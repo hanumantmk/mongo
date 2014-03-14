@@ -303,7 +303,7 @@ namespace mongo {
         QueryResult* qr = reinterpret_cast<QueryResult*>(bb.buf());
         qr->len = bb.len();
         qr->setOperation(opReply);
-        qr->_resultFlags() = resultFlags;
+        qr->setResultFlags(resultFlags);
         qr->cursorId = cursorid;
         qr->startingFrom = startingResult;
         qr->nReturned = numResults;

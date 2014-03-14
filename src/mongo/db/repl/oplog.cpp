@@ -154,7 +154,7 @@ namespace mongo {
 
             memcpy( buf, _frame.objdata(), _frame.objsize() - 1 ); // don't copy final EOO
 
-            reinterpret_cast<int*>( buf )[0] = documentSize();
+            value_writer(static_cast<int>(documentSize())).writeTo(buf);
 
             buf += ( _frame.objsize() - 1 );
             buf[0] = (char)Object;

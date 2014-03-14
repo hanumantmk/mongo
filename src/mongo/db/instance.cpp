@@ -311,8 +311,8 @@ namespace mongo {
             QueryResult * msgdata = (QueryResult *) b.buf();
             b.decouple();
             QueryResult *qr = msgdata;
-            qr->_resultFlags() = ResultFlag_ErrSet;
-            if( scex ) qr->_resultFlags() |= ResultFlag_ShardConfigStale;
+            qr->setResultFlags(ResultFlag_ErrSet);
+            if( scex ) qr->setResultFlags(qr->resultFlags() | ResultFlag_ShardConfigStale);
             qr->len = b.len();
             qr->setOperation(opReply);
             qr->cursorId = 0;
@@ -524,9 +524,12 @@ namespace mongo {
     } /* assembleResponse() */
 
     void receivedKillCursors(Message& m) {
-        int *x = (int *) m.singleData()->_data;
-        x++; // reserved
-        int n = *x++;
+        ValueWrapper<int> x = m.singleData()->_data;
+        x = x.offset(1); // reserved
+        int n;
+
+        n = x.get();
+        x.set(n + 1);
 
         uassert( 13659 , "sent 0 cursors to kill" , n != 0 );
         massert( 13658 , str::stream() << "bad kill cursors size: " << m.dataSize() , m.dataSize() == 8 + ( 8 * n ) );
@@ -537,7 +540,7 @@ namespace mongo {
             verify( n < 30000 );
         }
 
-        int found = CollectionCursorCache::eraseCursorGlobalIfAuthorized(n, (long long *) x);
+        int found = CollectionCursorCache::eraseCursorGlobalIfAuthorized(n, ValueWrapper<long long>(x.ptr()));
 
         if ( logger::globalLogDomain()->shouldLog(logger::LogSeverity::Debug(1)) || found != n ) {
             LOG( found == n ? 1 : 0 ) << "killcursors: found " << found << " of " << n << endl;

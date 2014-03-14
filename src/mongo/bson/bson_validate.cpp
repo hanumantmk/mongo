@@ -51,8 +51,7 @@ namespace mongo {
                 if ( ( _position + sizeof(N) ) > _maxLength )
                     return false;
                 if ( out ) {
-                    const N* temp = reinterpret_cast<const N*>(_buffer + _position);
-                    *out = *temp;
+                    std::memcpy(out, _buffer + _position, sizeof(N));
                 }
                 _position += sizeof(N);
                 return true;

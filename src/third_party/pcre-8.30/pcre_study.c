@@ -1430,6 +1430,8 @@ if (bits_set || min > 0
     return NULL;
     }
 
+#pragma GCC diagnostic ignored "-Wcast-align"
+
   study = (pcre_study_data *)((char *)extra + sizeof(PUBL(extra)));
   extra->flags = PCRE_EXTRA_STUDY_DATA;
   extra->study_data = study;

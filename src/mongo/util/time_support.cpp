@@ -829,7 +829,7 @@ namespace {
     static unsigned long long getFiletime() {
         FILETIME ft;
         GetSystemTimeAsFileTime(&ft);
-        return *reinterpret_cast<unsigned long long*>(&ft);
+        return MemoryReader::read<unsigned long long>(&ft);
     }
 
     static unsigned long long getPerfCounter() {

@@ -48,12 +48,10 @@ namespace mongo {
                 // Skip _id field -- we do not replace it
                 if (e.type() == Timestamp && e.fieldNameStringData() != idFieldName) {
                     // performance note, this locks a mutex:
-                    unsigned long long &timestamp =
-                        *(reinterpret_cast<unsigned long long*>(
-                              const_cast<char *>(e.value())));
-                    if (timestamp == 0) {
+
+                    if (MemoryReader::read<unsigned long long>(e.value()) == 0) {
                         mutex::scoped_lock lk(OpTime::m);
-                        timestamp = OpTime::now(lk).asDate();
+                        value_writer(OpTime::now(lk).asDate()).writeTo(const_cast<char *>(e.value()));
                     }
                 }
             }

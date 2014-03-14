@@ -104,7 +104,7 @@ namespace mongo {
             else if( mmf->relativePath() != lastDbPath ) {
                 lastDbPath = mmf->relativePath();
                 JDbContext c;
-                bb.appendStruct(c);
+                bb.appendBuf(&c, sizeof(c));
                 bb.appendStr(lastDbPath.toString());
             }
             bb.appendStruct(e);

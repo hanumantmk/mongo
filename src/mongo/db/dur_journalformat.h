@@ -157,7 +157,9 @@ namespace mongo {
             */
             bool checkHash(const void* begin, int len) const;
 
-            bool magicOk() const { return *((unsigned*)magic) == 0x0a0a0a0a; }
+            bool magicOk() const {
+                return MemoryReader::read<unsigned>(magic) == 0x0a0a0a0a;
+            }
         };
 
         /** declares "the next entry(s) are for this database / file path prefix" */

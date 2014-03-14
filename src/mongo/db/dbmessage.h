@@ -102,14 +102,14 @@ namespace mongo {
         int resultFlags() {
             return dataAsInt();
         }
-        int& _resultFlags() {
-            return dataAsInt();
+        void setResultFlags(int value) {
+            writeIntToData(value);
         }
         void setResultFlagsToOk() {
-            _resultFlags() = ResultFlag_AwaitCapable;
+            setResultFlags(ResultFlag_AwaitCapable);
         }
         void initializeResultFlags() {
-            _resultFlags() = 0;   
+            setResultFlags(0);
         }
     };
 
@@ -122,12 +122,11 @@ namespace mongo {
     */
     class DbMessage {
     public:
-        DbMessage(const Message& _m) : m(_m) , mark(0) {
+        DbMessage(const Message& _m) : m(_m) , reserved(NULL), mark(0) {
             // for received messages, Message has only one buffer
             theEnd = _m.singleData()->_data + _m.header()->dataLen();
-            char *r = _m.singleData()->_data;
-            reserved = (int *) r;
-            data = r + 4;
+            reserved = ValueWrapper<int>(_m.singleData()->_data);
+            data = reserved.ptr() + sizeof(int);
             nextjsobj = data;
         }
 
@@ -136,7 +135,9 @@ namespace mongo {
          * 0: InsertOption_ContinueOnError
          * 1: fromWriteback
          */
-        int& reservedField() { return *reserved; }
+        int reservedField() {
+            return reserved.get();
+        }
 
         const char * getns() const {
             return data;
@@ -147,8 +148,8 @@ namespace mongo {
         }
 
         int getInt( int num ) const {
-            const int * foo = (const int*)afterNS();
-            return foo[num];
+            int skip = num * sizeof(int);
+            return MemoryReader::read<int>(afterNS() + skip);
         }
 
         int getQueryNToReturn() const {
@@ -161,28 +162,29 @@ namespace mongo {
         long long getInt64( int offsetBytes ) const {
             const char * x = afterNS();
             x += offsetBytes;
-            const long long * ll = (const long long*)x;
-            return ll[0];
+            return MemoryReader::read<long long>(x);
         }
 
         void resetPull() { nextjsobj = data; }
-        int pullInt() const { return pullInt(); }
-        int& pullInt() {
+        int pullInt() {
+            return pullIntPtr().get();
+        }
+        ValueWrapper<int> pullIntPtr() {
             if ( nextjsobj == data )
                 nextjsobj += strlen(data) + 1; // skip namespace
-            int& i = *((int *)nextjsobj);
+            char* i = nextjsobj;
             nextjsobj += 4;
-            return i;
+            return ValueWrapper<int>(i);
         }
-        long long pullInt64() const {
-            return pullInt64();
+        long long pullInt64() {
+            return pullInt64Ptr().get();
         }
-        long long &pullInt64() {
+        ValueWrapper<long long> pullInt64Ptr() {
             if ( nextjsobj == data )
                 nextjsobj += strlen(data) + 1; // skip namespace
-            long long &i = *((long long *)nextjsobj);
+            char* i = nextjsobj;
             nextjsobj += 8;
-            return i;
+            return ValueWrapper<long long>(i);
         }
 
         OID* getOID() const {
@@ -190,10 +192,9 @@ namespace mongo {
         }
 
         void getQueryStuff(const char *&query, int& ntoreturn) {
-            int *i = (int *) (data + strlen(data) + 1);
-            ntoreturn = *i;
-            i++;
-            query = (const char *) i;
+            char* pos = data + strlen(data) + 1;
+            ntoreturn = MemoryReader::read<int>(pos);
+            query = pos + sizeof(int);
         }
 
         /* for insert and update msgs */
@@ -236,7 +237,7 @@ namespace mongo {
             mark = nextjsobj;
         }
 
-        void markReset( const char * toMark = 0) {
+        void markReset( char * toMark = 0) {
             if( toMark == 0 ) toMark = mark;
             verify( toMark );
             nextjsobj = toMark;
@@ -244,12 +245,12 @@ namespace mongo {
 
     private:
         const Message& m;
-        int* reserved;
-        const char *data;
-        const char *nextjsobj;
-        const char *theEnd;
+        ValueWrapper<int> reserved;
+        char *data;
+        char *nextjsobj;
+        char *theEnd;
 
-        const char * mark;
+        char * mark;
     };
 
 

@@ -60,8 +60,7 @@ namespace mongo {
     public:
         enum { TOO_BIG_SENTINEL = 1 } ;
 
-        CachedBSONObj() {
-            _size = (int*)_buf;
+        CachedBSONObj() : _size(_buf) {
             reset();
         }
 
@@ -82,7 +81,7 @@ namespace mongo {
             }
         }
 
-        int size() const { return *_size; }
+        int size() const { return _size.get(); }
         bool have() const { return size() > 0; }
         bool tooBig() const { return size() == TOO_BIG_SENTINEL; }
 
@@ -109,10 +108,10 @@ namespace mongo {
         }
 
         /** you have to be locked when you call this */
-        void _reset( int sz ) { _size[0] = sz; }
+        void _reset( int sz ) { _size.set(sz); }
 
         mutable SpinLock _lock;
-        int * _size;
+        ValueWrapper<int> _size;
         char _buf[BUFFER_SIZE];
     };
 

@@ -186,7 +186,7 @@ dodouble:
 
     inline BSONObj BSONElement::codeWScopeObject() const {
         verify( type() == CodeWScope );
-        int strSizeWNull = *(int *)( value() + 4 );
+        int strSizeWNull = MemoryReader::read<int>( value() + 4 );
         return BSONObj( value() + 4 + 4 + strSizeWNull );
     }
 

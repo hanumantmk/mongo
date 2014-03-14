@@ -9,6 +9,8 @@
 
 #define CREATE_SIZE 1
 
+#pragma GCC diagnostic ignored "-Wcast-align"
+
 extern symbol * create_s(void) {
     symbol * p;
     void * mem = malloc(HEAD + (CREATE_SIZE + 1) * sizeof(symbol));

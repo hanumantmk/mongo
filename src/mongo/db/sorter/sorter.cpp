@@ -235,7 +235,7 @@ namespace mongo {
 
             // sets _done to true on EOF - asserts on any other error
             void read(void* out, size_t size) {
-                _file.read(reinterpret_cast<char*>(out), size);
+                _file.read(static_cast<char*>(out), size);
                 if (!_file.good()) {
                     if (_file.eof()) {
                         _done = true;

@@ -65,37 +65,39 @@ namespace mongo {
         char* cur() { return _p._data + _len; }
 
         void appendChar(char j) {
-            *((char*)grow(sizeof(char))) = j;
+            grow_and_write(j);
         }
         void appendNum(char j) {
-            *((char*)grow(sizeof(char))) = j;
+            grow_and_write(j);
         }
         void appendNum(short j) {
-            *((short*)grow(sizeof(short))) = j;
+            grow_and_write(j);
         }
         void appendNum(int j) {
-            *((int*)grow(sizeof(int))) = j;
+            grow_and_write(j);
         }
         void appendNum(unsigned j) {
-            *((unsigned*)grow(sizeof(unsigned))) = j;
+            grow_and_write(j);
         }
         void appendNum(bool j) {
-            *((bool*)grow(sizeof(bool))) = j;
+            grow_and_write(j);
         }
         void appendNum(double j) {
-            *((double*)grow(sizeof(double))) = j;
+            grow_and_write(j);
         }
         void appendNum(long long j) {
-            *((long long*)grow(sizeof(long long))) = j;
+            grow_and_write(j);
         }
         void appendNum(unsigned long long j) {
-            *((unsigned long long*)grow(sizeof(unsigned long long))) = j;
+            grow_and_write(j);
         }
 
         void appendBuf(const void *src, size_t len) { memcpy(grow((unsigned) len), src, len); }
 
         template<class T>
-        void appendStruct(const T& s) { appendBuf(&s, sizeof(T)); }
+        void appendStruct(const T& s) {
+            grow_and_write(s);
+        }
 
         void appendStr(const StringData &str , bool includeEOO = true ) {
             const unsigned len = str.size() + ( includeEOO ? 1 : 0 );
@@ -108,6 +110,11 @@ namespace mongo {
 
     private:
         static const unsigned Alignment = 8192;
+
+        template<typename T>
+        void grow_and_write(const T& t) {
+            value_writer(t).writeTo(grow(sizeof(t)));
+        }
 
         /** returns the pre-grow write position */
         inline char* grow(unsigned by) {
