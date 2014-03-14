@@ -170,7 +170,7 @@ namespace mongo {
             AllElemMatchOp* e = new AllElemMatchOp();
             e->init(path());
             for (size_t i = 0; i < _list.size(); ++i) {
-                e->add(reinterpret_cast<ArrayMatchingMatchExpression*>(
+                e->add(static_cast<ArrayMatchingMatchExpression*>(
                     _list[i]->shallowClone()));
             }
             if ( getTag() ) {

@@ -40,7 +40,7 @@ namespace mongo {
 
     Hasher::Hasher( HashSeed seed ) : _seed( seed ) {
         md5_init( &_md5State );
-        md5_append( &_md5State , reinterpret_cast< const md5_byte_t * >( & _seed ) , sizeof( _seed ) );
+        md5_append( &_md5State , static_cast< md5_byte_t * >(static_cast< void *>(& _seed) ) , sizeof( _seed ) );
     }
 
     void Hasher::addData( const void * keyData , size_t numBytes ) {
@@ -58,7 +58,7 @@ namespace mongo {
         h->finish(d);
         //HashDigest is actually 16 bytes, but we just get 8 via truncation
         // NOTE: assumes little-endian
-        return *reinterpret_cast< long long int * >( d );
+        return MemoryReader::read<long long int>( d );
     }
 
     void BSONElementHasher::recursiveHash( Hasher* h ,

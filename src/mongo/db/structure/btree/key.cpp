@@ -277,10 +277,12 @@ namespace mongo {
             case Bool:
                 b.appendUChar( (e.boolean()?ctrue:cfalse) | bits );
                 break;
-            case jstOID:
+            case jstOID: {
+                OID oid = e.__oid();
                 b.appendUChar(coid|bits);
-                b.appendBuf(&e.__oid(), sizeof(OID));
+                b.appendBuf(&oid, sizeof(oid));
                 break;
+            }
             case BinData:
                 {
                     int t = e.binDataType();
@@ -422,11 +424,11 @@ namespace mongo {
                     p += sizeof(double);
                     break;
                 case cint:
-                    b.append("", static_cast< int >((reinterpret_cast< const PackedDouble& >(*p)).d));
+                    b.append("", static_cast< int >(MemoryReader::read<double>(p)));
                     p += sizeof(double);
                     break;
                 case clong:
-                    b.append("", static_cast< long long>((reinterpret_cast< const PackedDouble& >(*p)).d));
+                    b.append("", static_cast< long long>(MemoryReader::read<double>(p)));
                     p += sizeof(double);
                     break;
                 default:
@@ -452,8 +454,8 @@ namespace mongo {
         switch( lt ) { 
         case cdouble:
             {
-                double L = (reinterpret_cast< const PackedDouble* >(l))->d;
-                double R = (reinterpret_cast< const PackedDouble* >(r))->d;
+                double L = MemoryReader::read<double>(l);
+                double R = MemoryReader::read<double>(r);
                 if( L < R )
                     return -1;
                 if( L != R )
@@ -501,8 +503,10 @@ namespace mongo {
             }
         case cdate:
             {
-                long long L = *((long long *) l);
-                long long R = *((long long *) r);
+                long long L;
+                long long R;
+                value_reader(L).readFrom(l);
+                value_reader(R).readFrom(r);
                 if( L < R )
                     return -1;
                 if( L > R )
@@ -632,16 +636,16 @@ namespace mongo {
             l++; r++;
             switch( lval&cCANONTYPEMASK ) { 
             case coid:
-                if( *((unsigned*) l) != *((unsigned*) r) )
+                if( MemoryReader::read<unsigned>(l) != MemoryReader::read<unsigned>(r) )
                     return false;
                 l += 4; r += 4;
             case cdate:
-                if( *((unsigned long long *) l) != *((unsigned long long *) r) )
+                if( MemoryReader::read<unsigned long long>(l) != MemoryReader::read<unsigned long long>(r) )
                     return false;
                 l += 8; r += 8;
                 break;
             case cdouble:
-                if( (reinterpret_cast< const PackedDouble* > (l))->d != (reinterpret_cast< const PackedDouble* >(r))->d )
+                if( MemoryReader::read<double>(l) != MemoryReader::read<double>(r) )
                     return false;
                 l += 8; r += 8;
                 break;

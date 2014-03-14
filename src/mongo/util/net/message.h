@@ -123,8 +123,12 @@ namespace mongo {
         }
         char _data[4];
 
-        int& dataAsInt() {
-            return *((int *) _data);
+        int dataAsInt() {
+            return MemoryReader::read<int>(_data);
+        }
+
+        void writeIntToData(int value) {
+            value_writer(value).writeTo(_data);
         }
 
         bool valid() {
@@ -138,8 +142,7 @@ namespace mongo {
         long long getCursor() {
             verify( responseTo > 0 );
             verify( _operation == opReply );
-            long long * l = (long long *)(_data + 4);
-            return l[0];
+            return MemoryReader::read<long long>(_data + 4);
         }
 
         int dataLen(); // len without header

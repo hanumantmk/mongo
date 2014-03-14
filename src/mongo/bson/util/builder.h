@@ -25,19 +25,11 @@
 #include <string.h>
 
 #include "mongo/bson/inline_decls.h"
+#include "mongo/bson/util/memory.h"
 #include "mongo/base/string_data.h"
 #include "mongo/util/assert_util.h"
 
 namespace mongo {
-    /* Accessing unaligned doubles on ARM generates an alignment trap and aborts with SIGBUS on Linux.
-       Wrapping the double in a packed struct forces gcc to generate code that works with unaligned values too.
-       The generated code for other architectures (which already allow unaligned accesses) is the same as if
-       there was a direct pointer access.
-    */
-    struct PackedDouble {
-        double d;
-    } PACKED_DECL;
-
 
     /* Note the limit here is rather arbitrary and is simply a standard. generally the code works
        with any object that fits in ram.
@@ -147,34 +139,34 @@ namespace mongo {
         void decouple() { data = 0; }
 
         void appendUChar(unsigned char j) {
-            *((unsigned char*)grow(sizeof(unsigned char))) = j;
+            grow_and_write(j);
         }
         void appendChar(char j) {
-            *((char*)grow(sizeof(char))) = j;
+            grow_and_write(j);
         }
         void appendNum(char j) {
-            *((char*)grow(sizeof(char))) = j;
+            grow_and_write(j);
         }
         void appendNum(short j) {
-            *((short*)grow(sizeof(short))) = j;
+            grow_and_write(j);
         }
         void appendNum(int j) {
-            *((int*)grow(sizeof(int))) = j;
+            grow_and_write(j);
         }
         void appendNum(unsigned j) {
-            *((unsigned*)grow(sizeof(unsigned))) = j;
+            grow_and_write(j);
         }
         void appendNum(bool j) {
-            *((bool*)grow(sizeof(bool))) = j;
+            grow_and_write(j);
         }
         void appendNum(double j) {
-            (reinterpret_cast< PackedDouble* >(grow(sizeof(double))))->d = j;
+            grow_and_write(j);
         }
         void appendNum(long long j) {
-            *((long long*)grow(sizeof(long long))) = j;
+            grow_and_write(j);
         }
         void appendNum(unsigned long long j) {
-            *((unsigned long long*)grow(sizeof(unsigned long long))) = j;
+            grow_and_write(j);
         }
 
         void appendBuf(const void *src, size_t len) {
@@ -183,7 +175,7 @@ namespace mongo {
 
         template<class T>
         void appendStruct(const T& s) {
-            appendBuf(&s, sizeof(T));
+            grow_and_write(s);
         }
 
         void appendStr(const StringData &str , bool includeEndingNull = true ) {
@@ -209,6 +201,12 @@ namespace mongo {
         }
 
     private:
+
+        template<typename T>
+        void grow_and_write(const T& t) {
+            value_writer(t).writeTo(grow(sizeof(t)));
+        }
+
         /* "slow" portion of 'grow()'  */
         void NOINLINE_DECL grow_reallocate(int newLen) {
             int a = 64;

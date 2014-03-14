@@ -172,8 +172,9 @@ namespace mongo {
         ~DocumentStorage();
 
         static const DocumentStorage& emptyDoc() {
-            static const char emptyBytes[sizeof(DocumentStorage)] = {0};
-            return *reinterpret_cast<const DocumentStorage*>(emptyBytes);
+            // TODO: This isn't thread safe. Need a better way.
+            static const DocumentStorage empty;
+            return empty;
         }
 
         size_t size() const {

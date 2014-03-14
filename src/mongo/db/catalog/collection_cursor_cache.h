@@ -99,7 +99,7 @@ namespace mongo {
 
         // ----------------------
 
-        static int eraseCursorGlobalIfAuthorized( int n, long long* ids );
+        static int eraseCursorGlobalIfAuthorized( int n, char* ids );
         static bool eraseCursorGlobalIfAuthorized( CursorId id );
 
         static bool eraseCursorGlobal( CursorId id );

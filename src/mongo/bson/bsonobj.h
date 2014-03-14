@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "mongo/bson/bsonelement.h"
+#include "mongo/bson/util/memory.h"
 #include "mongo/base/string_data.h"
 #include "mongo/bson/util/atomic_int.h"
 #include "mongo/bson/util/builder.h"
@@ -269,7 +270,7 @@ namespace mongo {
             return _objdata;
         }
         /** @return total size of the BSON object in bytes */
-        int objsize() const { return *(reinterpret_cast<const int*>(objdata())); }
+        int objsize() const { return MemoryReader::read<int>(objdata()); }
 
         /** performs a cursory check on the object's size only. */
         bool isValid() const;
@@ -494,7 +495,7 @@ namespace mongo {
 
         void appendSelfToBufBuilder(BufBuilder& b) const {
             verify( objsize() );
-            b.appendBuf(reinterpret_cast<const void *>( objdata() ), objsize());
+            b.appendBuf(objdata(), objsize());
         }
 
         template<typename T> bool coerceVector( std::vector<T>* out ) const;
@@ -517,7 +518,7 @@ namespace mongo {
 #endif
                 if(--(h->refCount) == 0){
 #if defined(_DEBUG)
-                    unsigned sz = (unsigned&) *h->data;
+                    unsigned sz = MemoryReader::read<unsigned>(h->data);
                     verify(sz < BSONObjMaxInternalSize * 3);
                     memset(h->data, 0xdd, sz);
 #endif

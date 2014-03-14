@@ -163,7 +163,7 @@ namespace mongo {
                     unsigned long long *p = reinterpret_cast<unsigned long long *>( todelete->data() );
                     *getDur().writing(p) = 0;
                 }
-                _details->addDeletedRec((DeletedRecord*)todelete, dl);
+                _details->addDeletedRec(reinterpret_cast<DeletedRecord*>(todelete), dl);
             }
         }
 

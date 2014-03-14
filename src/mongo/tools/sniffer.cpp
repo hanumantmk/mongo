@@ -366,8 +366,8 @@ void processMessage( Connection& c , Message& m ) {
                 if ( m.operation() == mongo::dbGetMore ) {
                     DbMessage d( m );
                     d.pullInt();
-                    long long &cId = d.pullInt64();
-                    cId = mapCursor[ c ][ cId ];
+                    char *cId = d.pullInt64Ptr();
+                    value_writer(mapCursor[ c ][ MemoryReader::read<long long>(cId) ]).writeTo(cId);
                 }
                 Message response;
                 conn->port().call( m, response );

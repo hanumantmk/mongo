@@ -85,7 +85,7 @@ namespace mongo {
                 }
                 else {
                     // Size limit exceeded, rollback to previous insert position
-                    dbMsg.markReset( prevObjMark );
+                    dbMsg.markReset( const_cast<char *>(prevObjMark) );
                     break;
                 }
             }

@@ -179,7 +179,7 @@ class LogMessageVoidify {
 
 // Potentially unaligned loads and stores.
 
-#if 1
+#if defined(MONGO_USE_REINTERPRET_CAST_MEMORY_ACCESS_STRATEGY)
 //#if defined(__i386__) || defined(__x86_64__) || defined(__powerpc__) || defined(_WIN32)
 
 #define UNALIGNED_LOAD16(_p) (*reinterpret_cast<const uint16 *>(_p))
@@ -190,7 +190,7 @@ class LogMessageVoidify {
 #define UNALIGNED_STORE32(_p, _val) (*reinterpret_cast<uint32 *>(_p) = (_val))
 #define UNALIGNED_STORE64(_p, _val) (*reinterpret_cast<uint64 *>(_p) = (_val))
 
-#else
+#elif defined(MONGO_USE_MEMCPY_MEMORY_ACCESS_STRATEGY)
 
 // These functions are provided for architectures that don't support
 // unaligned loads and stores.

@@ -51,8 +51,10 @@ namespace mongo {
         unsigned p = ProcessId::getCurrent().asUInt32();
         x._pid ^= static_cast<unsigned short>(p);
         // when the pid is greater than 16 bits, let the high bits modulate the machine id field.
-        unsigned short& rest = (unsigned short &) x._machineNumber[1];
+        unsigned short rest;
+        value_reader(rest).readFrom(&x._machineNumber[1]);
         rest ^= p >> 16;
+        value_writer(rest).writeTo(&x._machineNumber[1]);
     }
 
     OID::MachineAndPid OID::genMachineAndPid() {
@@ -61,7 +63,7 @@ namespace mongo {
         // we only call this once per process
         scoped_ptr<SecureRandom> sr( SecureRandom::create() );
         int64_t n = sr->nextInt64();
-        OID::MachineAndPid x = ourMachine = reinterpret_cast<OID::MachineAndPid&>(n);
+        OID::MachineAndPid x = ourMachine = MemoryReader::read<OID::MachineAndPid>(&n);
         foldInPid(x);
         return x;
     }
@@ -83,7 +85,7 @@ namespace mongo {
         x[1] = ourMachineAndPid._machineNumber[1];
         x[2] = ourMachineAndPid._machineNumber[2];
         x[3] = 0;
-        return (unsigned&) x[0];
+        return MemoryReader::read<unsigned>(&x[0]);
     }
 
     void OID::justForked() {
@@ -158,10 +160,9 @@ namespace mongo {
         data[2] = T[1];
         data[3] = T[0];
 
-        if (max)
-            *(long long*)(data + 4) = 0xFFFFFFFFFFFFFFFFll;
-        else
-            *(long long*)(data + 4) = 0x0000000000000000ll;
+        const long long maxVal = 0xFFFFFFFFFFFFFFFFll;
+        const long long minVal = 0x0000000000000000ll;
+        value_writer(max ? maxVal : minVal).writeTo(data + 4);
     }
 
     time_t OID::asTimeT() {

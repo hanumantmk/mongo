@@ -64,7 +64,7 @@ namespace mongo {
         b.skip(sizeof(QueryResult));
         b.appendBuf(data, size);
         QueryResult *qr = (QueryResult *) b.buf();
-        qr->_resultFlags() = queryResultFlags;
+        qr->setResultFlags(queryResultFlags);
         qr->len = b.len();
         qr->setOperation(opReply);
         qr->cursorId = cursorId;
@@ -93,13 +93,13 @@ namespace mongo {
     void replyToQuery( int queryResultFlags, Message& response, const BSONObj& resultObj ) {
         BufBuilder bufBuilder;
         bufBuilder.skip( sizeof( QueryResult ));
-        bufBuilder.appendBuf( reinterpret_cast< void *>(
+        bufBuilder.appendBuf( static_cast< void *>(
                 const_cast< char* >( resultObj.objdata() )), resultObj.objsize() );
 
         QueryResult* queryResult = reinterpret_cast< QueryResult* >( bufBuilder.buf() );
         bufBuilder.decouple();
 
-        queryResult->_resultFlags() = queryResultFlags;
+        queryResult->setResultFlags(queryResultFlags);
         queryResult->len = bufBuilder.len();
         queryResult->setOperation( opReply );
         queryResult->cursorId = 0;

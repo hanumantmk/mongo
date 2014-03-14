@@ -330,6 +330,17 @@ add_option('cache-dir',
            "Specify the directory to use for caching objects if --cache is in use",
            1, False, default="#build/cached/.cache")
 
+memory_access_strategies = {
+    'reinterpret_cast' : 'MONGO_USE_REINTERPRET_CAST_MEMORY_ACCESS_STRATEGY',
+    'memcpy'           : 'MONGO_USE_MEMCPY_MEMORY_ACCESS_STRATEGY'
+}
+
+add_option('memory-access-strategy', 1, True,
+           'Select strategy for potentially unaligned memory access',
+           type='choice',
+           default=memory_access_strategies.keys()[0],
+           choices=memory_access_strategies.keys())
+
 # don't run configure if user calls --help
 if GetOption('help'):
     Return()
@@ -810,7 +821,6 @@ if nix:
 
     # -Winvalid-pch Warn if a precompiled header (see Precompiled Headers) is found in the search path but can't be used.
     env.Append( CCFLAGS=["-fPIC",
-                         "-fno-strict-aliasing",
                          "-ggdb",
                          "-pthread",
                          "-Wall",
@@ -919,6 +929,16 @@ if not use_system_version_of_library("snappy"):
 
 env.Append( CPPPATH=['$EXTRACPPPATH'],
             LIBPATH=['$EXTRALIBPATH'] )
+
+# Enable the preprocessor definition associated with the current memory access strategy. Also,
+# error out if trying to use the reinterpret_cast strategy with the undefined behavior
+# sanitizer.
+memory_access_strategy = get_option('memory-access-strategy')
+if memory_access_strategy == 'reinterpret_cast' and get_option('sanitize') == 'undefined':
+    print("To use the undefined behavior sanitizier, do not use the reinterpret_cast memory access strategy")
+    Exit(1)
+memory_access_strategy_define = memory_access_strategies[memory_access_strategy]
+env.Append( CPPDEFINES=[memory_access_strategy_define] )
 
 # discover modules, and load the (python) module for each module's build.py
 mongo_modules = moduleconfig.discover_modules('src/mongo/db/modules')
@@ -1330,6 +1350,31 @@ def doConfigure(myenv):
         conf.Finish()
         if haveUUThread:
             myenv.Append(CPPDEFINES=['MONGO_HAVE___THREAD'])
+
+    def CheckForIsTriviallyCopyable(context):
+            test_body = """
+            #include <type_traits>
+            int main(int argc, char* argv[]) {
+                return std::is_trivially_copyable<int>::value;
+            }
+            """
+            context.Message('Checking for std::is_trivially_copyable... ')
+            ret = context.TryCompile(textwrap.dedent(test_body), ".cpp")
+            context.Result(ret)
+    conf = Configure(myenv, help=False, custom_tests = {
+        'CheckForIsTriviallyCopyable' : CheckForIsTriviallyCopyable,
+    })
+    haveIsTriviallyCopyable = conf.CheckForIsTriviallyCopyable()
+    conf.Finish()
+    if haveIsTriviallyCopyable:
+        myenv.Append(CPPDEFINES=['MONGO_HAVE_IS_TRIVIALLY_COPYABLE'])
+
+    if using_clang() or using_gcc():
+        if memory_access_strategy == "reinterpret_cast":
+            AddToCCFLAGSIfSupported(myenv, "-fno-strict-aliasing")
+        else:
+            AddToCCFLAGSIfSupported(myenv, "-Wcast-align")
+            AddToCCFLAGSIfSupported(myenv, "-Wstrict-aliasing=1")
 
     conf = Configure(myenv)
     libdeps.setup_conftests(conf)
