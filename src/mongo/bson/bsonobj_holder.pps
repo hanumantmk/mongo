@@ -1,0 +1,6 @@
+from portable_packed_struct import *
+
+print(CLASS("HolderData", [
+    FIELD("AtomicUInt", "refCount"),
+    FIELD("char", "data", 4),
+], True).cpp())

@@ -40,7 +40,7 @@ namespace mongo {
     using namespace mongoutils;
 
     void ValueStorage::verifyRefCountingIfShould() const {
-        switch (type) {
+        switch (vsd.get_type()) {
         case MinKey:
         case MaxKey:
         case jstOID:
@@ -54,7 +54,7 @@ namespace mongo {
         case NumberLong:
         case NumberDouble:
             // the above types never reference external data
-            verify(!refCounter);
+            verify(!vsd.get_refCounter());
             break;
 
         case String:
@@ -62,7 +62,7 @@ namespace mongo {
         case Code:
         case Symbol:
             // the above types reference data when not using short-string optimization
-            verify(refCounter == !shortStr);
+            verify(vsd.get_refCounter() == !vsd.get_shortStr());
             break;
 
         case BinData: // TODO this should probably support short-string optimization
@@ -70,13 +70,13 @@ namespace mongo {
         case DBRef:
         case CodeWScope:
             // the above types always reference external data.
-            verify(refCounter);
-            verify(bool(genericRCPtr));
+            verify(vsd.get_refCounter());
+            verify(bool(vsd.get_genericRCPtr()));
             break;
 
         case Object:
             // Objects either hold a NULL ptr or should be ref-counting
-            verify(refCounter == bool(genericRCPtr));
+            verify(vsd.get_refCounter() == bool(vsd.get_genericRCPtr()));
             break;
         }
     }

@@ -1,0 +1,38 @@
+from portable_packed_struct import *
+
+print(CLASS("ValueStorageData", [
+    UNION([
+        STRUCT([
+            FIELD("char", "type"),
+            BITFIELD(FIELD("unsigned char", "byte2"), [
+                BITFIELDFIELD("unsigned", "refCounter", 1),
+                BITFIELDFIELD("unsigned", "shortStr", 1),
+            ]),
+            UNION([
+                FIELD("char", "oid", 12),
+                STRUCT([
+                    FIELD("char", "shortStrSize"),
+                    FIELD("char", "shortStrStorage", 16 - 3 - 1),
+                    FIELD("char", "nulTerminator"),
+                ]),
+                STRUCT([
+                    UNION([
+                        FIELD("unsigned char", "binSubType"),
+                        FIELD("char", "pad", 6),
+                        FIELD("char", "stringCache", 6),
+                    ]),
+                    UNION([
+                        FIELD("const RefCountable *", "genericRCPtr"),
+                        FIELD("double", "doubleValue"),
+                        FIELD("bool", "boolValue"),
+                        FIELD("int", "intValue"),
+                        FIELD("long long", "longValue"),
+                        FIELD("ReplTime", "timestampValue"),
+                        FIELD("long long", "dateValue"),
+                    ])
+                ])
+            ])
+        ]),
+        FIELD("long long", "i64", 2),
+    ])
+], True).cpp())

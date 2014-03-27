@@ -65,46 +65,49 @@ namespace mongo {
         const OID oid;
     };
 
-#pragma pack(1)
     class ValueStorage {
+#include "db/pipeline/value_storage_data.h"
+
+    ValueStorageData vsd;
+
     public:
         // Note: it is important the memory is zeroed out (by calling zero()) at the start of every
         // constructor. Much code relies on every byte being predictably initialized to zero.
 
         // This is a "missing" Value
-        ValueStorage() { zero(); type = EOO; }
+        ValueStorage() { vsd.zero(); vsd.set_type(EOO); }
 
-        explicit ValueStorage(BSONType t)                  { zero(); type = t; }
-        ValueStorage(BSONType t, int i)                    { zero(); type = t; intValue = i; }
-        ValueStorage(BSONType t, long long l)              { zero(); type = t; longValue = l; }
-        ValueStorage(BSONType t, double d)                 { zero(); type = t; doubleValue = d; }
-        ValueStorage(BSONType t, ReplTime r)               { zero(); type = t; timestampValue = r; }
-        ValueStorage(BSONType t, bool b)                   { zero(); type = t; boolValue = b; }
-        ValueStorage(BSONType t, const Document& d)        { zero(); type = t; putDocument(d); }
-        ValueStorage(BSONType t, const RCVector* a)        { zero(); type = t; putVector(a); }
-        ValueStorage(BSONType t, const StringData& s)      { zero(); type = t; putString(s); }
-        ValueStorage(BSONType t, const BSONBinData& bd)    { zero(); type = t; putBinData(bd); }
-        ValueStorage(BSONType t, const BSONRegEx& re)      { zero(); type = t; putRegEx(re); }
-        ValueStorage(BSONType t, const BSONCodeWScope& cs) { zero(); type = t; putCodeWScope(cs); }
-        ValueStorage(BSONType t, const BSONDBRef& dbref)   { zero(); type = t; putDBRef(dbref); }
+        explicit ValueStorage(BSONType t)                  { vsd.zero(); vsd.set_type(t); }
+        ValueStorage(BSONType t, int i)                    { vsd.zero(); vsd.set_type(t); vsd.set_intValue(i); }
+        ValueStorage(BSONType t, long long l)              { vsd.zero(); vsd.set_type(t); vsd.set_longValue(l); }
+        ValueStorage(BSONType t, double d)                 { vsd.zero(); vsd.set_type(t); vsd.set_doubleValue(d); }
+        ValueStorage(BSONType t, ReplTime r)               { vsd.zero(); vsd.set_type(t); vsd.set_timestampValue(r); }
+        ValueStorage(BSONType t, bool b)                   { vsd.zero(); vsd.set_type(t); vsd.set_boolValue(b); }
+        ValueStorage(BSONType t, const Document& d)        { vsd.zero(); vsd.set_type(t); putDocument(d); }
+        ValueStorage(BSONType t, const RCVector* a)        { vsd.zero(); vsd.set_type(t); putVector(a); }
+        ValueStorage(BSONType t, const StringData& s)      { vsd.zero(); vsd.set_type(t); putString(s); }
+        ValueStorage(BSONType t, const BSONBinData& bd)    { vsd.zero(); vsd.set_type(t); putBinData(bd); }
+        ValueStorage(BSONType t, const BSONRegEx& re)      { vsd.zero(); vsd.set_type(t); putRegEx(re); }
+        ValueStorage(BSONType t, const BSONCodeWScope& cs) { vsd.zero(); vsd.set_type(t); putCodeWScope(cs); }
+        ValueStorage(BSONType t, const BSONDBRef& dbref)   { vsd.zero(); vsd.set_type(t); putDBRef(dbref); }
 
         ValueStorage(BSONType t, const OID& o) {
-            zero();
-            type = t;
-            memcpy(&oid, &o, sizeof(OID));
-            BOOST_STATIC_ASSERT(sizeof(OID) == sizeof(oid));
+            vsd.zero();
+            vsd.set_type(t);
+            memcpy(vsd.ptr_to_oid(), &o, sizeof(OID));
+            BOOST_STATIC_ASSERT(sizeof(OID) == vsd.size_of_oid());
         }
 
         ValueStorage(const ValueStorage& rhs) {
-            memcpy(this, &rhs, sizeof(*this));
+            memcpy(vsd.base(), rhs.vsd.base(), vsd.size());
             memcpyed();
         }
 
         ~ValueStorage() {
             DEV verifyRefCountingIfShould();
-            if (refCounter)
-                intrusive_ptr_release(genericRCPtr);
-            DEV memset(this, 0xee, sizeof(*this));
+            if (vsd.get_refCounter())
+                intrusive_ptr_release(vsd.get_genericRCPtr());
+            DEV memset(vsd.base(), 0xee, vsd.size());
         }
 
         ValueStorage& operator= (ValueStorage rhsCopy) {
@@ -123,8 +126,8 @@ namespace mongo {
         /// Call this after memcpying to update ref counts if needed
         void memcpyed() const {
             DEV verifyRefCountingIfShould();
-            if (refCounter)
-                intrusive_ptr_add_ref(genericRCPtr);
+            if (vsd.get_refCounter())
+                intrusive_ptr_add_ref(vsd.get_genericRCPtr());
         }
 
         /// These are only to be called during Value construction on an empty Value
@@ -136,7 +139,7 @@ namespace mongo {
             putRefCountable(
                 RCString::create(
                     StringData(static_cast<const char*>(bd.data), bd.length)));
-            binSubType = bd.type;
+            vsd.set_binSubType(bd.type);
         }
 
         void putDBRef(const BSONDBRef& dbref) {
@@ -148,22 +151,22 @@ namespace mongo {
         }
 
         void putRefCountable(intrusive_ptr<const RefCountable> ptr) {
-            genericRCPtr = ptr.get();
+            vsd.set_genericRCPtr(ptr.get());
 
-            if (genericRCPtr) {
-                intrusive_ptr_add_ref(genericRCPtr);
-                refCounter = true;
+            if (vsd.get_genericRCPtr()) {
+                intrusive_ptr_add_ref(vsd.get_genericRCPtr());
+                vsd.set_refCounter(true);
             }
             DEV verifyRefCountingIfShould();
         }
 
         StringData getString() const {
-            if (shortStr) {
-                return StringData(shortStrStorage, shortStrSize);
+            if (vsd.get_shortStr()) {
+                return StringData(vsd.get_shortStrStorage(), vsd.get_shortStrSize());
             }
             else {
-                dassert(typeid(*genericRCPtr) == typeid(const RCString));
-                const RCString* stringPtr = static_cast<const RCString*>(genericRCPtr);
+                dassert(typeid(*vsd.get_genericRCPtr()) == typeid(const RCString));
+                const RCString* stringPtr = static_cast<const RCString*>(vsd.get_genericRCPtr());
                 return StringData(stringPtr->c_str(), stringPtr->size());
             }
         }
@@ -207,58 +210,7 @@ namespace mongo {
         }
 
         void verifyRefCountingIfShould() const;
-
-        // This data is public because this should only be used by Value which would be a friend
-        union {
-            struct {
-                // byte 1
-                signed char type;
-
-                // byte 2
-                struct {
-                    bool refCounter : 1; // true if we need to refCount
-                    bool shortStr : 1; // true if we are using short strings
-                    // reservedFlags: 6;
-                };
-
-                // bytes 3-16;
-                union {
-                    unsigned char oid[12];
-
-                    struct {
-                        char shortStrSize; // TODO Consider moving into flags union (4 bits)
-                        char shortStrStorage[16/*total bytes*/ - 3/*offset*/ - 1/*NUL byte*/];
-                        union {
-                            char nulTerminator;
-                        };
-                    };
-
-                    struct {
-                        union {
-                            unsigned char binSubType;
-                            char pad[6];
-                            char stringCache[6]; // TODO copy first few bytes of strings in here
-                        };
-                        union { // 8 bytes long and 8-byte aligned
-                            // There should be no pointers to non-const data
-                            const RefCountable* genericRCPtr;
-
-                            double doubleValue;
-                            bool boolValue;
-                            int intValue;
-                            long long longValue;
-                            ReplTime timestampValue;
-                            long long dateValue;
-                        };
-                    };
-                };
-            };
-
-            // covers the whole ValueStorage
-            long long i64[2];
-        };
     };
     BOOST_STATIC_ASSERT(sizeof(ValueStorage) == 16);
-#pragma pack()
 
 }
