@@ -940,7 +940,7 @@ namespace mongo {
             break;
 
         // simple types
-        case jstOID:       buf.appendStruct(_storage.oid); break;
+        case jstOID:       buf.appendBuf(_storage.oid, sizeof(_storage.oid)); break;
         case NumberInt:    buf.appendNum(_storage.intValue); break;
         case NumberLong:   buf.appendNum(_storage.longValue); break;
         case NumberDouble: buf.appendNum(_storage.doubleValue); break;

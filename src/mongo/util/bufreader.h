@@ -56,10 +56,10 @@ namespace mongo {
         /** read in the object specified, and advance buffer pointer */
         template <typename T>
         void read(T &t) {
-            T* cur = (T*) _pos;
-            T *next = cur + 1;
+            const void* cur = _pos;
+            const void* next = static_cast<const char *>(cur) + sizeof(t);
             if( _end < next ) throw eof();
-            t = *cur;
+            value_reader(t).readFrom(cur);
             _pos = next;
         }
 
@@ -74,10 +74,10 @@ namespace mongo {
         /** read in the object specified, but do not advance buffer pointer */
         template <typename T>
         void peek(T &t) const {
-            T* cur = (T*) _pos;
-            T *next = cur + 1;
+            const void* cur = _pos;
+            const void* next = static_cast<const char *>(cur) + sizeof(t);
             if( _end < next ) throw eof();
-            t = *cur;
+            value_reader(t).readFrom(cur);
         }
 
         /** read in and return an object of the specified type, but do not advance buffer pointer */

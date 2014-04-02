@@ -165,7 +165,7 @@ class LogMessageVoidify {
 #define DCHECK_LT(a, b) CRASH_UNLESS(true)
 #define DCHECK_GT(a, b) CRASH_UNLESS(true)
 
-#else
+#elif defined(MONGO_USE_MEMCPY_MEMORY_ACCESS_STRATEGY)
 
 #define DCHECK(cond) CHECK(cond)
 #define DCHECK_LE(a, b) CHECK_LE(a, b)
