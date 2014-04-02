@@ -33,6 +33,7 @@
 #include "mongo/bson/bsonmisc.h"
 #include "mongo/bson/bson_builder_base.h"
 #include "mongo/bson/bson_field.h"
+#include "mongo/bson/util/memory.h"
 #include "mongo/client/export_macros.h"
 
 #if defined(_DEBUG) && defined(MONGO_EXPOSE_MACROS)
@@ -685,7 +686,7 @@ namespace mongo {
             _b.appendNum((char) EOO);
             char *data = _b.buf() + _offset;
             int size = _b.len() - _offset;
-            *((int*)data) = size;
+            value_writer(size).writeTo(data);
             if ( _tracker )
                 _tracker->got( size );
             return data;
