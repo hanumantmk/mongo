@@ -210,10 +210,8 @@ namespace mongo {
         unsigned long long Z() const { 
             // endian
             unsigned long long result = ofs;
-            char* cursor = reinterpret_cast<char *>(&result);
-            *reinterpret_cast<uint16_t*>(cursor + 4) = *reinterpret_cast<const uint16_t*>(&_a[0]);
-            *reinterpret_cast<uint8_t*>(cursor + 6) = *reinterpret_cast<const uint8_t*>(&_a[2]);
-            *reinterpret_cast<uint8_t*>(cursor + 7) = uint8_t(0);
+            std::memcpy(reinterpret_cast<char *>(&result) + 4, &_a[0], sizeof(_a));
+            std::memset(reinterpret_cast<char *>(&result) + 7, 0, 1);
             return result;
         }
         enum { 
@@ -232,8 +230,9 @@ namespace mongo {
         operator const DiskLoc() const { 
             // endian
             if( isNull() ) return DiskLoc();
-            unsigned a = *((unsigned *) (_a-1));
-            return DiskLoc(a >> 8, ofs);
+            unsigned a = 0;
+            std::memcpy(&a, &_a[0], sizeof(_a));
+            return DiskLoc(a, ofs);
         }
         int& GETOFS()      { return ofs; }
         int getOfs() const { return ofs; }

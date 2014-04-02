@@ -19,6 +19,7 @@
 #include <iostream>
 #include <sstream>
 
+#include "mongo/bson/util/memory.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/concurrency/mutex.h"
 #include "mongo/util/time_support.h"
@@ -105,10 +106,10 @@ namespace mongo {
          bytes of overhead.
          */
         unsigned long long asDate() const {
-            return reinterpret_cast<const unsigned long long*>(&i)[0];
+            return MemoryReader::read<unsigned long long>(&i);
         }
         long long asLL() const {
-            return reinterpret_cast<const long long*>(&i)[0];
+            return MemoryReader::read<long long>(&i);
         }
 
         bool isNull() const { return secs == 0; }

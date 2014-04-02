@@ -58,7 +58,7 @@ namespace mongo {
         h->finish(d);
         //HashDigest is actually 16 bytes, but we just get 8 via truncation
         // NOTE: assumes little-endian
-        return *reinterpret_cast< long long int * >( d );
+        return MemoryReader::read<long long int>( d );
     }
 
     void BSONElementHasher::recursiveHash( Hasher* h ,

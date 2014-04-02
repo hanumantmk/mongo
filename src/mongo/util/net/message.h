@@ -123,8 +123,12 @@ namespace mongo {
         }
         char _data[4];
 
-        int& dataAsInt() {
-            return *((int *) _data);
+        int dataAsInt() {
+            return MemoryReader::read<int>(_data);
+        }
+
+        void writeIntToData(int value) {
+            value_writer(value).writeTo(_data);
         }
 
         bool valid() {

@@ -102,14 +102,14 @@ namespace mongo {
         int resultFlags() {
             return dataAsInt();
         }
-        int& _resultFlags() {
-            return dataAsInt();
+        void setResultFlags(int value) {
+            writeIntToData(value);
         }
         void setResultFlagsToOk() {
-            _resultFlags() = ResultFlag_AwaitCapable;
+            setResultFlags(ResultFlag_AwaitCapable);
         }
         void initializeResultFlags() {
-            _resultFlags() = 0;   
+            setResultFlags(0);
         }
     };
 
