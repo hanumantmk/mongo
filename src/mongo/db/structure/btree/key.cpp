@@ -422,11 +422,11 @@ namespace mongo {
                     p += sizeof(double);
                     break;
                 case cint:
-                    b.append("", static_cast< int >((reinterpret_cast< const PackedDouble& >(*p)).d));
+                    b.append("", static_cast< int >(MemoryReader::read<double>(p)));
                     p += sizeof(double);
                     break;
                 case clong:
-                    b.append("", static_cast< long long>((reinterpret_cast< const PackedDouble& >(*p)).d));
+                    b.append("", static_cast< long long>(MemoryReader::read<double>(p)));
                     p += sizeof(double);
                     break;
                 default:
@@ -452,8 +452,8 @@ namespace mongo {
         switch( lt ) { 
         case cdouble:
             {
-                double L = (reinterpret_cast< const PackedDouble* >(l))->d;
-                double R = (reinterpret_cast< const PackedDouble* >(r))->d;
+                double L = MemoryReader::read<double>(l);
+                double R = MemoryReader::read<double>(r);
                 if( L < R )
                     return -1;
                 if( L != R )
@@ -641,7 +641,7 @@ namespace mongo {
                 l += 8; r += 8;
                 break;
             case cdouble:
-                if( (reinterpret_cast< const PackedDouble* > (l))->d != (reinterpret_cast< const PackedDouble* >(r))->d )
+                if( MemoryReader::read<double>(l) != MemoryReader::read<double>(r) )
                     return false;
                 l += 8; r += 8;
                 break;

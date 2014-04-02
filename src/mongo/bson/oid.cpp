@@ -61,7 +61,7 @@ namespace mongo {
         // we only call this once per process
         scoped_ptr<SecureRandom> sr( SecureRandom::create() );
         int64_t n = sr->nextInt64();
-        OID::MachineAndPid x = ourMachine = reinterpret_cast<OID::MachineAndPid&>(n);
+        OID::MachineAndPid x = ourMachine = MemoryReader::read<OID::MachineAndPid>(&n);
         foldInPid(x);
         return x;
     }

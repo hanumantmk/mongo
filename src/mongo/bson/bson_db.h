@@ -49,7 +49,7 @@ namespace mongo {
 
     inline OpTime BSONElement::_opTime() const {
         if( type() == mongo::Date || type() == Timestamp )
-            return OpTime( *reinterpret_cast< const unsigned long long* >( value() ) );
+            return OpTime( MemoryReader::read<unsigned long long>( value() ) );
         return OpTime();
     }
 

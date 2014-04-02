@@ -23,6 +23,7 @@
 
 #include "mongo/bson/bsontypes.h"
 #include "mongo/bson/oid.h"
+#include "mongo/bson/util/memory.h"
 #include "mongo/client/export_macros.h"
 #include "mongo/platform/cstdint.h"
 #include "mongo/platform/float_utils.h"
@@ -109,7 +110,9 @@ namespace mongo {
         operator std::string() const { return toString(); }
 
         /** Returns the type of the element */
-        BSONType type() const { return (BSONType) *reinterpret_cast< const signed char * >(data); }
+        BSONType type() const {
+            return static_cast<BSONType>(MemoryReader::read<int8_t>(data));
+        }
 
         /** retrieve a field within this element
             throws exception if *this is not an embedded object
@@ -183,7 +186,7 @@ namespace mongo {
             @see Bool(), trueValue()
         */
         Date_t date() const {
-            return *reinterpret_cast< const Date_t* >( value() );
+            return MemoryReader::read<Date_t>(value());
         }
 
         /** Convert the value to boolean, regardless of its type, in a javascript-like fashion
@@ -198,11 +201,11 @@ namespace mongo {
         bool isNumber() const;
 
         /** Return double value for this field. MUST be NumberDouble type. */
-        double _numberDouble() const {return (reinterpret_cast< const PackedDouble* >( value() ))->d; }
+        double _numberDouble() const {return MemoryReader::read<double>( value() );}
         /** Return int value for this field. MUST be NumberInt type. */
-        int _numberInt() const {return *reinterpret_cast< const int* >( value() ); }
+        int _numberInt() const {return MemoryReader::read<int>( value() );}
         /** Return long long value for this field. MUST be NumberLong type. */
-        long long _numberLong() const {return *reinterpret_cast< const long long* >( value() ); }
+        long long _numberLong() const {return MemoryReader::read<long long>( value() ); }
 
         /** Retrieve int value for the element safely.  Zero returned if not a number. */
         int numberInt() const;
@@ -241,12 +244,12 @@ namespace mongo {
             @return string size including terminating null
         */
         int valuestrsize() const {
-            return *reinterpret_cast< const int* >( value() );
+            return MemoryReader::read<int>( value() );
         }
 
         // for objects the size *includes* the size of the size field
         size_t objsize() const {
-            return static_cast< const size_t >( *reinterpret_cast< const uint32_t* >( value() ) );
+            return static_cast< const size_t >( MemoryReader::read<uint32_t>( value() ) );
         }
 
         /** Get a string's value.  Also gives you start of the real data for an embedded object.
@@ -400,15 +403,16 @@ namespace mongo {
         }
 
         Date_t timestampTime() const {
-            unsigned long long t = ((unsigned int*)(value() + 4 ))[0];
+            const unsigned int unsigned_value = MemoryReader::read<unsigned int>(value() + 4);
+            const unsigned long long t = unsigned_value;
             return t * 1000;
         }
         unsigned int timestampInc() const {
-            return ((unsigned int*)(value() ))[0];
+            return MemoryReader::read<unsigned int>(value());
         }
 
         unsigned long long timestampValue() const {
-            return reinterpret_cast<const unsigned long long*>( value() )[0];
+            return MemoryReader::read<unsigned long long >(value());
         }
 
         const char * dbrefNS() const {
@@ -419,7 +423,7 @@ namespace mongo {
         const mongo::OID& dbrefOID() const {
             uassert( 10064 ,  "not a dbref" , type() == DBRef );
             const char * start = value();
-            start += 4 + *reinterpret_cast< const int* >( start );
+            start += 4 + MemoryReader::read<int>( start );
             return *reinterpret_cast< const mongo::OID* >( start );
         }
 
@@ -504,11 +508,11 @@ namespace mongo {
         // NOTE Behavior changes must be replicated in Value::coerceToBool().
         switch( type() ) {
         case NumberLong:
-            return *reinterpret_cast< const long long* >( value() ) != 0;
+            return MemoryReader::read<long long>( value() ) != 0;
         case NumberDouble:
-            return (reinterpret_cast < const PackedDouble* >(value ()))->d != 0;
+            return MemoryReader::read<double>(value () ) != 0;
         case NumberInt:
-            return *reinterpret_cast< const int* >( value() ) != 0;
+            return MemoryReader::read<int>( value() ) != 0;
         case mongo::Bool:
             return boolean();
         case EOO:
@@ -554,9 +558,9 @@ namespace mongo {
         case NumberDouble:
             return _numberDouble();
         case NumberInt:
-            return *reinterpret_cast< const int* >( value() );
+            return MemoryReader::read<int>( value() );
         case NumberLong:
-            return (double) *reinterpret_cast< const long long* >( value() );
+            return MemoryReader::read<long long>( value() );
         default:
             return 0;
         }
@@ -566,11 +570,11 @@ namespace mongo {
     inline int BSONElement::numberInt() const {
         switch( type() ) {
         case NumberDouble:
-            return (int) _numberDouble();
+            return _numberDouble();
         case NumberInt:
             return _numberInt();
         case NumberLong:
-            return (int) _numberLong();
+            return _numberLong();
         default:
             return 0;
         }
@@ -580,7 +584,7 @@ namespace mongo {
     inline long long BSONElement::numberLong() const {
         switch( type() ) {
         case NumberDouble:
-            return (long long) _numberDouble();
+            return _numberDouble();
         case NumberInt:
             return _numberInt();
         case NumberLong:
