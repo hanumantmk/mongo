@@ -148,4 +148,33 @@ namespace mongo {
         return ValueWriter<T>(t);
     }
 
+    template<typename T>
+    class ValueWrapper {
+    public:
+        inline ValueWrapper(char * ptr) : _ptr(ptr) { }
+
+        inline T get() const {
+            return MemoryReader::read<T>(_ptr);
+        }
+
+        inline void set(const T& t) {
+            MemoryWriter::write(_ptr, &t);
+        }
+
+        inline char * ptr() const {
+            return _ptr;
+        }
+
+        inline size_t size() const {
+            return sizeof(T);
+        }
+
+        inline ValueWrapper offset(int i) const {
+            return ValueWrapper(_ptr + (sizeof(T) * i));
+        }
+
+    private:
+        char * _ptr;
+    };
+
 } // namespace mongo

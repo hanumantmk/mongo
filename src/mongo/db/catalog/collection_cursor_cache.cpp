@@ -239,10 +239,10 @@ namespace mongo {
         return _globalCursorIdCache.timeoutCursors( millisSinceLastCall );
     }
 
-    int CollectionCursorCache::eraseCursorGlobalIfAuthorized(int n, long long* ids) {
+    int CollectionCursorCache::eraseCursorGlobalIfAuthorized(int n, ValueWrapper<long long> ids) {
         int numDeleted = 0;
         for ( int i = 0; i < n; i++ ) {
-            if ( eraseCursorGlobalIfAuthorized( ids[i] ) )
+            if ( eraseCursorGlobalIfAuthorized( ids.offset(i).get() ) )
                 numDeleted++;
             if ( inShutdown() )
                 break;
