@@ -93,7 +93,7 @@ namespace mongo {
     void replyToQuery( int queryResultFlags, Message& response, const BSONObj& resultObj ) {
         BufBuilder bufBuilder;
         bufBuilder.skip( sizeof( QueryResult ));
-        bufBuilder.appendBuf( reinterpret_cast< void *>(
+        bufBuilder.appendBuf( static_cast< void *>(
                 const_cast< char* >( resultObj.objdata() )), resultObj.objsize() );
 
         QueryResult* queryResult = reinterpret_cast< QueryResult* >( bufBuilder.buf() );

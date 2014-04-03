@@ -158,7 +158,7 @@ namespace mongo {
             bool checkHash(const void* begin, int len) const;
 
             bool magicOk() const {
-                return MemoryReader::read<unsigned>(&magic[0]) == 0x0a0a0a0a;
+                return MemoryReader::read<unsigned>(magic) == 0x0a0a0a0a;
             }
         };
 

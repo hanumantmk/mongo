@@ -142,8 +142,7 @@ namespace mongo {
         long long getCursor() {
             verify( responseTo > 0 );
             verify( _operation == opReply );
-            long long * l = (long long *)(_data + 4);
-            return l[0];
+            return MemoryReader::read<long long>(_data + 4);
         }
 
         int dataLen(); // len without header

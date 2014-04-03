@@ -59,7 +59,7 @@ namespace mongo {
         case Code:
             return std::string(valuestr(), valuestrsize()-1);
         case CodeWScope:
-            return std::string(codeWScopeCode(), *(int*)(valuestr())-1);
+            return std::string(codeWScopeCode(), MemoryReader::read<int>(valuestr())-1);
         default:
             log() << "can't convert type: " << (int)(type()) << " to code" << std::endl;
         }

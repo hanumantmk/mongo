@@ -63,11 +63,11 @@ namespace mongo {
             return i;
         }
         OpTime(Date_t date) {
-            reinterpret_cast<unsigned long long&>(*this) = date.millis;
+            value_writer(date.millis).writeTo(this)
             dassert( (int)secs >= 0 );
         }
         OpTime(ReplTime x) {
-            reinterpret_cast<unsigned long long&>(*this) = x;
+            value_writer(x).writeTo(this)
             dassert( (int)secs >= 0 );
         }
         OpTime(unsigned a, unsigned b) {

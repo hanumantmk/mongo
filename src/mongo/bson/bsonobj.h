@@ -516,7 +516,7 @@ namespace mongo {
 #endif
                 if(--(h->refCount) == 0){
 #if defined(_DEBUG)
-                    unsigned sz = (unsigned&) *h->data;
+                    unsigned sz = MemoryReader::read<unsigned>(h->data);
                     verify(sz < BSONObjMaxInternalSize * 3);
                     memset(h->data, 0xdd, sz);
 #endif

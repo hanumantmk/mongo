@@ -203,7 +203,7 @@ namespace mongo {
     private:
 
         template<typename T>
-        void grow_and_write(T & t) {
+        void grow_and_write(const T& t) {
             value_writer(t).writeTo(grow(sizeof(T)));
         }
 

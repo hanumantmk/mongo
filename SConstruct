@@ -888,9 +888,6 @@ if memory_access_strategy == 'reinterpret_cast' and get_option('sanitize') == 'u
 memory_access_strategy_define = memory_access_strategies[memory_access_strategy]
 env.Append( CPPDEFINES=[memory_access_strategy_define] )
 
-if memory_access_strategy == "reinterpret_cast":
-    env.Append( CCFLAGS=["-fno-strict-aliasing"] )
-
 # discover modules, and load the (python) module for each module's build.py
 mongo_modules = moduleconfig.discover_modules('src/mongo/db/modules')
 env['MONGO_MODULES'] = [m.name for m in mongo_modules]
@@ -1439,6 +1436,14 @@ def doConfigure(myenv):
     conf.Finish()
     if haveIsTriviallyCopyable:
         myenv.Append(CPPDEFINES=['MONGO_HAVE_IS_TRIVIALLY_COPYABLE'])
+
+    if using_clang() or using_gcc():
+        AddToCCFLAGSIfSupported(myenv, "-fno-strict-aliasing")
+#        if memory_access_strategy == "reinterpret_cast":
+#            AddToCCFLAGSIfSupported(myenv, "-fno-strict-aliasing")
+#        else:
+#            AddToCCFLAGSIfSupported(myenv, "-Wcast-align")
+#            AddToCCFLAGSIfSupported(myenv, "-Wstrict-aliasing=1")
 
     conf = Configure(myenv)
     libdeps.setup_conftests(conf)

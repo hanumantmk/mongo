@@ -111,7 +111,7 @@ namespace mongo {
 
         /** Returns the type of the element */
         BSONType type() const {
-            return static_cast<BSONType>(MemoryReader::read<int8_t>(data));
+            return static_cast<BSONType>(MemoryReader::read<signed char>(data));
         }
 
         /** retrieve a field within this element
@@ -232,7 +232,7 @@ namespace mongo {
 
         /** Retrieve the object ID stored in the object.
             You must ensure the element is of type jstOID first. */
-        const mongo::OID &__oid() const { return *reinterpret_cast< const mongo::OID* >( value() ); }
+        mongo::OID __oid() const { return MemoryReader::read<mongo::OID>( value() ); }
 
         /** True if element is null. */
         bool isNull() const {
@@ -278,7 +278,7 @@ namespace mongo {
          *  This INCLUDES the null char at the end */
         int codeWScopeCodeLen() const {
             massert( 16178 , "not codeWScope" , type() == CodeWScope );
-            return *(int *)( value() + 4 );
+            return MemoryReader::read<int>( value() + 4 );
         }
 
         /** Get the scope SavedContext of a CodeWScope data element.
@@ -403,8 +403,7 @@ namespace mongo {
         }
 
         Date_t timestampTime() const {
-            const unsigned int unsigned_value = MemoryReader::read<unsigned int>(value() + 4);
-            const unsigned long long t = unsigned_value;
+            const unsigned long long t = MemoryReader::read<unsigned int>(value() + 4);
             return t * 1000;
         }
         unsigned int timestampInc() const {
@@ -420,11 +419,11 @@ namespace mongo {
             return value() + 4;
         }
 
-        const mongo::OID& dbrefOID() const {
+        mongo::OID dbrefOID() const {
             uassert( 10064 ,  "not a dbref" , type() == DBRef );
             const char * start = value();
             start += 4 + MemoryReader::read<int>( start );
-            return *reinterpret_cast< const mongo::OID* >( start );
+            return MemoryReader::read<mongo::OID>( start );
         }
 
         /** this does not use fieldName in the comparison, just the value */

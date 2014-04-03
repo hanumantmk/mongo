@@ -85,7 +85,7 @@ namespace mongo {
         x[1] = ourMachineAndPid._machineNumber[1];
         x[2] = ourMachineAndPid._machineNumber[2];
         x[3] = 0;
-        return MemoryReader::read<unsigned>(&x[0]);
+        return MemoryReader::read<unsigned>(x);
     }
 
     void OID::justForked() {

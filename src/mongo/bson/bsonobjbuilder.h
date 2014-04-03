@@ -110,7 +110,7 @@ namespace mongo {
         BSONObjBuilder& appendObject(const StringData& fieldName, const char * objdata , int size = 0 ) {
             verify( objdata );
             if ( size == 0 ) {
-                size = *((int*)objdata);
+                value_reader(size).readFrom(objdata);
             }
 
             verify( size > 4 && size < 100000000 );

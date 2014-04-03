@@ -85,8 +85,7 @@ namespace mongo {
     public:
         /// If false you have exclusive access to this object. This is useful for implementing COW.
         bool isShared() const {
-            // TODO: switch to unfenced read method after SERVER-6973
-            return reinterpret_cast<unsigned&>(_count) > 1;
+            return _count.loadRelaxed() > 1;
         }
 
         friend void intrusive_ptr_add_ref(const RefCountable* ptr) {

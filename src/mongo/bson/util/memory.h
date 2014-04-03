@@ -17,9 +17,9 @@
 
 #include <cstring>
 
-#if __cplusplus >= 201103L
+#if MONGO_HAVE_IS_TRIVIALLY_COPYABLE
 #include <type_traits>
-#endif // __cplusplus >= 201103L
+#endif
 
 namespace mongo {
 
@@ -29,17 +29,17 @@ namespace mongo {
     };
 
     const MemoryAccessStrategy kDefaultMemoryAccessStrategy =
-#if defined(MONGO_USE_REINTERPRET_MEMORY_ACCESS_STRATEGY)
+#if defined(MONGO_USE_REINTERPRET_CAST_MEMORY_ACCESS_STRATEGY)
         kMemoryAccessStrategyReinterpret;
-#else
+#elif defined(MONGO_USE_MEMCPY_MEMORY_ACCESS_STRATEGY)
         kMemoryAccessStrategyMemcpy;
+#else
+#error Unknown memory access strategy
 #endif
-
 
     template<typename T>
     struct trivially_copyable_concept {
         trivially_copyable_concept() {
-            // TODO add configure check for this
 #if MONGO_HAVE_IS_TRIVIALLY_COPYABLE
             static_assert(
                 std::is_trivially_copyable<T>::value,
@@ -124,14 +124,14 @@ namespace mongo {
     };
 
     template<typename T>
-    ValueReader<T> value_reader(T& t) {
+    inline ValueReader<T> value_reader(T& t) {
         return ValueReader<T>(t);
     }
 
     template<typename T>
     class ValueWriter {
     public:
-        ValueWriter(const T& t)
+        inline ValueWriter(const T& t)
             : _t(t) {
         }
 
@@ -144,7 +144,7 @@ namespace mongo {
     };
 
     template<typename T>
-    ValueWriter<T> value_writer(const T& t) {
+    inline ValueWriter<T> value_writer(const T& t) {
         return ValueWriter<T>(t);
     }
 

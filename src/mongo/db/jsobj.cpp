@@ -194,11 +194,10 @@ namespace mongo {
             }
             break;
         case BinData: {
-            const int len = *( reinterpret_cast<const int*>( value() ) );
-            BinDataType type = BinDataType( *( reinterpret_cast<const unsigned char*>( value() ) +
-                                               sizeof( int ) ) );
+            const int len = MemoryReader::read<int>(value());
+            BinDataType type = BinDataType( MemoryReader::read<unsigned char>(value() + sizeof(int)));
             s << "{ \"$binary\" : \"";
-            const char *start = reinterpret_cast<const char*>( value() ) + sizeof( int ) + 1;
+            const char *start = value() + sizeof( int ) + 1;
             base64::encode( s , start , len );
             s << "\", \"$type\" : \"" << hex;
             s.width( 2 );

@@ -49,8 +49,7 @@ namespace {
             int size = 1234;
 
             char* x = new char[size];
-            int* xx = reinterpret_cast<int*>(x);
-            xx[0] = size;
+            value_writer(size).writeTo(x);
 
             for ( int i=4; i<size; i++ ) {
                 x[i] = r.nextInt32( 255 );
@@ -155,7 +154,7 @@ namespace {
             for( int32_t byteIdx = 4; byteIdx < original.objsize(); ++byteIdx ) {
                 for( int32_t bitIdx = 0; bitIdx < 8; ++bitIdx ) {
                     if ( randomSource.nextInt32( fuzzFrequency ) == 0 ) {
-                        reinterpret_cast<unsigned char&>( buffer[ byteIdx ] ) ^= ( 1U << bitIdx );
+                        static_cast<unsigned char&>( buffer[ byteIdx ] ) ^= ( 1U << bitIdx );
                     }
                 }
             }

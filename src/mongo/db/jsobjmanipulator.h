@@ -48,19 +48,19 @@ namespace mongo {
 
         /** Change the value, in place, of the number. */
         void setNumber(double d) {
-            if ( _element.type() == NumberDouble ) *reinterpret_cast< double * >( value() )  = d;
-            else if ( _element.type() == NumberInt ) *reinterpret_cast< int * >( value() ) = (int) d;
+            if ( _element.type() == NumberDouble ) value_writer(d).writeTo(value());
+            else if ( _element.type() == NumberInt ) value_writer((int) d).writeTo(value());
             else verify(0);
         }
         void SetNumber(double d);
         void setLong(long long n) {
             verify( _element.type() == NumberLong );
-            *reinterpret_cast< long long * >( value() ) = n;
+            value_writer(n).writeTo(value());
         }
         void SetLong(long long n);
         void setInt(int n) {
             verify( _element.type() == NumberInt );
-            *reinterpret_cast< int * >( value() ) = n;
+            value_writer(n).writeTo(value());
         }
         void SetInt(int n);
 

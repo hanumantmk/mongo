@@ -147,8 +147,8 @@ namespace mongo {
         }
 
         int getInt( int num ) const {
-            const int * foo = (const int*)afterNS();
-            return foo[num];
+            int skip = num * sizeof(int);
+            return MemoryReader::read<int>(afterNS() + skip);
         }
 
         int getQueryNToReturn() const {
@@ -190,10 +190,9 @@ namespace mongo {
         }
 
         void getQueryStuff(const char *&query, int& ntoreturn) {
-            int *i = (int *) (data + strlen(data) + 1);
-            ntoreturn = *i;
-            i++;
-            query = (const char *) i;
+            char* pos = data + strlen(data) + 1;
+            ntoreturn = MemoryReader::read<int>(pos);
+            query = pos + sizeof(int);
         }
 
         /* for insert and update msgs */
@@ -236,7 +235,7 @@ namespace mongo {
             mark = nextjsobj;
         }
 
-        void markReset( const char * toMark = 0) {
+        void markReset( char * toMark = 0) {
             if( toMark == 0 ) toMark = mark;
             verify( toMark );
             nextjsobj = toMark;
