@@ -154,7 +154,7 @@ namespace {
             for( int32_t byteIdx = 4; byteIdx < original.objsize(); ++byteIdx ) {
                 for( int32_t bitIdx = 0; bitIdx < 8; ++bitIdx ) {
                     if ( randomSource.nextInt32( fuzzFrequency ) == 0 ) {
-                        static_cast<unsigned char&>( buffer[ byteIdx ] ) ^= ( 1U << bitIdx );
+                        value_writer(static_cast<unsigned char>(buffer[ byteIdx ]) ^ ( 1U << bitIdx )).writeTo(&buffer[ byteIdx ]);
                     }
                 }
             }
