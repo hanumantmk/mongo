@@ -882,6 +882,8 @@ if not use_system_version_of_library("stemmer"):
 if not use_system_version_of_library("snappy"):
     env.Prepend(CPPPATH=['$BUILD_DIR/third_party/snappy'])
 
+env.Prepend(CPPPATH=['#/src/third_party/encoded_value'])
+
 env.Append( CPPPATH=['$EXTRACPPPATH'],
             LIBPATH=['$EXTRALIBPATH'] )
 

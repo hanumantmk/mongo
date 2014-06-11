@@ -82,7 +82,7 @@ namespace mongo {
         if( getsAResponse ){
             verify( dbresponse );
             BufBuilder b( 32768 );
-            b.skip( sizeof( QueryResult ) );
+            b.skip( QueryResult<>::_size );
             {
                 BSONObjBuilder bob;
 
@@ -96,20 +96,20 @@ namespace mongo {
                 b.appendBuf( obj.objdata() , obj.objsize() );
             }
 
-            QueryResult *qr = (QueryResult*)b.buf();
+            QueryResult<>::Pointer qr(b.buf());
             qr->_resultFlags() = ResultFlag_ErrSet | ResultFlag_ShardConfigStale;
-            qr->len = b.len();
+            qr->len() = b.len();
             qr->setOperation( opReply );
-            qr->cursorId = 0;
-            qr->startingFrom = 0;
-            qr->nReturned = 1;
+            qr->cursorId() = 0;
+            qr->startingFrom() = 0;
+            qr->nReturned() = 1;
             b.decouple();
 
             Message * resp = new Message();
-            resp->setData( qr , true );
+            resp->setData( qr.ptr() , true );
 
             dbresponse->response = resp;
-            dbresponse->responseTo = m.header()->id;
+            dbresponse->responseTo = m.header()->id();
             return true;
         }
 
@@ -136,8 +136,8 @@ namespace mongo {
         wanted.addToBSON( b );
         received.addToBSON( b, "yourVersion" );
 
-        b.appendBinData( "msg" , m.header()->len , bdtCustom , (char*)(m.singleData()) );
-        LOG(2) << "writing back msg with len: " << m.header()->len << " op: " << m.operation() << endl;
+        b.appendBinData( "msg" , m.header()->len() , bdtCustom , m.singleData().ptr() );
+        LOG(2) << "writing back msg with len: " << m.header()->len() << " op: " << m.operation() << endl;
         
         // we pass the builder to queueWriteBack so that it can select the writebackId
         // this is important so that the id is guaranteed to be ascending 

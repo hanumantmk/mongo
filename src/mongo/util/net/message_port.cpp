@@ -80,13 +80,13 @@ namespace mongo {
         }
 
         void append( Message& m ) {
-            verify( m.header()->len <= 1300 );
+            verify( m.header()->len() <= 1300 );
 
-            if ( len() + m.header()->len > 1300 )
+            if ( len() + m.header()->len() > 1300 )
                 flush();
 
-            memcpy( _cur , m.singleData() , m.header()->len );
-            _cur += m.header()->len;
+            memcpy( _cur , m.singleData().ptr() , m.header()->len() );
+            _cur += m.header()->len();
         }
 
         void flush() {
@@ -171,10 +171,10 @@ namespace mongo {
         try {
 again:
             //mmm( log() << "*  recv() sock:" << this->sock << endl; )
-            MSGHEADER header;
-            int headerLen = sizeof(MSGHEADER);
-            psock->recv( (char *)&header, headerLen );
-            int len = header.messageLength; 
+            MSGHEADER<>::Value header;
+            int headerLen = MSGHEADER<>::_size;
+            psock->recv( header.ptr(), headerLen );
+            int len = header.messageLength();
 
             if ( len == 542393671 ) {
                 // an http GET
@@ -196,17 +196,17 @@ again:
             // If responseTo is not 0 or -1 for first packet assume SSL
             else if (psock->isAwaitingHandshake()) {
 #ifndef MONGO_SSL
-                if (header.responseTo != 0 && header.responseTo != -1) {
+                if (header.responseTo() != 0 && header.responseTo() != -1) {
                     uasserted(17133,
                               "SSL handshake requested, SSL feature not available in this build");
                 }
 #else                    
-                if (header.responseTo != 0 && header.responseTo != -1) {
+                if (header.responseTo() != 0 && header.responseTo() != -1) {
                     uassert(17132,
                             "SSL handshake received but server is started without SSL support",
                             sslGlobalParams.sslMode.load() != SSLGlobalParams::SSLMode_disabled);
                     setX509SubjectName(psock->doSSLHandshake(
-                                       reinterpret_cast<const char*>(&header), sizeof(header)));
+                                       header.ptr(), sizeof(header)));
                     psock->setHandshakeReceived();
                     goto again;
                 }
@@ -214,27 +214,27 @@ again:
                         sslGlobalParams.sslMode.load() != SSLGlobalParams::SSLMode_requireSSL);
 #endif // MONGO_SSL
             }
-            if ( static_cast<size_t>(len) < sizeof(MSGHEADER) || 
+            if ( static_cast<size_t>(len) < MSGHEADER<>::_size ||
                  static_cast<size_t>(len) > MaxMessageSizeBytes ) {
                 LOG(0) << "recv(): message len " << len << " is invalid. "
-                       << "Min " << sizeof(MSGHEADER) << " Max: " << MaxMessageSizeBytes << endl;
+                       << "Min " << MSGHEADER<>::_size << " Max: " << MaxMessageSizeBytes << endl;
                 return false;
             }
 
             psock->setHandshakeReceived();
             int z = (len+1023)&0xfffffc00;
             verify(z>=len);
-            MsgData *md = (MsgData *) malloc(z);
-            ScopeGuard guard = MakeGuard(free, md);
-            verify(md);
+            MsgData<>::Pointer md( static_cast<char *>(malloc(z)) );
+            ScopeGuard guard = MakeGuard(free, md.ptr());
+            verify(md.ptr());
 
-            memcpy(md, &header, headerLen);
+            memcpy(md.ptr(), header.ptr(), headerLen);
             int left = len - headerLen;
 
-            psock->recv( (char *)&md->_data, left );
+            psock->recv( md->_data().ptr(), left );
 
             guard.Dismiss();
-            m.setData(md, true);
+            m.setData(md.ptr(), true);
             return true;
 
         }
@@ -249,7 +249,7 @@ again:
     }
 
     void MessagingPort::reply(Message& received, Message& response) {
-        say(/*received.from, */response, received.header()->id);
+        say(/*received.from, */response, received.header()->id());
     }
 
     void MessagingPort::reply(Message& received, Message& response, MSGID responseTo) {
@@ -270,13 +270,13 @@ again:
                 return false;
             }
             //log() << "got response: " << response.data->responseTo << endl;
-            if ( response.header()->responseTo == toSend.header()->id )
+            if ( response.header()->responseTo() == toSend.header()->id() )
                 break;
-            error() << "MessagingPort::call() wrong id got:" << hex << (unsigned)response.header()->responseTo << " expect:" << (unsigned)toSend.header()->id << '\n'
+            error() << "MessagingPort::call() wrong id got:" << hex << (unsigned)response.header()->responseTo() << " expect:" << (unsigned)toSend.header()->id() << '\n'
                     << dec
                     << "  toSend op: " << (unsigned)toSend.operation() << '\n'
-                    << "  response msgid:" << (unsigned)response.header()->id << '\n'
-                    << "  response len:  " << (unsigned)response.header()->len << '\n'
+                    << "  response msgid:" << (unsigned)response.header()->id() << '\n'
+                    << "  response len:  " << (unsigned)response.header()->len() << '\n'
                     << "  response op:  " << response.operation() << '\n'
                     << "  remote: " << psock->remoteString() << endl;
             verify(false);
@@ -289,12 +289,12 @@ again:
     void MessagingPort::say(Message& toSend, int responseTo) {
         verify( !toSend.empty() );
         mmm( log() << "*  say()  thr:" << GetCurrentThreadId() << endl; )
-        toSend.header()->id = nextMessageId();
-        toSend.header()->responseTo = responseTo;
+        toSend.header()->id() = nextMessageId();
+        toSend.header()->responseTo() = responseTo;
 
         if ( piggyBackData && piggyBackData->len() ) {
             mmm( log() << "*     have piggy back" << endl; )
-            if ( ( piggyBackData->len() + toSend.header()->len ) > 1300 ) {
+            if ( ( piggyBackData->len() + toSend.header()->len() ) > 1300 ) {
                 // won't fit in a packet - so just send it off
                 piggyBackData->flush();
             }
@@ -310,15 +310,15 @@ again:
 
     void MessagingPort::piggyBack( Message& toSend , int responseTo ) {
 
-        if ( toSend.header()->len > 1300 ) {
+        if ( toSend.header()->len() > 1300 ) {
             // not worth saving because its almost an entire packet
             say( toSend );
             return;
         }
 
         // we're going to be storing this, so need to set it up
-        toSend.header()->id = nextMessageId();
-        toSend.header()->responseTo = responseTo;
+        toSend.header()->id() = nextMessageId();
+        toSend.header()->responseTo() = responseTo;
 
         if ( ! piggyBackData )
             piggyBackData = new PiggyBackData( this );

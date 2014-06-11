@@ -73,18 +73,18 @@ namespace mongo {
                       long long cursorId 
                       ) {
         BufBuilder b(32768);
-        b.skip(sizeof(QueryResult));
+        b.skip(QueryResult<>::_size);
         b.appendBuf(data, size);
-        QueryResult *qr = (QueryResult *) b.buf();
+        QueryResult<>::Pointer qr( b.buf() );
         qr->_resultFlags() = queryResultFlags;
-        qr->len = b.len();
+        qr->len() = b.len();
         qr->setOperation(opReply);
-        qr->cursorId = cursorId;
-        qr->startingFrom = startingFrom;
-        qr->nReturned = nReturned;
+        qr->cursorId() = cursorId;
+        qr->startingFrom() = startingFrom;
+        qr->nReturned() = nReturned;
         b.decouple();
-        Message resp(qr, true);
-        p->reply(requestMsg, resp, requestMsg.header()->id);
+        Message resp(qr.ptr(), true);
+        p->reply(requestMsg, resp, requestMsg.header()->id());
     }
 
     void replyToQuery(int queryResultFlags,
@@ -99,26 +99,26 @@ namespace mongo {
         Message *resp = new Message();
         replyToQuery( queryResultFlags, *resp, obj );
         dbresponse.response = resp;
-        dbresponse.responseTo = m.header()->id;
+        dbresponse.responseTo = m.header()->id();
     }
 
     void replyToQuery( int queryResultFlags, Message& response, const BSONObj& resultObj ) {
         BufBuilder bufBuilder;
-        bufBuilder.skip( sizeof( QueryResult ));
-        bufBuilder.appendBuf( reinterpret_cast< void *>(
+        bufBuilder.skip( QueryResult<>::_size );
+        bufBuilder.appendBuf( static_cast< void *>(
                 const_cast< char* >( resultObj.objdata() )), resultObj.objsize() );
 
-        QueryResult* queryResult = reinterpret_cast< QueryResult* >( bufBuilder.buf() );
+        QueryResult<>::Pointer queryResult( bufBuilder.buf() );
         bufBuilder.decouple();
 
         queryResult->_resultFlags() = queryResultFlags;
-        queryResult->len = bufBuilder.len();
+        queryResult->len() = bufBuilder.len();
         queryResult->setOperation( opReply );
-        queryResult->cursorId = 0;
-        queryResult->startingFrom = 0;
-        queryResult->nReturned = 1;
+        queryResult->cursorId() = 0;
+        queryResult->startingFrom() = 0;
+        queryResult->nReturned() = 1;
 
-        response.setData( queryResult, true ); // transport will free
+        response.setData( queryResult.ptr(), true ); // transport will free
     }
 
 }

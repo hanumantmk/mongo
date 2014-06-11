@@ -140,9 +140,6 @@ namespace mongo {
         }
     } mystartupdbcpp;
 
-    QueryResult* emptyMoreResult(long long);
-
-
     /* todo: make this a real test.  the stuff in dbtests/ seem to do all dbdirectclient which exhaust doesn't support yet. */
 // QueryOption_Exhaust
 #define TESTEXHAUST 0
@@ -210,17 +207,17 @@ namespace mongo {
                 if ( dbresponse.response ) {
                     port->reply(m, *dbresponse.response, dbresponse.responseTo);
                     if( dbresponse.exhaustNS.size() > 0 ) {
-                        MsgData *header = dbresponse.response->header();
-                        QueryResult *qr = (QueryResult *) header;
-                        long long cursorid = qr->cursorId;
+                        MsgData<>::Pointer header = dbresponse.response->header();
+                        QueryResult<>::Pointer qr(header.ptr());
+                        long long cursorid = qr->cursorId();
                         if( cursorid ) {
                             verify( dbresponse.exhaustNS.size() && dbresponse.exhaustNS[0] );
                             string ns = dbresponse.exhaustNS; // before reset() free's it...
                             m.reset();
                             BufBuilder b(512);
                             b.appendNum((int) 0 /*size set later in appendData()*/);
-                            b.appendNum(header->id);
-                            b.appendNum(header->responseTo);
+                            b.appendNum(header->id());
+                            b.appendNum(header->responseTo());
                             b.appendNum((int) dbGetMore);
                             b.appendNum((int) 0);
                             b.appendStr(ns);

@@ -32,6 +32,7 @@
 #include <sstream>
 #include <string>
 
+#include "encoded_value.h"
 #include "mongo/client/export_macros.h"
 #include "mongo/logger/labeled_level.h"
 #include "mongo/logger/log_severity.h"
@@ -112,6 +113,12 @@ namespace logger {
         LogstreamBuilder& operator<<(long long x) { stream() << x; return *this; }
         LogstreamBuilder& operator<<(unsigned long long x) { stream() << x; return *this; }
         LogstreamBuilder& operator<<(bool x) { stream() << x; return *this; }
+
+        template <typename T, encoded_value::endian::ConvertEndian ce>
+        LogstreamBuilder& operator<<(encoded_value::Pointer<T, ce> x) { stream() << *x; return *this; }
+
+        template <typename T, encoded_value::endian::ConvertEndian ce>
+        LogstreamBuilder& operator<<(encoded_value::Reference<T, ce> x) { stream() << x.operator T(); return *this; }
 
         template <typename T>
         LogstreamBuilder& operator<<(const T& x) {

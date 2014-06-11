@@ -36,6 +36,7 @@
 #include "mongo/util/goodies.h"
 #include "mongo/util/net/hostandport.h"
 #include "mongo/util/net/sock.h"
+#include "encoded_value.h"
 
 namespace mongo {
 
@@ -105,63 +106,11 @@ namespace mongo {
 
     }
 
-#pragma pack(1)
     /* see http://dochub.mongodb.org/core/mongowireprotocol
     */
-    struct MSGHEADER {
-        int messageLength; // total message size, including this
-        int requestID;     // identifier for this message
-        int responseTo;    // requestID from the original request
-        //   (used in responses from db)
-        int opCode;
-    };
-#pragma pack()
+#include "mongo/util/net/encoded_value_msgheader.h"
 
-#pragma pack(1)
-    /* todo merge this with MSGHEADER (or inherit from it). */
-    struct MsgData {
-        int len; /* len of the msg, including this field */
-        MSGID id; /* request/reply id's match... */
-        MSGID responseTo; /* id of the message we are responding to */
-        short _operation;
-        char _flags;
-        char _version;
-        int operation() const {
-            return _operation;
-        }
-        void setOperation(int o) {
-            _flags = 0;
-            _version = 0;
-            _operation = o;
-        }
-        char _data[4];
-
-        int& dataAsInt() {
-            return *((int *) _data);
-        }
-
-        bool valid() {
-            if ( len <= 0 || len > ( 4 * BSONObjMaxInternalSize ) )
-                return false;
-            if ( _operation < 0 || _operation > 30000 )
-                return false;
-            return true;
-        }
-
-        long long getCursor() {
-            verify( responseTo > 0 );
-            verify( _operation == opReply );
-            long long * l = (long long *)(_data + 4);
-            return l[0];
-        }
-
-        int dataLen(); // len without header
-    };
-    const int MsgDataHeaderSize = sizeof(MsgData) - 4;
-    inline int MsgData::dataLen() {
-        return len - MsgDataHeaderSize;
-    }
-#pragma pack()
+#include "mongo/util/net/encoded_value_msgdata.h"
 
     class Message {
     public:
@@ -169,7 +118,7 @@ namespace mongo {
         Message() : _buf( 0 ), _data( 0 ), _freeIt( false ) {}
         Message( void * data , bool freeIt ) :
             _buf( 0 ), _data( 0 ), _freeIt( false ) {
-            _setData( reinterpret_cast< MsgData* >( data ), freeIt );
+            _setData( static_cast<char *>(data), freeIt );
         };
         Message(Message& r) : _buf( 0 ), _data( 0 ), _freeIt( false ) {
             *this = r;
@@ -180,13 +129,13 @@ namespace mongo {
 
         SockAddr _from;
 
-        MsgData *header() const {
+        MsgData<>::Pointer header() const {
             verify( !empty() );
-            return _buf ? _buf : reinterpret_cast< MsgData* > ( _data[ 0 ].first );
+            return _buf ? _buf : ( _data[ 0 ].first );
         }
         int operation() const { return header()->operation(); }
 
-        MsgData *singleData() const {
+        MsgData<>::Pointer singleData() const {
             massert( 13273, "single data buffer expected", _buf );
             return header();
         }
@@ -196,7 +145,7 @@ namespace mongo {
         int size() const {
             int res = 0;
             if ( _buf ) {
-                res =  _buf->len;
+                res =  _buf->len();
             }
             else {
                 for (MsgVec::const_iterator it = _data.begin(); it != _data.end(); ++it) {
@@ -206,7 +155,7 @@ namespace mongo {
             return res;
         }
 
-        int dataSize() const { return size() - sizeof(MSGHEADER); }
+        int dataSize() const { return size() - MSGHEADER<>::_size; }
 
         // concat multiple buffers - noop if <2 buffers already, otherwise can be expensive copy
         // can get rid of this if we make response handling smarter
@@ -229,7 +178,7 @@ namespace mongo {
                 p += i->second;
             }
             reset();
-            _setData( (MsgData*)buf, true );
+            _setData( buf, true );
         }
 
         // vector swap() so this is fast
@@ -249,7 +198,7 @@ namespace mongo {
         void reset() {
             if ( _freeIt ) {
                 if ( _buf ) {
-                    free( _buf );
+                    free( _buf.ptr() );
                 }
                 for (std::vector< std::pair< char *, int > >::const_iterator i = _data.begin();
                      i != _data.end(); ++i) {
@@ -268,22 +217,22 @@ namespace mongo {
                 return;
             }
             if ( empty() ) {
-                MsgData *md = (MsgData*)d;
-                md->len = size; // can be updated later if more buffers added
-                _setData( md, true );
+                MsgData<>::Reference md = d;
+                md.len() = size; // can be updated later if more buffers added
+                _setData( md.ptr(), true );
                 return;
             }
             verify( _freeIt );
             if ( _buf ) {
-                _data.push_back(std::make_pair((char*)_buf, _buf->len));
+                _data.push_back(std::make_pair(_buf.ptr(), _buf->len()));
                 _buf = 0;
             }
             _data.push_back(std::make_pair(d, size));
-            header()->len += size;
+            header()->len() += size;
         }
 
         // use to set first buffer if empty
-        void setData(MsgData *d, bool freeIt) {
+        void setData(char *d, bool freeIt) {
             verify( empty() );
             _setData( d, freeIt );
         }
@@ -292,12 +241,12 @@ namespace mongo {
         }
         void setData(int operation, const char *msgdata, size_t len) {
             verify( empty() );
-            size_t dataLen = len + sizeof(MsgData) - 4;
-            MsgData *d = (MsgData *) malloc(dataLen);
-            memcpy(d->_data, msgdata, len);
-            d->len = fixEndian(dataLen);
+            size_t dataLen = len + MsgData<>::_size - 4;
+            MsgData<>::Pointer d(static_cast<char *>(malloc(dataLen)));
+            memcpy(d->_data().ptr(), msgdata, len);
+            d->len() = dataLen;
             d->setOperation(operation);
-            _setData( d, true );
+            _setData( d.ptr(), true );
         }
 
         bool doIFreeIt() {
@@ -309,12 +258,12 @@ namespace mongo {
         std::string toString() const;
 
     private:
-        void _setData( MsgData *d, bool freeIt ) {
+        void _setData( MsgData<>::Pointer d, bool freeIt ) {
             _freeIt = freeIt;
             _buf = d;
         }
         // if just one buffer, keep it in _buf, otherwise keep a sequence of buffers in _data
-        MsgData * _buf;
+        MsgData<>::Pointer _buf;
         // byte buffer(s) - the first must contain at least a full MsgData unless using _buf for storage instead
         typedef std::vector< std::pair< char*, int > > MsgVec;
         MsgVec _data;

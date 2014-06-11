@@ -44,7 +44,7 @@ namespace mongo {
     /**
      * Called from the getMore entry point in ops/query.cpp.
      */
-    QueryResult* newGetMore(OperationContext* txn,
+    QueryResult<>::Pointer newGetMore(OperationContext* txn,
                             const char* ns,
                             int ntoreturn,
                             long long cursorid,

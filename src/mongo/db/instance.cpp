@@ -94,8 +94,8 @@
 namespace mongo {
     
     // for diaglog
-    inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop((char *) m.singleData(), m.header()->len); }
-    inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop((char *) m.singleData(), m.header()->len); }
+    inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop( m.singleData().ptr(), m.header()->len()); }
+    inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop( m.singleData().ptr(), m.header()->len()); }
 
     void receivedKillCursors(OperationContext* txn, Message& m);
     void receivedUpdate(OperationContext* txn, Message& m, CurOp& op);
@@ -235,7 +235,7 @@ namespace mongo {
 
     static bool receivedQuery(OperationContext* txn, Client& c, DbResponse& dbresponse, Message& m ) {
         bool ok = true;
-        MSGID responseTo = m.header()->id;
+        MSGID responseTo = m.header()->id();
 
         DbMessage d(m);
         QueryMessage q(d);
@@ -292,22 +292,22 @@ namespace mongo {
             }
 
             BufBuilder b;
-            b.skip(sizeof(QueryResult));
+            b.skip(QueryResult<>::_size);
             b.appendBuf((void*) errObj.objdata(), errObj.objsize());
 
             // todo: call replyToQuery() from here instead of this!!! see dbmessage.h
-            QueryResult * msgdata = (QueryResult *) b.buf();
+            QueryResult<>::Pointer msgdata(b.buf());
             b.decouple();
-            QueryResult *qr = msgdata;
+            QueryResult<>::Pointer qr(msgdata);
             qr->_resultFlags() = ResultFlag_ErrSet;
             if( scex ) qr->_resultFlags() |= ResultFlag_ShardConfigStale;
-            qr->len = b.len();
+            qr->len() = b.len();
             qr->setOperation(opReply);
-            qr->cursorId = 0;
-            qr->startingFrom = 0;
-            qr->nReturned = 1;
+            qr->cursorId() = 0;
+            qr->startingFrom() = 0;
+            qr->nReturned() = 1;
             resp.reset( new Message() );
-            resp->setData( msgdata, true );
+            resp->setData( msgdata.ptr(), true );
 
         }
 
@@ -338,7 +338,8 @@ namespace mongo {
         // before we lock...
         int op = m.operation();
         bool isCommand = false;
-        const char *ns = m.singleData()->_data + 4;
+
+        const char *ns = m.singleData()->_data().ptr() + 4;
 
         Client& c = cc();
         if (!c.isGod()) {
@@ -434,7 +435,7 @@ namespace mongo {
         }
         else if ( op == dbMsg ) {
             // deprecated - replaced by commands
-            char *p = m.singleData()->_data;
+            char *p = m.singleData()->_data().ptr();
             int len = strlen(p);
             if ( len > 400 )
                 log() << curTimeMillis64() % 10000 <<
@@ -447,7 +448,7 @@ namespace mongo {
                 resp->setData( opReply , "i am fine - dbMsg deprecated");
 
             dbresponse.response = resp;
-            dbresponse.responseTo = m.header()->id;
+            dbresponse.responseTo = m.header()->id();
         }
         else {
             try {
@@ -520,7 +521,7 @@ namespace mongo {
     } /* assembleResponse() */
 
     void receivedKillCursors(OperationContext* txn, Message& m) {
-        int *x = (int *) m.singleData()->_data;
+        encoded_value::Pointer<int> x(m.singleData()->_data().ptr());
         x++; // reserved
         int n = *x++;
 
@@ -533,7 +534,7 @@ namespace mongo {
             verify( n < 30000 );
         }
 
-        int found = CollectionCursorCache::eraseCursorGlobalIfAuthorized(txn, n, (long long *) x);
+        int found = CollectionCursorCache::eraseCursorGlobalIfAuthorized(txn, n, encoded_value::Pointer<long long>(x.ptr()));
 
         if ( logger::globalLogDomain()->shouldLog(logger::LogSeverity::Debug(1)) || found != n ) {
             LOG( found == n ? 1 : 0 ) << "killcursors: found " << found << " of " << n << endl;
@@ -656,8 +657,6 @@ namespace mongo {
         op.debug().ndeleted = n;
     }
 
-    QueryResult* emptyMoreResult(long long);
-
     bool receivedGetMore(OperationContext* txn, DbResponse& dbresponse, Message& m, CurOp& curop ) {
         bool ok = true;
 
@@ -675,7 +674,7 @@ namespace mongo {
         scoped_ptr<Timer> timer;
         int pass = 0;
         bool exhaust = false;
-        QueryResult* msgdata = 0;
+        QueryResult<>::Pointer msgdata(0);
         OpTime last;
         while( 1 ) {
             bool isCursorAuthorized = false;
@@ -723,7 +722,7 @@ namespace mongo {
                 ok = false;
                 break;
             }
-            
+
             if (msgdata == 0) {
                 // this should only happen with QueryOption_AwaitData
                 exhaust = false;
@@ -767,12 +766,12 @@ namespace mongo {
         }
 
         Message *resp = new Message();
-        resp->setData(msgdata, true);
+        resp->setData(msgdata.ptr(), true);
         curop.debug().responseLength = resp->header()->dataLen();
-        curop.debug().nreturned = msgdata->nReturned;
+        curop.debug().nreturned = msgdata->nReturned();
 
         dbresponse.response = resp;
-        dbresponse.responseTo = m.header()->id;
+        dbresponse.responseTo = m.header()->id();
         
         if( exhaust ) {
             curop.debug().exhaust = true;

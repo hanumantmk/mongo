@@ -16,6 +16,15 @@ Import("v8suffix")
 Import("enforce_glibc")
 Import("darwin windows solaris linux nix")
 
+encoded_value_headers = [
+    'util/net/encoded_value_msgheader',
+    'util/net/encoded_value_msgdata',
+    'db/encoded_value_query_result'
+]
+
+for evh in encoded_value_headers:
+    env.Command(evh + ".h", [evh + ".py", "#/src/third_party/encoded_value/"], 'PYTHONPATH=' + Dir('#/src/third_party/encoded_value').abspath + ' $PYTHON $SOURCE > $TARGET')
+
 env.SConscript(['base/SConscript',
                 'db/auth/SConscript',
                 'db/catalog/SConscript',

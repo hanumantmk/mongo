@@ -90,30 +90,7 @@ namespace mongo {
    Note that the update field layout is very similar layout to Query.
 */
 
-
-#pragma pack(1)
-    struct QueryResult : public MsgData {
-        long long cursorId;
-        int startingFrom;
-        int nReturned;
-        const char *data() {
-            return (char *) (((int *)&nReturned)+1);
-        }
-        int resultFlags() {
-            return dataAsInt();
-        }
-        int& _resultFlags() {
-            return dataAsInt();
-        }
-        void setResultFlagsToOk() {
-            _resultFlags() = ResultFlag_AwaitCapable;
-        }
-        void initializeResultFlags() {
-            _resultFlags() = 0;   
-        }
-    };
-
-#pragma pack()
+#include "mongo/db/encoded_value_query_result.h"
 
     /* For the database/server protocol, these objects and functions encapsulate
        the various messages transmitted over the connection.
@@ -122,11 +99,11 @@ namespace mongo {
     */
     class DbMessage {
     public:
-        DbMessage(const Message& _m) : m(_m) , mark(0) {
+        DbMessage(const Message& _m) : m(_m), reserved(0), mark(0) {
             // for received messages, Message has only one buffer
-            theEnd = _m.singleData()->_data + _m.header()->dataLen();
-            char *r = _m.singleData()->_data;
-            reserved = (int *) r;
+            theEnd = _m.singleData()->_data().ptr() + _m.header()->dataLen();
+            char *r = _m.singleData()->_data().ptr();
+            reserved = r;
             data = r + 4;
             nextjsobj = data;
         }
@@ -136,7 +113,8 @@ namespace mongo {
          * 0: InsertOption_ContinueOnError
          * 1: fromWriteback
          */
-        int& reservedField() { return *reserved; }
+        encoded_value::Reference<int>
+        reservedField() { return reserved.ptr(); }
 
         const char * getns() const {
             return data;
@@ -147,7 +125,7 @@ namespace mongo {
         }
 
         int getInt( int num ) const {
-            const int * foo = (const int*)afterNS();
+            encoded_value::CPointer<int> foo(afterNS());
             return foo[num];
         }
 
@@ -161,26 +139,25 @@ namespace mongo {
         long long getInt64( int offsetBytes ) const {
             const char * x = afterNS();
             x += offsetBytes;
-            const long long * ll = (const long long*)x;
-            return ll[0];
+            return encoded_value::CReference<long long>(x);
         }
 
         void resetPull() { nextjsobj = data; }
         int pullInt() const { return pullInt(); }
-        int& pullInt() {
+        encoded_value::Reference<int> pullInt() {
             if ( nextjsobj == data )
                 nextjsobj += strlen(data) + 1; // skip namespace
-            int& i = *((int *)nextjsobj);
+            encoded_value::Reference<int> i(const_cast<char *>(nextjsobj));
             nextjsobj += 4;
             return i;
         }
         long long pullInt64() const {
             return pullInt64();
         }
-        long long &pullInt64() {
+        encoded_value::Reference<long long> pullInt64() {
             if ( nextjsobj == data )
                 nextjsobj += strlen(data) + 1; // skip namespace
-            long long &i = *((long long *)nextjsobj);
+            encoded_value::Reference<long long> i(const_cast<char *>(nextjsobj));
             nextjsobj += 8;
             return i;
         }
@@ -190,10 +167,10 @@ namespace mongo {
         }
 
         void getQueryStuff(const char *&query, int& ntoreturn) {
-            int *i = (int *) (data + strlen(data) + 1);
+            encoded_value::CPointer<int> i(data + strlen(data) + 1);
             ntoreturn = *i;
             i++;
-            query = (const char *) i;
+            query = i.ptr();
         }
 
         /* for insert and update msgs */
@@ -244,7 +221,7 @@ namespace mongo {
 
     private:
         const Message& m;
-        int* reserved;
+        encoded_value::Pointer<int> reserved;
         const char *data;
         const char *nextjsobj;
         const char *theEnd;

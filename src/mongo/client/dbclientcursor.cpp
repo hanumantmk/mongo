@@ -193,7 +193,7 @@ namespace mongo {
 
     void DBClientCursor::dataReceived( bool& retry, string& host ) {
 
-        QueryResult *qr = (QueryResult *) batch.m->singleData();
+        QueryResult<>::Pointer qr(batch.m->singleData().ptr());
         resultFlags = qr->resultFlags();
 
         if ( qr->resultFlags() & ResultFlag_ErrSet ) {
@@ -202,7 +202,7 @@ namespace mongo {
 
         if ( qr->resultFlags() & ResultFlag_CursorNotFound ) {
             // cursor id no longer valid at the server.
-            verify( qr->cursorId == 0 );
+            verify( qr->cursorId() == 0 );
             cursorId = 0; // 0 indicates no longer valid (dead)
             if ( ! ( opts & QueryOption_CursorTailable ) )
                 throw UserException( 13127 , "getMore: cursor didn't exist on server, possible restart or timeout?" );
@@ -211,10 +211,10 @@ namespace mongo {
         if ( cursorId == 0 || ! ( opts & QueryOption_CursorTailable ) ) {
             // only set initially: we don't want to kill it on end of data
             // if it's a tailable cursor
-            cursorId = qr->cursorId;
+            cursorId = qr->cursorId();
         }
 
-        batch.nReturned = qr->nReturned;
+        batch.nReturned = qr->nReturned();
         batch.pos = 0;
         batch.data = qr->data();
 
