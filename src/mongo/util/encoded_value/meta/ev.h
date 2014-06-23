@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 10gen Inc.
+ *    Copyright (C) 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,38 +28,27 @@
 
 #pragma once
 
-#include <string>
+/* EV provides access to encoded_value generated classes as Pointers.  Because
+ * it doesn't implement references, it only really needs size.
+ *
+ * Template params are as follows:
+ *
+ * T - The type to return
+ *
+ * */
 
-#include "mongo/db/clientcursor.h"
-#include "mongo/db/curop.h"
-#include "mongo/db/dbmessage.h"
-#include "mongo/db/query/canonical_query.h"
-#include "mongo/db/query/runner.h"
-#include "mongo/util/net/message.h"
+#include <cstring>
 
 namespace mongo {
+namespace encoded_value {
+namespace Meta {
 
-    class OperationContext;
+    template <typename T>
+    class EV {
+    public:
+        static const std::size_t size = T::size;
+    };
 
-    /**
-     * Called from the getMore entry point in ops/query.cpp.
-     */
-    QueryResult::Pointer newGetMore(OperationContext* txn,
-                            const char* ns,
-                            int ntoreturn,
-                            long long cursorid,
-                            CurOp& curop,
-                            int pass,
-                            bool& exhaust,
-                            bool* isCursorAuthorized);
-
-    /**
-     * Run the query 'q' and place the result in 'result'.
-     */
-    std::string newRunQuery(OperationContext* txn,
-                            Message& m,
-                            QueryMessage& q,
-                            CurOp& curop,
-                            Message &result);
-
-}  // namespace mongo
+} // namespace Meta
+} // namespace encoded_value
+} // namespace mongo

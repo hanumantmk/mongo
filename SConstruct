@@ -415,7 +415,7 @@ env = Environment( BUILD_DIR=variantDir,
                    PYTHON=utils.find_python(),
                    SERVER_ARCHIVE='${SERVER_DIST_BASENAME}${DIST_ARCHIVE_SUFFIX}',
                    TARGET_ARCH=msarch ,
-                   tools=["default", "gch", "jsheader", "mergelib", "unittest"],
+                   tools=["default", "encoded_value", "gch", "jsheader", "mergelib", "unittest"],
                    UNITTEST_ALIAS='unittests',
                    UNITTEST_LIST='#build/unittests.txt',
                    PYSYSPLATFORM=os.sys.platform,
@@ -881,8 +881,6 @@ if not use_system_version_of_library("stemmer"):
 
 if not use_system_version_of_library("snappy"):
     env.Prepend(CPPPATH=['$BUILD_DIR/third_party/snappy'])
-
-env.Prepend(CPPPATH=['#/src/third_party/encoded_value'])
 
 env.Append( CPPPATH=['$EXTRACPPPATH'],
             LIBPATH=['$EXTRALIBPATH'] )

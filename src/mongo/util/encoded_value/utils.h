@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 10gen Inc.
+ *    Copyright (C) 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,38 +28,15 @@
 
 #pragma once
 
-#include <string>
-
-#include "mongo/db/clientcursor.h"
-#include "mongo/db/curop.h"
-#include "mongo/db/dbmessage.h"
-#include "mongo/db/query/canonical_query.h"
-#include "mongo/db/query/runner.h"
-#include "mongo/util/net/message.h"
-
 namespace mongo {
+namespace encoded_value {
 
-    class OperationContext;
+    /* We need this for computing union sizes at compile time */
+    template <int A, int B>
+    class _max {
+    public:
+        static const int result = A > B ? A : B;
+    };
 
-    /**
-     * Called from the getMore entry point in ops/query.cpp.
-     */
-    QueryResult::Pointer newGetMore(OperationContext* txn,
-                            const char* ns,
-                            int ntoreturn,
-                            long long cursorid,
-                            CurOp& curop,
-                            int pass,
-                            bool& exhaust,
-                            bool* isCursorAuthorized);
-
-    /**
-     * Run the query 'q' and place the result in 'result'.
-     */
-    std::string newRunQuery(OperationContext* txn,
-                            Message& m,
-                            QueryMessage& q,
-                            CurOp& curop,
-                            Message &result);
-
-}  // namespace mongo
+} // namespace encoded_value
+} // namespace mongo

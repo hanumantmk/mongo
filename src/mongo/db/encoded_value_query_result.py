@@ -1,6 +1,6 @@
 from encoded_value import *
 
-print(CLASS("QueryResult", [
+print(CLASS("_QueryResult", [
     FIELD("long long", "cursorId"),
     FIELD("int", "startingFrom"),
     FIELD("int", "nReturned"),
@@ -24,4 +24,6 @@ print(CLASS("QueryResult", [
             _resultFlags() = 0;
         }
     ''')
-], "MsgData").cpp());
+], "_MsgData").cpp());
+
+print("typedef _QueryResult<> QueryResult;\n");

@@ -8,6 +8,8 @@ Import("env")
 # get resolved.
 #
 
+env.EncodedValue('encoded_value_query_result.h')
+
 env.Library(
     target= 'common',
     source= [

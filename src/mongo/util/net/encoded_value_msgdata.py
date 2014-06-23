@@ -1,6 +1,6 @@
 from encoded_value import *
 
-print(CLASS("MsgData", [
+print(CLASS("_MsgData", [
     FIELD("int", "len"),
     FIELD("MSGID", "id"),
     FIELD("MSGID", "responseTo"),
@@ -15,7 +15,7 @@ print(CLASS("MsgData", [
     }
 
     int dataLen() const {
-        return len() - (MsgData<>::_size - 4);
+        return len() - (_MsgData<>::size - 4);
     }
 
     long long getCursor() const {
@@ -47,3 +47,5 @@ print(CLASS("MsgData", [
 
     ''')
 ]).cpp());
+
+print("typedef _MsgData<> MsgData;\n");

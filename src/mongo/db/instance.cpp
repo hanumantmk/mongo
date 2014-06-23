@@ -292,13 +292,13 @@ namespace mongo {
             }
 
             BufBuilder b;
-            b.skip(QueryResult<>::_size);
+            b.skip(QueryResult::size);
             b.appendBuf((void*) errObj.objdata(), errObj.objsize());
 
             // todo: call replyToQuery() from here instead of this!!! see dbmessage.h
-            QueryResult<>::Pointer msgdata(b.buf());
+            QueryResult::Pointer msgdata(b.buf());
             b.decouple();
-            QueryResult<>::Pointer qr(msgdata);
+            QueryResult::Pointer qr(msgdata);
             qr->_resultFlags() = ResultFlag_ErrSet;
             if( scex ) qr->_resultFlags() |= ResultFlag_ShardConfigStale;
             qr->len() = b.len();
@@ -338,7 +338,6 @@ namespace mongo {
         // before we lock...
         int op = m.operation();
         bool isCommand = false;
-
         const char *ns = m.singleData()->_data().ptr() + 4;
 
         Client& c = cc();
@@ -674,7 +673,7 @@ namespace mongo {
         scoped_ptr<Timer> timer;
         int pass = 0;
         bool exhaust = false;
-        QueryResult<>::Pointer msgdata(0);
+        QueryResult::Pointer msgdata(0);
         OpTime last;
         while( 1 ) {
             bool isCursorAuthorized = false;
@@ -722,7 +721,6 @@ namespace mongo {
                 ok = false;
                 break;
             }
-
             if (msgdata == 0) {
                 // this should only happen with QueryOption_AwaitData
                 exhaust = false;

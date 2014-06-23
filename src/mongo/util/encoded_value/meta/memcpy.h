@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 10gen Inc.
+ *    Copyright (C) 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,38 +28,43 @@
 
 #pragma once
 
-#include <string>
+/* Memcpy provides safe access to values by memcpy'ing them
+ *
+ * Template params are as follows:
+ *
+ * T - The type to return
+ *
+ * ce - endian conversion
+ *
+ * */
 
-#include "mongo/db/clientcursor.h"
-#include "mongo/db/curop.h"
-#include "mongo/db/dbmessage.h"
-#include "mongo/db/query/canonical_query.h"
-#include "mongo/db/query/runner.h"
-#include "mongo/util/net/message.h"
+#include <cstring>
+
+#include "mongo/util/encoded_value/endian.h"
+#include "mongo/util/encoded_value/reference.h"
 
 namespace mongo {
+namespace encoded_value {
+namespace Meta {
 
-    class OperationContext;
+    template <typename T, enum endian::ConvertEndian ce>
+    class Memcpy {
+    public:
+        static const std::size_t size = sizeof(T);
+        typedef T type;
 
-    /**
-     * Called from the getMore entry point in ops/query.cpp.
-     */
-    QueryResult::Pointer newGetMore(OperationContext* txn,
-                            const char* ns,
-                            int ntoreturn,
-                            long long cursorid,
-                            CurOp& curop,
-                            int pass,
-                            bool& exhaust,
-                            bool* isCursorAuthorized);
+        static inline void writeTo(const T& t, void* ptr) {
+            T tmp = endian::swab<T, ce>(t);
+            std::memcpy(ptr, &tmp, size);
+        }
 
-    /**
-     * Run the query 'q' and place the result in 'result'.
-     */
-    std::string newRunQuery(OperationContext* txn,
-                            Message& m,
-                            QueryMessage& q,
-                            CurOp& curop,
-                            Message &result);
+        static inline void readFrom(T& t, const void* ptr) {
+            std::memcpy(&t, ptr, size);
 
-}  // namespace mongo
+            t = endian::swab<T, ce>(t);
+        }
+    };
+
+} // namespace Meta
+} // namespace encoded_value
+} // namespace mongo

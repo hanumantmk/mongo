@@ -146,7 +146,7 @@ namespace mongo {
         }
 
         // A query result is returned from commands
-        QueryResult<>::Pointer recvdQuery( toRecv->singleData().ptr() );
+        QueryResult::Pointer recvdQuery( toRecv->singleData().ptr() );
         *result = BSONObj( recvdQuery->data() );
     }
 

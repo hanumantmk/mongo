@@ -207,8 +207,8 @@ namespace mongo {
                 if ( dbresponse.response ) {
                     port->reply(m, *dbresponse.response, dbresponse.responseTo);
                     if( dbresponse.exhaustNS.size() > 0 ) {
-                        MsgData<>::Pointer header = dbresponse.response->header();
-                        QueryResult<>::Pointer qr(header.ptr());
+                        MsgData::Pointer header = dbresponse.response->header();
+                        QueryResult::Pointer qr(header.ptr());
                         long long cursorid = qr->cursorId();
                         if( cursorid ) {
                             verify( dbresponse.exhaustNS.size() && dbresponse.exhaustNS[0] );

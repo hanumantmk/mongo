@@ -141,7 +141,7 @@ namespace mongo {
      *        when this method returns an empty result, incrementing pass on each call.  
      *        Thus, pass == 0 indicates this is the first "attempt" before any 'awaiting'.
      */
-    QueryResult<>::Pointer newGetMore(OperationContext* txn,
+    QueryResult::Pointer newGetMore(OperationContext* txn,
                             const char* ns,
                             int ntoreturn,
                             long long cursorid,
@@ -176,9 +176,9 @@ namespace mongo {
         int numResults = 0;
         int startingResult = 0;
 
-        const int InitialBufSize = 512 + QueryResult<>::_size + MaxBytesToReturnToClientAtOnce;
+        const int InitialBufSize = 512 + QueryResult::size + MaxBytesToReturnToClientAtOnce;
         BufBuilder bb(InitialBufSize);
-        bb.skip(QueryResult<>::_size);
+        bb.skip(QueryResult::size);
 
         if (NULL == cc) {
             cursorid = 0;
@@ -325,7 +325,7 @@ namespace mongo {
             }
         }
 
-        QueryResult<>::Pointer qr(bb.buf());
+        QueryResult::Pointer qr(bb.buf());
         qr->len() = bb.len();
         qr->setOperation(opReply);
         qr->_resultFlags() = resultFlags;
@@ -432,7 +432,7 @@ namespace mongo {
             curop.markCommand();
 
             BufBuilder bb;
-            bb.skip(QueryResult<>::_size);
+            bb.skip(QueryResult::size);
 
             BSONObjBuilder cmdResBuf;
             if (!runCommands(txn, ns, q.query, curop, bb, cmdResBuf, false, q.queryOptions)) {
@@ -443,7 +443,7 @@ namespace mongo {
             // TODO: Does this get overwritten/do we really need to set this twice?
             curop.debug().query = q.query;
 
-            QueryResult<>::Pointer qr(bb.buf());
+            QueryResult::Pointer qr(bb.buf());
             bb.decouple();
             qr->setResultFlagsToOk();
             qr->len() = bb.len();
@@ -495,7 +495,7 @@ namespace mongo {
             }
 
             BufBuilder bb;
-            bb.skip(QueryResult<>::_size);
+            bb.skip(QueryResult::size);
 
             BSONObjBuilder explainBob;
             Status explainStatus = Explain::explain(collection, cq, options,
@@ -513,7 +513,7 @@ namespace mongo {
             curop.debug().query = q.query;
 
             // Set query result fields.
-            QueryResult<>::Pointer qr(bb.buf());
+            QueryResult::Pointer qr(bb.buf());
             bb.decouple();
             qr->setResultFlagsToOk();
             qr->len() = bb.len();
@@ -590,7 +590,7 @@ namespace mongo {
         // this buffer should contain either requested documents per query or
         // explain information, but not both
         BufBuilder bb(32768);
-        bb.skip(QueryResult<>::_size);
+        bb.skip(QueryResult::size);
 
         // How many results have we obtained from the runner?
         int numResults = 0;
@@ -830,7 +830,7 @@ namespace mongo {
         bb.decouple();
 
         // Fill out the output buffer's header.
-        QueryResult<>::Pointer qr(result.header().ptr());
+        QueryResult::Pointer qr(result.header().ptr());
         qr->cursorId() = ccId;
         curop.debug().cursorid = (0 == ccId ? -1 : ccId);
         qr->setResultFlagsToOk();

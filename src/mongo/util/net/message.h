@@ -36,7 +36,7 @@
 #include "mongo/util/goodies.h"
 #include "mongo/util/net/hostandport.h"
 #include "mongo/util/net/sock.h"
-#include "encoded_value.h"
+#include "mongo/util/encoded_value.h"
 
 namespace mongo {
 
@@ -129,13 +129,13 @@ namespace mongo {
 
         SockAddr _from;
 
-        MsgData<>::Pointer header() const {
+        MsgData::Pointer header() const {
             verify( !empty() );
             return _buf ? _buf : ( _data[ 0 ].first );
         }
         int operation() const { return header()->operation(); }
 
-        MsgData<>::Pointer singleData() const {
+        MsgData::Pointer singleData() const {
             massert( 13273, "single data buffer expected", _buf );
             return header();
         }
@@ -155,7 +155,7 @@ namespace mongo {
             return res;
         }
 
-        int dataSize() const { return size() - MSGHEADER<>::_size; }
+        int dataSize() const { return size() - MSGHEADER::size; }
 
         // concat multiple buffers - noop if <2 buffers already, otherwise can be expensive copy
         // can get rid of this if we make response handling smarter
@@ -217,7 +217,7 @@ namespace mongo {
                 return;
             }
             if ( empty() ) {
-                MsgData<>::Reference md = d;
+                MsgData::Reference md = d;
                 md.len() = size; // can be updated later if more buffers added
                 _setData( md.ptr(), true );
                 return;
@@ -241,8 +241,8 @@ namespace mongo {
         }
         void setData(int operation, const char *msgdata, size_t len) {
             verify( empty() );
-            size_t dataLen = len + MsgData<>::_size - 4;
-            MsgData<>::Pointer d(static_cast<char *>(malloc(dataLen)));
+            size_t dataLen = len + MsgData::size - 4;
+            MsgData::Pointer d(static_cast<char *>(malloc(dataLen)));
             memcpy(d->_data().ptr(), msgdata, len);
             d->len() = dataLen;
             d->setOperation(operation);
@@ -258,12 +258,12 @@ namespace mongo {
         std::string toString() const;
 
     private:
-        void _setData( MsgData<>::Pointer d, bool freeIt ) {
+        void _setData( MsgData::Pointer d, bool freeIt ) {
             _freeIt = freeIt;
             _buf = d;
         }
         // if just one buffer, keep it in _buf, otherwise keep a sequence of buffers in _data
-        MsgData<>::Pointer _buf;
+        MsgData::Pointer _buf;
         // byte buffer(s) - the first must contain at least a full MsgData unless using _buf for storage instead
         typedef std::vector< std::pair< char*, int > > MsgVec;
         MsgVec _data;

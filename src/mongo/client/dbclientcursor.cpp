@@ -193,7 +193,7 @@ namespace mongo {
 
     void DBClientCursor::dataReceived( bool& retry, string& host ) {
 
-        QueryResult<>::Pointer qr(batch.m->singleData().ptr());
+        QueryResult::Pointer qr(batch.m->singleData().ptr());
         resultFlags = qr->resultFlags();
 
         if ( qr->resultFlags() & ResultFlag_ErrSet ) {

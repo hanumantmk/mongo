@@ -73,9 +73,9 @@ namespace mongo {
                       long long cursorId 
                       ) {
         BufBuilder b(32768);
-        b.skip(QueryResult<>::_size);
+        b.skip(QueryResult::size);
         b.appendBuf(data, size);
-        QueryResult<>::Pointer qr( b.buf() );
+        QueryResult::Pointer qr( b.buf() );
         qr->_resultFlags() = queryResultFlags;
         qr->len() = b.len();
         qr->setOperation(opReply);
@@ -104,11 +104,11 @@ namespace mongo {
 
     void replyToQuery( int queryResultFlags, Message& response, const BSONObj& resultObj ) {
         BufBuilder bufBuilder;
-        bufBuilder.skip( QueryResult<>::_size );
+        bufBuilder.skip( QueryResult::size );
         bufBuilder.appendBuf( static_cast< void *>(
                 const_cast< char* >( resultObj.objdata() )), resultObj.objsize() );
 
-        QueryResult<>::Pointer queryResult( bufBuilder.buf() );
+        QueryResult::Pointer queryResult( bufBuilder.buf() );
         bufBuilder.decouple();
 
         queryResult->_resultFlags() = queryResultFlags;

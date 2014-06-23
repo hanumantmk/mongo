@@ -1,0 +1,6 @@
+# -*- mode: python -*-
+
+Import("env")
+
+env.EncodedValue("encoded_value_msgheader.h")
+env.EncodedValue("encoded_value_msgdata.h")

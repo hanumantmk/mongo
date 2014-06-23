@@ -82,7 +82,7 @@ namespace mongo {
         if( getsAResponse ){
             verify( dbresponse );
             BufBuilder b( 32768 );
-            b.skip( QueryResult<>::_size );
+            b.skip( QueryResult::size );
             {
                 BSONObjBuilder bob;
 
@@ -96,7 +96,7 @@ namespace mongo {
                 b.appendBuf( obj.objdata() , obj.objsize() );
             }
 
-            QueryResult<>::Pointer qr(b.buf());
+            QueryResult::Pointer qr(b.buf());
             qr->_resultFlags() = ResultFlag_ErrSet | ResultFlag_ShardConfigStale;
             qr->len() = b.len();
             qr->setOperation( opReply );

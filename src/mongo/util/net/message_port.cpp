@@ -171,8 +171,8 @@ namespace mongo {
         try {
 again:
             //mmm( log() << "*  recv() sock:" << this->sock << endl; )
-            MSGHEADER<>::Value header;
-            int headerLen = MSGHEADER<>::_size;
+            MSGHEADER::Value header;
+            int headerLen = MSGHEADER::size;
             psock->recv( header.ptr(), headerLen );
             int len = header.messageLength();
 
@@ -214,17 +214,17 @@ again:
                         sslGlobalParams.sslMode.load() != SSLGlobalParams::SSLMode_requireSSL);
 #endif // MONGO_SSL
             }
-            if ( static_cast<size_t>(len) < MSGHEADER<>::_size ||
+            if ( static_cast<size_t>(len) < MSGHEADER::size ||
                  static_cast<size_t>(len) > MaxMessageSizeBytes ) {
                 LOG(0) << "recv(): message len " << len << " is invalid. "
-                       << "Min " << MSGHEADER<>::_size << " Max: " << MaxMessageSizeBytes << endl;
+                       << "Min " << MSGHEADER::size << " Max: " << MaxMessageSizeBytes << endl;
                 return false;
             }
 
             psock->setHandshakeReceived();
             int z = (len+1023)&0xfffffc00;
             verify(z>=len);
-            MsgData<>::Pointer md( static_cast<char *>(malloc(z)) );
+            MsgData::Pointer md( static_cast<char *>(malloc(z)) );
             ScopeGuard guard = MakeGuard(free, md.ptr());
             verify(md.ptr());
 

@@ -1,3 +1,29 @@
+#    Copyright (C) 2014 MongoDB Inc.
+#
+#    This program is free software: you can redistribute it and/or  modify
+#    it under the terms of the GNU Affero General Public License, version 3,
+#    as published by the Free Software Foundation.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU Affero General Public License for more details.
+#
+#    You should have received a copy of the GNU Affero General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#    As a special exception, the copyright holders give permission to link the
+#    code of portions of this program with the OpenSSL library under certain
+#    conditions as described in each individual source file and distribute
+#    linked combinations including the program with the OpenSSL library. You
+#    must comply with the GNU Affero General Public License in all respects for
+#    all of the code used other than as permitted herein. If you modify file(s)
+#    with this exception, you may extend this exception to your version of the
+#    file(s), but you are not obligated to do so. If you do not wish to do so,
+#    delete this exception statement from your version. If you delete this
+#    exception statement from all source files in the program, then also delete
+#    it in the license file.
+
 """
 encoded_value provides a number of helper classes that help form a meta
 description of an encoded_value class.  When .cpp() is invoked on the object
@@ -8,7 +34,7 @@ The form of that class intended to be:
 
 template <convertEndian>
 class NAME {
-    static const int _size = TOTAL_SIZE;
+    static const int size = TOTAL_SIZE;
     typedef HIDEOUS_TEMPLATE_FOR_MUTABLE_POINTER Pointer;
     typedef HIDEOUS_TEMPLATE_FOR_CONST_POINTER CPointer;
 
@@ -87,12 +113,12 @@ class CLASS:
         out = []
 
         # classes inherit the global endian conversion default
-        out.extend(["template <enum encoded_value::endian::ConvertEndian convertEndian = encoded_value::endian::gDefault>\n"])
+        out.extend(["template <enum encoded_value::endian::ConvertEndian convertEndian = encoded_value::endian::kDefault>\n"])
         out.extend(["class ", self.name, " {\n"])
         out.extend(["public:\n\n"])
 
         if self.parent:
-            sizeof = [self.parent + "<>::_size"]
+            sizeof = [self.parent + "<>::size"]
         else:
             sizeof = ["0"]
 
@@ -102,7 +128,7 @@ class CLASS:
         # size is the sum of the fields and the parent class.  This assumes
         # contigous storage for a char[] class inheriting from a char[] class.
         # That's probably true, but we should also static_assert. TODO
-        out.extend(["    static const int _size = ", ' + '.join(sizeof), ";\n\n"])
+        out.extend(["    static const int size = ", ' + '.join(sizeof), ";\n\n"])
 
         out.extend(["    class Value;\n\n"])
         out.extend(["    class Reference;\n\n"])
@@ -129,7 +155,7 @@ class CLASS:
         out.extend(["};"])
 
         return ''.join(out)
-    
+
     def _cpp_helper(self, out, offset, sizeof, name):
         """ Generates the class subtypes (Value, Reference and CReference) """
         fields = self.fields
@@ -141,19 +167,19 @@ class CLASS:
 
         out.extend(["public:\n"])
 
-        out.extend(["    static const int _size = ", ' + '.join(sizeof), ";\n\n"])
+        out.extend(["    static const int size = ", ' + '.join(sizeof), ";\n\n"])
 
         # If we're a value type and have a parent, reserve some bytes for our
         # values on top of the char[] we're inheriting
         if self.parent and name == "Value":
             out.extend(["private:\n"])
-            out.extend(["    char _ignore[_size - ", self.parent, "<>::_size];\n"])
-        
+            out.extend(["    char _ignore[size - ", self.parent, "<>::size];\n"])
+
         # Otherwise an array or other pointer type
         if not self.parent:
             out.extend(["protected:\n"])
             if name == "Value":
-                out.extend(["    char storage[_size];\n"])
+                out.extend(["    char storage[size];\n"])
             elif name == "CReference":
                 out.extend(["    const char * storage;\n"])
             else:
@@ -164,7 +190,7 @@ class CLASS:
         # These are a bunch of assignment methods.  So only for mutables
         if name != "CReference":
             out.extend(["    void zero() {\n"])
-            out.extend(["        std::memset(this->storage, 0, _size);\n"])
+            out.extend(["        std::memset(this->storage, 0, size);\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    char * ptr() const {\n"])
@@ -172,17 +198,17 @@ class CLASS:
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "& operator=(const Reference& p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["        return *this;\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "& operator=(const CReference& p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["        return *this;\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "& operator=(const Value& p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["        return *this;\n"])
             out.extend(["    }\n\n"])
 
@@ -203,19 +229,19 @@ class CLASS:
 
         if name == "Value":
             out.extend(["    ", name, "(const char * in) {\n"])
-            out.extend(["        std::memcpy(this->storage, in, _size);\n"])
+            out.extend(["        std::memcpy(this->storage, in, size);\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "(const Reference & p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "(const CReference & p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["    }\n\n"])
 
             out.extend(["    ", name, "(const Value& p) {\n"])
-            out.extend(["        std::memcpy(this->storage, p.ptr(), _size);\n"])
+            out.extend(["        std::memcpy(this->storage, p.ptr(), size);\n"])
             out.extend(["    }\n\n"])
 
         elif name == "CReference":
@@ -423,9 +449,9 @@ class EVSTRUCT:
 
     def sizeof(self):
         if self.array is None:
-            return self.type + "<convertEndian>::_size"
+            return self.type + "<convertEndian>::size"
         else:
-            return "(" + self.type + "<convertEndian>::_size * " + str(self.array) + ")"
+            return "(" + self.type + "<convertEndian>::size * " + str(self.array) + ")"
 
     def cpp(self, offset_str, is_const):
         out = []

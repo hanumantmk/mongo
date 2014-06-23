@@ -50,13 +50,13 @@ namespace mongo {
             // This is tailored to act as a dummy response for write commands.
 
             BufBuilder bb;
-            bb.skip(QueryResult<>::_size);
+            bb.skip(QueryResult::size);
 
             BSONObj cmdResult(BSON("ok" << 1));
 
             bb.appendBuf(cmdResult.objdata(), cmdResult.objsize());
 
-            QueryResult<>::Pointer qr(bb.buf());
+            QueryResult::Pointer qr(bb.buf());
             bb.decouple();
             qr->setResultFlagsToOk();
             qr->len() = bb.len();

@@ -958,7 +958,7 @@ namespace {
             return false;
 
         if ( ns ) {
-            QueryResult<>::Pointer res(response.singleData().ptr());
+            QueryResult::Pointer res(response.singleData().ptr());
             if ( res->nReturned() == 1 ) {
                 BSONObj x(res->data() );
                 if ( str::contains( ns , "$cmd" ) ) {
