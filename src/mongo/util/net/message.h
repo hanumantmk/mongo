@@ -112,6 +112,53 @@ namespace mongo {
 
 #include "mongo/util/net/encoded_value_msgdata.h"
 
+    ENCODED_VALUE_WRAPPER_CLASS_BEGIN(MsgDataPrivate, MsgDataGenerated)
+
+        ENCODED_VALUE_CONST_METHODS_BEGIN
+        public:
+            int operation() const {
+                return this->_operation();
+            }
+
+            int dataLen() const {
+                return this->len() - (T::size - 4);
+            }
+
+            long long getCursor() const {
+                verify( this->responseTo() > 0 );
+                verify( this->_operation() == opReply );
+                return encoded_value::CReference<long long, convertEndian>(this->_data().ptr() + 4);
+            }
+
+            bool valid() const {
+                if ( this->len() <= 0 || this->len() > ( 4 * BSONObjMaxInternalSize ) )
+                    return false;
+                if ( this->_operation() < 0 || this->_operation() > 30000 )
+                    return false;
+                return true;
+            }
+        ENCODED_VALUE_CONST_METHODS_END
+
+        ENCODED_VALUE_REFERENCE_METHODS_BEGIN
+        public:
+            void setOperation(int o) {
+                this->_flags() = 0;
+                this->_version() = 0;
+                this->_operation() = o;
+            }
+
+            encoded_value::Reference<int, convertEndian> dataAsInt() {
+                return this->_data().ptr();
+            }
+        ENCODED_VALUE_REFERENCE_METHODS_END
+
+        ENCODED_VALUE_VALUE_METHODS_BEGIN
+        ENCODED_VALUE_VALUE_METHODS_END
+
+    ENCODED_VALUE_WRAPPER_CLASS_END
+
+    typedef MsgDataPrivate<> MsgData;
+
     class Message {
     public:
         // we assume here that a vector with initial size 0 does no allocation (0 is the default, but wanted to make it explicit).

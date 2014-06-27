@@ -1,6 +1,6 @@
 from encoded_value import *
 
-print(CLASS("_MsgData", [
+print(CLASS("MsgDataGenerated", [
     FIELD("int", "len"),
     FIELD("MSGID", "id"),
     FIELD("MSGID", "responseTo"),
@@ -8,44 +8,4 @@ print(CLASS("_MsgData", [
     FIELD("char", "_flags"),
     FIELD("char", "_version"),
     FIELD("char", "_data", 4),
-    EXTRA_CONST('''
-
-    int operation() const {
-        return _operation();
-    }
-
-    int dataLen() const {
-        return len() - (_MsgData<>::size - 4);
-    }
-
-    long long getCursor() const {
-        verify( responseTo() > 0 );
-        verify( _operation() == opReply );
-        return encoded_value::CReference<long long, convertEndian>(_data().ptr() + 4);
-    }
-
-    bool valid() const {
-        if ( len() <= 0 || len() > ( 4 * BSONObjMaxInternalSize ) )
-            return false;
-        if ( _operation() < 0 || _operation() > 30000 )
-            return false;
-        return true;
-    }
-
-    '''),
-    EXTRA_MUTABLE('''
-
-    void setOperation(int o) {
-        _flags() = 0;
-        _version() = 0;
-        _operation() = o;
-    }
-
-    encoded_value::Reference<int, convertEndian> dataAsInt() {
-        return _data().ptr();
-    }
-
-    ''')
 ]).cpp());
-
-print("typedef _MsgData<> MsgData;\n");

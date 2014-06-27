@@ -268,33 +268,6 @@ class CLASS:
 
         out.extend(["};\n\n"])
 
-class EXTRA_MUTABLE:
-    """ Inlines mutable methods if not const """
-
-    def __init__(self, body):
-        self.body = body
-
-    def sizeof(self):
-        return "0"
-
-    def cpp(self, offset_str, is_const):
-        if is_const:
-            return []
-        else:
-            return [self.body]
-
-class EXTRA_CONST:
-    """ Inlines const methods everywhere """
-
-    def __init__(self, body):
-        self.body = body
-
-    def sizeof(self):
-        return "0"
-
-    def cpp(self, offset_str, is_const):
-        return [self.body]
-
 class FIELD:
     """ Generators accessors for regular fields """
 

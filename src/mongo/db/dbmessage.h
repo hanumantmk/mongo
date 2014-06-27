@@ -92,6 +92,39 @@ namespace mongo {
 
 #include "mongo/db/encoded_value_query_result.h"
 
+    ENCODED_VALUE_WRAPPER_CLASS_BEGIN(QueryResultPrivate, QueryResultGenerated)
+
+        ENCODED_VALUE_CONST_METHODS_BEGIN
+        public:
+            const char *data() const {
+                return (&(this->nReturned()) + 1).ptr();
+            }
+
+            int resultFlags() const {
+                return encoded_value::CReference<int, convertEndian>(this->_data().ptr());
+            }
+        ENCODED_VALUE_CONST_METHODS_END
+
+        ENCODED_VALUE_REFERENCE_METHODS_BEGIN
+        public:
+            encoded_value::Reference<int, convertEndian> _resultFlags() {
+                return this->dataAsInt();
+            }
+            void setResultFlagsToOk() {
+                this->_resultFlags() = ResultFlag_AwaitCapable;
+            }
+            void initializeResultFlags() {
+                this->_resultFlags() = 0;
+            }
+        ENCODED_VALUE_REFERENCE_METHODS_END
+
+        ENCODED_VALUE_VALUE_METHODS_BEGIN
+        ENCODED_VALUE_VALUE_METHODS_END
+
+    ENCODED_VALUE_WRAPPER_CLASS_END
+
+    typedef QueryResultPrivate<> QueryResult;
+
     /* For the database/server protocol, these objects and functions encapsulate
        the various messages transmitted over the connection.
 

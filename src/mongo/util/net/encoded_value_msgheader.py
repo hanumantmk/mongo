@@ -1,10 +1,10 @@
 from encoded_value import *
 
-print(CLASS("_MSGHEADER", [
+print(CLASS("MSGHEADERGenerated", [
     FIELD("int", "messageLength"),
     FIELD("int", "requestID"),
     FIELD("int", "responseTo"),
     FIELD("int", "opCode"),
 ]).cpp());
 
-print("typedef _MSGHEADER<> MSGHEADER;\n");
+print("typedef MSGHEADERGenerated<> MSGHEADER;\n");
