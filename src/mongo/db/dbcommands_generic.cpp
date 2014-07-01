@@ -178,10 +178,10 @@ namespace mongo {
                 bb.done();
             }
             if ( cmdObj["oidReset"].trueValue() ) {
-                result.append( "oidMachineOld" , OID::getMachineId() );
-                OID::regenMachineId();
+                result.append( "oidMachineOld" , OIDPrivate<>::getMachineId() );
+                OIDPrivate<>::regenMachineId();
             }
-            result.append( "oidMachine" , OID::getMachineId() );
+            result.append( "oidMachine" , OIDPrivate<>::getMachineId() );
             return true;
         }
 

@@ -28,9 +28,12 @@
 
 #pragma once
 
-#define ENCODED_VALUE_CONST_METHODS_BEGIN \
+#define ENCODED_VALUE_CONST_METHODS_NO_CONSTRUCTORS_BEGIN \
     template <class T> \
-    class T_CReference : public T { \
+    class T_CReference : public T {
+
+#define ENCODED_VALUE_CONST_METHODS_BEGIN \
+    ENCODED_VALUE_CONST_METHODS_NO_CONSTRUCTORS_BEGIN \
     public: \
         T_CReference(const char * _ptr) { this->storage = _ptr; } \
         T_CReference() {} \
@@ -38,9 +41,12 @@
 
 #define ENCODED_VALUE_CONST_METHODS_END };
 
-#define ENCODED_VALUE_REFERENCE_METHODS_BEGIN \
+#define ENCODED_VALUE_REFERENCE_METHODS_NO_CONSTRUCTORS_BEGIN \
     template <class T> \
-    class T_Reference : public T_CReference<T> { \
+    class T_Reference : public T_CReference<T> {
+
+#define ENCODED_VALUE_REFERENCE_METHODS_BEGIN \
+    ENCODED_VALUE_REFERENCE_METHODS_NO_CONSTRUCTORS_BEGIN \
     public: \
         T_Reference(char * _ptr) { this->storage = _ptr; } \
         T_Reference() {} \
@@ -48,10 +54,14 @@
 
 #define ENCODED_VALUE_REFERENCE_METHODS_END };
 
-#define ENCODED_VALUE_VALUE_METHODS_BEGIN \
+#define ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN \
     template <class T> \
-    class T_Value : public T_Reference<T> { \
+    class T_Value : public T_Reference<T> {
+
+#define ENCODED_VALUE_VALUE_METHODS_BEGIN \
+    ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN \
     public: \
+        T_Value(const char * _ptr) { memcpy(this->storage, _ptr, this->size); } \
         T_Value() {} \
     private:
 
@@ -63,14 +73,17 @@ class name { \
 public:\
     typedef sc<convertEndian> superclass; \
     typedef name<convertEndian> thisclass; \
-
-#define ENCODED_VALUE_WRAPPER_CLASS_END \
-    static const int size = superclass::size; \
+    template <class T> class T_CReference; \
+    template <class T> class T_Reference; \
+    template <class T> class T_Value; \
     typedef T_CReference<typename superclass::CReference> CReference; \
     typedef T_Reference<typename superclass::Reference> Reference; \
     typedef T_Value<typename superclass::Value> Value; \
     typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<thisclass>, Reference, char * > Pointer; \
     typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<thisclass>, CReference, const char * > CPointer; \
+    static const int size = superclass::size; \
+
+#define ENCODED_VALUE_WRAPPER_CLASS_END \
 };
 
 #define ENCODED_VALUE_REFERENCE_METHOD(rval, name) \
@@ -89,6 +102,7 @@ public:\
     rval name<convertEndian>::template T_Value<T>
 
 #define ENCODED_VALUE_INSTANTIATE(name, ce) \
+    template class name<encoded_value::endian::ce>; \
     template class name<encoded_value::endian::ce>::template T_Reference<name<encoded_value::endian::ce>::superclass::Reference>; \
     template class name<encoded_value::endian::ce>::template T_CReference<name<encoded_value::endian::ce>::superclass::CReference>; \
     template class name<encoded_value::endian::ce>::template T_Value<name<encoded_value::endian::ce>::superclass::Value>;

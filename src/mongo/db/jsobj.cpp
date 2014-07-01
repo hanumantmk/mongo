@@ -1261,8 +1261,7 @@ namespace mongo {
             appendMaxKey( fieldName ); return;
         case jstOID: {
             OID o;
-            memset(&o, 0, sizeof(o));
-            appendOID( fieldName , &o);
+            appendOID( fieldName , o.ptr());
             return;
         }
         case Bool:
@@ -1279,7 +1278,6 @@ namespace mongo {
             appendRegex( fieldName , "" ); return;
         case DBRef: {
             OID o;
-            memset(&o, 0, sizeof(o));
             appendDBRef( fieldName , "" , o );
             return;
         }
@@ -1317,8 +1315,8 @@ namespace mongo {
             appendMaxKey( fieldName ); return;
         case jstOID: {
             OID o;
-            memset(&o, 0xFF, sizeof(o));
-            appendOID( fieldName , &o);
+            memset(o.ptr(), 0xFF, o.size);
+            appendOID( fieldName , o.ptr());
             return;
         }
         case Bool:

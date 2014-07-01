@@ -819,7 +819,7 @@ namespace {
 }  // namespace
 
     void AuthorizationManager::_updateCacheGeneration_inlock() {
-        _cacheGeneration = OID::gen();
+        _cacheGeneration = OIDPrivate<>::gen();
     }
 
     void AuthorizationManager::_invalidateRelevantCacheData(const char* op,

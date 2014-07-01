@@ -215,6 +215,11 @@ class CLASS:
             out.extend(["    Pointer operator &() {\n"])
             out.extend(["        return Pointer(this->storage);\n"])
             out.extend(["    }\n\n"])
+        else:
+            out.extend(["    const char * ptr() const {\n"])
+            out.extend(["        return this->storage;\n"])
+            out.extend(["    }\n\n"])
+
 
         # everybody gets a const pointer operator&()
         out.extend(["    CPointer operator &() const {\n"])
@@ -271,10 +276,15 @@ class CLASS:
 class FIELD:
     """ Generators accessors for regular fields """
 
-    def __init__(self, t, name, array = None):
+    def __init__(self, t, name, array = None, convertEndian = None):
         self.type = t
         self.name = name
         self.array = array
+
+        if (convertEndian is None):
+            self.convertEndian = "convertEndian"
+        else:
+            self.convertEndian = "encoded_value::endian::" + convertEndian
 
     def sizeof(self):
         if self.array is None:
@@ -284,26 +294,76 @@ class FIELD:
 
     def cpp(self, offset_str, is_const):
         out = []
+        convertEndian = self.convertEndian
 
         # generating array versus regular accessors, then only producing
         # non-const methods on non-const object types
         if self.array is None:
             if not is_const:
-                out.extend(["    encoded_value::Reference<", self.type, ", convertEndian> ", self.name, "() {\n"])
-                out.extend(["        return encoded_value::Reference<", self.type, ", convertEndian>(this->storage +", offset_str, ");\n"])
+                out.extend(["    encoded_value::Reference<", self.type, ", ", convertEndian, "> ", self.name, "() {\n"])
+                out.extend(["        return encoded_value::Reference<", self.type, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
                 out.extend(["    }\n\n"])
 
-            out.extend(["    encoded_value::CReference<", self.type, ", convertEndian> ", self.name, "() const {\n"])
-            out.extend(["        return encoded_value::CReference<", self.type, ", convertEndian>(this->storage +", offset_str, ");\n"])
+            out.extend(["    encoded_value::CReference<", self.type, ", ", convertEndian, "> ", self.name, "() const {\n"])
+            out.extend(["        return encoded_value::CReference<", self.type, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
             out.extend(["    }\n\n"])
         else:
             if not is_const:
-                out.extend(["    encoded_value::Pointer<", self.type, ", convertEndian> ", self.name, "() {\n"])
-                out.extend(["        return encoded_value::Pointer<", self.type, ", convertEndian>(this->storage +", offset_str, ");\n"])
+                out.extend(["    encoded_value::Pointer<", self.type, ", ", convertEndian, "> ", self.name, "() {\n"])
+                out.extend(["        return encoded_value::Pointer<", self.type, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
                 out.extend(["    }\n\n"])
 
-            out.extend(["    encoded_value::CPointer<", self.type, ", convertEndian> ", self.name, "() const {\n"])
-            out.extend(["        return encoded_value::CPointer<", self.type, ", convertEndian>(this->storage +", offset_str, ");\n"])
+            out.extend(["    encoded_value::CPointer<", self.type, ", ", convertEndian, "> ", self.name, "() const {\n"])
+            out.extend(["        return encoded_value::CPointer<", self.type, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
+            out.extend(["    }\n\n"])
+
+        return out
+
+class SHORTINTFIELD:
+    """ Generators accessors for short int fields """
+
+    def __init__(self, t, name, num_bytes, array = None, convertEndian = None):
+        self.type = t
+        self.name = name
+        self.num_bytes = str(num_bytes)
+        self.array = array
+
+        if (convertEndian is None):
+            self.convertEndian = "convertEndian"
+        else:
+            self.convertEndian = "encoded_value::endian::" + convertEndian
+
+
+    def sizeof(self):
+        if self.array is None:
+            return self.num_bytes
+        else:
+            return "(" + self.num_bytes + " * " + str(self.array) + ")"
+
+    def cpp(self, offset_str, is_const):
+        out = []
+        convertEndian = self.convertEndian
+        num_bytes = self.num_bytes
+
+        # generating array versus regular accessors, then only producing
+        # non-const methods on non-const object types
+        if self.array is None:
+            if not is_const:
+                out.extend(["    encoded_value::ShortInt::Reference<", self.type, ", ", num_bytes, ", ", convertEndian, "> ", self.name, "() {\n"])
+                out.extend(["        return encoded_value::ShortInt::Reference<", self.type, ", ", num_bytes, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
+                out.extend(["    }\n\n"])
+
+            out.extend(["    encoded_value::ShortInt::CReference<", self.type, ", ", num_bytes, ", ", convertEndian, "> ", self.name, "() const {\n"])
+            out.extend(["        return encoded_value::ShortInt::CReference<", self.type, ", ", num_bytes, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
+            out.extend(["    }\n\n"])
+        else:
+            if not is_const:
+                out.extend(["    encoded_value::ShortInt::Pointer<", self.type, ", ", num_bytes, ", ", convertEndian, "> ", self.name, "() {\n"])
+                out.extend(["        return encoded_value::ShortInt::Pointer<", self.type, ", ", num_bytes, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
+                out.extend(["    }\n\n"])
+
+            out.extend(["    encoded_value::ShortInt::CPointer<", self.type, ", ", num_bytes, ", ", convertEndian, "> ", self.name, "() const {\n"])
+            out.extend(["        return encoded_value::ShortInt::CPointer<", self.type, ", ", num_bytes, ", ", convertEndian, ">(this->storage +", offset_str, ");\n"])
             out.extend(["    }\n\n"])
 
         return out
@@ -324,9 +384,14 @@ class BITFIELD:
         recursively, but instead uses the data contained FIELD's hold
     """
 
-    def __init__(self, root, fields):
+    def __init__(self, root, fields, convertEndian = None):
         self.fields = fields
         self.root = root
+
+        if (convertEndian is None):
+            self.convertEndian = "convertEndian"
+        else:
+            self.convertEndian = "encoded_value::endian::" + convertEndian
 
     def sizeof(self):
         return "sizeof(" + self.root + ")"
@@ -339,7 +404,7 @@ class BITFIELD:
             if (isinstance(field, SKIP)):
                 offset += field.skip
             else:
-                bitfield_impl = field.type + ", " + self.root + ", " + str(offset) + ", " + str(field.array) + ", convertEndian"
+                bitfield_impl = field.type + ", " + self.root + ", " + str(offset) + ", " + str(field.array) + ", " + self.convertEndian
 
                 if not is_const:
                     out.extend(["    encoded_value::BitField::Reference<", bitfield_impl, "> ", field.name, "() {\n"])
@@ -415,39 +480,45 @@ class STRUCT:
 class EVSTRUCT:
     """ Provides access to embedded encoded_value objects """
 
-    def __init__(self, t, name, array = None):
+    def __init__(self, t, name, array = None, convertEndian = None):
         self.type = t
         self.name = name
         self.array = array
 
+        if (convertEndian is None):
+            self.convertEndian = "convertEndian"
+        else:
+            self.convertEndian = "encoded_value::endian::" + convertEndian
+
     def sizeof(self):
         if self.array is None:
-            return self.type + "<convertEndian>::size"
+            return self.type + "<" + self.convertEndian + ">::size"
         else:
-            return "(" + self.type + "<convertEndian>::size * " + str(self.array) + ")"
+            return "(" + self.type + "<" + self.convertEndian + ">::size * " + str(self.array) + ")"
 
     def cpp(self, offset_str, is_const):
         out = []
+        convertEndian = self.convertEndian
 
         # generating array versus regular accessors, then only producing
         # non-const methods on non-const object types
         if self.array is None:
             if not is_const:
-                out.extend(["    ", self.type, "<convertEndian>::Reference ", self.name, "() {\n"])
-                out.extend(["        return ", self.type, "<convertEndian>::Reference(this->storage +", offset_str, ");\n"])
+                out.extend(["    typename ", self.type, "<", convertEndian, ">::Reference ", self.name, "() {\n"])
+                out.extend(["        return typename ", self.type, "<", convertEndian, ">::Reference(this->storage +", offset_str, ");\n"])
                 out.extend(["    }\n\n"])
 
-            out.extend(["    ", self.type, "<convertEndian>::CReference ", self.name, "() const {\n"])
-            out.extend(["        return ", self.type, "<convertEndian>::CReference(this->storage +", offset_str, ");\n"])
+            out.extend(["    typename ", self.type, "<", convertEndian, ">::CReference ", self.name, "() const {\n"])
+            out.extend(["        return typename ", self.type, "<", convertEndian, ">::CReference(this->storage +", offset_str, ");\n"])
             out.extend(["    }\n\n"])
         else:
             if not is_const:
-                out.extend(["    ", self.type, "<convertEndian>::Pointer ", self.name, "() {\n"])
-                out.extend(["        return ", self.type, "<convertEndian>::Pointer(this->storage +", offset_str, ");\n"])
+                out.extend(["    typename ", self.type, "<", convertEndian, ">::Pointer ", self.name, "() {\n"])
+                out.extend(["        return typename ", self.type, "<", convertEndian, ">::Pointer(this->storage +", offset_str, ");\n"])
                 out.extend(["    }\n\n"])
 
-            out.extend(["    ", self.type, "<convertEndian>::CPointer ", self.name, "() const {\n"])
-            out.extend(["        return ", self.type, "<convertEndian>::CPointer(this->storage +", offset_str, ");\n"])
+            out.extend(["    typename ", self.type, "<", convertEndian, ">::CPointer ", self.name, "() const {\n"])
+            out.extend(["        return typename ", self.type, "<", convertEndian, ">::CPointer(this->storage +", offset_str, ");\n"])
             out.extend(["    }\n\n"])
 
         return out

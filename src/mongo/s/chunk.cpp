@@ -1633,7 +1633,7 @@ namespace mongo {
         cmdBuilder.append( "setShardVersion" , ns.c_str() );
         cmdBuilder.append( "configdb" , configServer.modelServer() );
         version.addToBSON( cmdBuilder );
-        cmdBuilder.appendOID( "serverID" , &serverID );
+        cmdBuilder.appendOID( "serverID" , serverID.ptr() );
         if ( authoritative )
             cmdBuilder.appendBool( "authoritative" , 1 );
 

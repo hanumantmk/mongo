@@ -976,7 +976,7 @@ namespace mongo {
             break;
 
         case DBRef:
-            buf.appendStruct(_storage.getDBRef()->oid);
+            buf.appendBuf(_storage.getDBRef()->oid.ptr(), OID::size);
             buf.appendStr(_storage.getDBRef()->ns, /*NUL byte*/ true);
             break;
 

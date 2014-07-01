@@ -1,0 +1,6 @@
+# -*- mode: python -*-
+
+Import("env")
+
+env.EncodedValue("encoded_value_machine_and_pid.h")
+env.EncodedValue("encoded_value_oid.h")

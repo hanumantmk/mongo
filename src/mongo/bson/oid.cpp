@@ -39,66 +39,72 @@
 
 #define verify MONGO_verify
 
-BOOST_STATIC_ASSERT( sizeof(mongo::OID) == mongo::OID::kOIDSize );
-BOOST_STATIC_ASSERT( sizeof(mongo::OID) == 12 );
+BOOST_STATIC_ASSERT( mongo::OIDPrivate<>::size == mongo::OIDPrivate<>::kOIDSize );
+BOOST_STATIC_ASSERT( mongo::OIDPrivate<>::size == 12 );
 
 namespace mongo {
 
-    void OID::hash_combine(size_t &seed) const {
-        boost::hash_combine(seed, x);
-        boost::hash_combine(seed, y);
-        boost::hash_combine(seed, z);
+    ENCODED_VALUE_CONST_METHOD(void, OIDPrivate)::hash_combine(size_t &seed) const {
+        boost::hash_combine(seed, this->x());
+        boost::hash_combine(seed, this->y());
+        boost::hash_combine(seed, this->z());
     }
 
     // machine # before folding in the process id
-    OID::MachineAndPid OID::ourMachine;
+    template<>
+    OIDPrivate<>::MachineAndPid::Value OIDPrivate<>::ourMachine;
 
     ostream& operator<<( ostream &s, const OID &o ) {
         s << o.str();
         return s;
     }
 
-    void OID::foldInPid(OID::MachineAndPid& x) {
+    template<>
+    template<class T>
+    void OIDPrivate<>::foldInPid(typename MachineAndPidPrivate<>::T_Reference<T>& x) {
         unsigned p = ProcessId::getCurrent().asUInt32();
-        x._pid ^= static_cast<unsigned short>(p);
+        x._pid() ^= static_cast<unsigned short>(p);
         // when the pid is greater than 16 bits, let the high bits modulate the machine id field.
-        unsigned short& rest = (unsigned short &) x._machineNumber[1];
-        rest ^= p >> 16;
+        x._machineNumber() ^= p >> 16;
     }
 
-    OID::MachineAndPid OID::genMachineAndPid() {
-        BOOST_STATIC_ASSERT( sizeof(mongo::OID::MachineAndPid) == 5 );
+    template<>
+    MachineAndPidPrivate<>::Value OIDPrivate<>::genMachineAndPid() {
+        BOOST_STATIC_ASSERT( mongo::OIDPrivate<>::MachineAndPid::size == 5 );
 
         // we only call this once per process
         scoped_ptr<SecureRandom> sr( SecureRandom::create() );
-        int64_t n = sr->nextInt64();
-        OID::MachineAndPid x = ourMachine = reinterpret_cast<OID::MachineAndPid&>(n);
+        int64_t _n;
+        encoded_value::Reference<int64_t, encoded_value::endian::Little> n(reinterpret_cast<char *>(&_n));
+        n = sr->nextInt64();
+        memcpy(ourMachine.ptr(), n.ptr(), ourMachine.size);
+        OIDPrivate<>::MachineAndPid::Value x = ourMachine;
+
         foldInPid(x);
         return x;
     }
 
     // after folding in the process id
-    OID::MachineAndPid OID::ourMachineAndPid = OID::genMachineAndPid();
+    template<>
+    OIDPrivate<>::MachineAndPid::Value OIDPrivate<>::ourMachineAndPid = OIDPrivate<>::genMachineAndPid();
 
-    void OID::regenMachineId() {
+    template<>
+    void OIDPrivate<>::regenMachineId() {
         ourMachineAndPid = genMachineAndPid();
     }
 
-    inline bool OID::MachineAndPid::operator!=(const OID::MachineAndPid& rhs) const {
-        return _pid != rhs._pid || _machineNumber != rhs._machineNumber;
+    ENCODED_VALUE_CONST_METHOD(bool, MachineAndPidPrivate)::operator!=(const MachineAndPidPrivate<convertEndian>::T_CReference<T>& rhs) const {
+        return this->_pid() != rhs._pid() || this->_machineNumber() != rhs._machineNumber();
     }
 
-    unsigned OID::getMachineId() {
-        unsigned char x[4];
-        x[0] = ourMachineAndPid._machineNumber[0];
-        x[1] = ourMachineAndPid._machineNumber[1];
-        x[2] = ourMachineAndPid._machineNumber[2];
-        x[3] = 0;
-        return (unsigned&) x[0];
+    template<>
+    unsigned OIDPrivate<>::getMachineId() {
+        return ourMachineAndPid._machineNumber();
     }
 
-    void OID::justForked() {
-        MachineAndPid x = ourMachine;
+    template<>
+    void OIDPrivate<>::justForked() {
+        MachineAndPid::Value x = ourMachine;
         // we let the random # for machine go into all 5 bytes of MachineAndPid, and then
         // xor in the pid into _pid.  this reduces the probability of collisions.
         foldInPid(x);
@@ -107,83 +113,63 @@ namespace mongo {
         ourMachineAndPid = x;
     }
 
-    void OID::init() {
+    ENCODED_VALUE_VALUE_METHOD(void, OIDPrivate)::init() {
         static AtomicUInt32 inc(
             static_cast<unsigned>(
                 scoped_ptr<SecureRandom>(SecureRandom::create())->nextInt64()));
 
         {
             unsigned t = (unsigned) time(0);
-            unsigned char *T = (unsigned char *) &t;
-            _time[0] = T[3]; // big endian order because we use memcmp() to compare OID's
-            _time[1] = T[2];
-            _time[2] = T[1];
-            _time[3] = T[0];
+            this->_time() = t;
         }
 
-        _machineAndPid = ourMachineAndPid;
+        this->_machineAndPid() = ourMachineAndPid.ptr();
 
         {
             int new_inc = inc.fetchAndAdd(1);
-            unsigned char *T = (unsigned char *) &new_inc;
-            _inc[0] = T[2];
-            _inc[1] = T[1];
-            _inc[2] = T[0];
+            this->_inc() = new_inc;
         }
     }
 
     static AtomicUInt64 _initSequential_sequence;
-    void OID::initSequential() {
+
+    ENCODED_VALUE_VALUE_METHOD(void, OIDPrivate)::initSequential() {
 
         {
             unsigned t = (unsigned) time(0);
-            unsigned char *T = (unsigned char *) &t;
-            _time[0] = T[3]; // big endian order because we use memcmp() to compare OID's
-            _time[1] = T[2];
-            _time[2] = T[1];
-            _time[3] = T[0];
+            this->_time() = t;
         }
         
         {
             unsigned long long nextNumber = _initSequential_sequence.fetchAndAdd(1);
             unsigned char* numberData = reinterpret_cast<unsigned char*>(&nextNumber);
             for ( int i=0; i<8; i++ ) {
-                data[4+i] = numberData[7-i];
+                this->data()[4+i] = numberData[7-i];
             }
         }
     }
 
-    void OID::init( const std::string& s ) {
+    ENCODED_VALUE_VALUE_METHOD(void, OIDPrivate)::init( const std::string& s ) {
         verify( s.size() == 24 );
         const char *p = s.c_str();
         for( size_t i = 0; i < kOIDSize; i++ ) {
-            data[i] = fromHex(p);
+            this->data()[i] = fromHex(p);
             p += 2;
         }
     }
 
-    void OID::init(Date_t date, bool max) {
+    ENCODED_VALUE_VALUE_METHOD(void, OIDPrivate)::init(Date_t date, bool max) {
         int time = (int) (date / 1000);
-        char* T = (char *) &time;
-        data[0] = T[3];
-        data[1] = T[2];
-        data[2] = T[1];
-        data[3] = T[0];
+        this->_time() = time;
 
         if (max)
-            *(long long*)(data + 4) = 0xFFFFFFFFFFFFFFFFll;
+            encoded_value::Reference<long long>(this->data() + 4) = 0xFFFFFFFFFFFFFFFFll;
         else
-            *(long long*)(data + 4) = 0x0000000000000000ll;
+            encoded_value::Reference<long long>(this->data() + 4) = 0x0000000000000000ll;
     }
 
-    time_t OID::asTimeT() {
-        int time;
-        char* T = (char *) &time;
-        T[0] = data[3];
-        T[1] = data[2];
-        T[2] = data[1];
-        T[3] = data[0];
-        return time;
+    ENCODED_VALUE_CONST_METHOD(time_t, OIDPrivate)::asTimeT() const {
+        return this->_time();
     }
 
     const string BSONObjBuilder::numStrs[] = {

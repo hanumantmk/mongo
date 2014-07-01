@@ -29,6 +29,7 @@
 #pragma once
 
 #include "mongo/util/encoded_value/meta/memcpy.h"
+#include "mongo/util/encoded_value/meta/shortint.h"
 #include "mongo/util/encoded_value/endian.h"
 #include "mongo/util/encoded_value/meta/bitfield.h"
 #include "mongo/util/encoded_value/pointer.h"
@@ -120,91 +121,181 @@ namespace encoded_value {
 
     namespace BitField {
 
-    template <
-        typename T, typename Base, int offset, int bits,
-        enum endian::ConvertEndian ce = endian::kDefault
-    >
-    class Pointer :
-        public Impl::Pointer<
-            Meta::BitField<T, Base, offset, bits, ce>,
-            Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, char*>,
-            char*
-        > {
-    public:
-        Pointer(char* in) :
-            Impl::Pointer<
+        template <
+            typename T, typename Base, int offset, int bits,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class Pointer :
+            public Impl::Pointer<
                 Meta::BitField<T, Base, offset, bits, ce>,
                 Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, char*>,
                 char*
-            >(in)
-        {}
-    };
+            > {
+        public:
+            Pointer(char* in) :
+                Impl::Pointer<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, char*>,
+                    char*
+                >(in)
+            {}
+        };
 
-    template <
-        typename T, typename Base, int offset, int bits,
-        enum endian::ConvertEndian ce = endian::kDefault
-    >
-    class CPointer :
-        public Impl::Pointer<
-            Meta::BitField<T, Base, offset, bits, ce>,
-            Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, const char*>,
-            const char*
-        > {
-    public:
-        CPointer(const char* in) :
-            Impl::Pointer<
+        template <
+            typename T, typename Base, int offset, int bits,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class CPointer :
+            public Impl::Pointer<
                 Meta::BitField<T, Base, offset, bits, ce>,
                 Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, const char*>,
                 const char*
-            >(in)
-        {}
-    };
-
-    template <
-        typename T, typename Base, int offset, int bits,
-        enum endian::ConvertEndian ce = endian::kDefault
-    >
-    class Reference :
-        public Impl::Reference<
-            Meta::BitField<T, Base, offset, bits, ce>,
-            char*
-        > {
-    public:
-        Reference(char* in) :
-            Impl::Reference<
-                Meta::BitField<T, Base, offset, bits, ce>,
-                char*
-            >(in)
-        {}
-
-        Reference& operator=(const T& t) {
-            Impl::Reference<
-                Meta::BitField<T, Base, offset, bits, ce>,
-                char*
-            >::operator=(t);
-
-            return *this;
+            > {
+        public:
+            CPointer(const char* in) :
+                Impl::Pointer<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, const char*>,
+                    const char*
+                >(in)
+            {}
         };
-    };
 
-    template <
-        typename T, typename Base, int offset, int bits,
-        enum endian::ConvertEndian ce = endian::kDefault
-    >
-    class CReference :
-        public Impl::Reference<
-            Meta::BitField<T, Base, offset, bits, ce>,
-            const char*
-        > {
-    public:
-        CReference(const char* in) :
-            Impl::Reference<
+        template <
+            typename T, typename Base, int offset, int bits,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class Reference :
+            public Impl::Reference<
+                Meta::BitField<T, Base, offset, bits, ce>,
+                char*
+            > {
+        public:
+            Reference(char* in) :
+                Impl::Reference<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    char*
+                >(in)
+            {}
+
+            Reference& operator=(const T& t) {
+                Impl::Reference<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    char*
+                >::operator=(t);
+
+                return *this;
+            };
+        };
+
+        template <
+            typename T, typename Base, int offset, int bits,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class CReference :
+            public Impl::Reference<
                 Meta::BitField<T, Base, offset, bits, ce>,
                 const char*
-            >(in)
-        {}
-    };
+            > {
+        public:
+            CReference(const char* in) :
+                Impl::Reference<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    const char*
+                >(in)
+            {}
+        };
 
-} // namespace BitField
+    } // namespace BitField
+
+    namespace ShortInt {
+
+        template <
+            typename T, int bytes,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class Pointer :
+            public Impl::Pointer<
+                Meta::ShortInt<T, bytes, ce>,
+                Impl::Reference<Meta::ShortInt<T, bytes, ce>, char*>,
+                char*
+            > {
+        public:
+            Pointer(char* in) :
+                Impl::Pointer<
+                    Meta::ShortInt<T, bytes, ce>,
+                    Impl::Reference<Meta::ShortInt<T, bytes, ce>, char*>,
+                    char*
+                >(in)
+            {}
+        };
+
+        template <
+            typename T, int bytes,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class CPointer :
+            public Impl::Pointer<
+                Meta::ShortInt<T, bytes, ce>,
+                Impl::Reference<Meta::ShortInt<T, bytes, ce>, const char*>,
+                const char*
+            > {
+        public:
+            CPointer(const char* in) :
+                Impl::Pointer<
+                    Meta::ShortInt<T, bytes, ce>,
+                    Impl::Reference<Meta::ShortInt<T, bytes, ce>, const char*>,
+                    const char*
+                >(in)
+            {}
+        };
+
+        template <
+            typename T, int bytes,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class Reference :
+            public Impl::Reference<
+                Meta::ShortInt<T, bytes, ce>,
+                char*
+            > {
+        public:
+            Reference(char* in) :
+                Impl::Reference<
+                    Meta::ShortInt<T, bytes, ce>,
+                    char*
+                >(in)
+            {}
+
+            Reference& operator=(const T& t) {
+                Impl::Reference<
+                    Meta::ShortInt<T, bytes, ce>,
+                    char*
+                >::operator=(t);
+
+                return *this;
+            };
+        };
+
+        template <
+            typename T, int bytes,
+            enum endian::ConvertEndian ce = endian::kDefault
+        >
+        class CReference :
+            public Impl::Reference<
+                Meta::ShortInt<T, bytes, ce>,
+                const char*
+            > {
+        public:
+            CReference(const char* in) :
+                Impl::Reference<
+                    Meta::ShortInt<T, bytes, ce>,
+                    const char*
+                >(in)
+            {}
+        };
+
+    } // namespace ShortInt
+
 } // namespace encoded_value
 } // namespace mongo

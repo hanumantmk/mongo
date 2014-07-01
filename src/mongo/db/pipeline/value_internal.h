@@ -91,8 +91,8 @@ namespace mongo {
         ValueStorage(BSONType t, const OID& o) {
             zero();
             type = t;
-            memcpy(&oid, &o, sizeof(OID));
-            BOOST_STATIC_ASSERT(sizeof(OID) == sizeof(oid));
+            memcpy(oid, o.ptr(), sizeof(oid));
+            BOOST_STATIC_ASSERT(OID::size == sizeof(oid));
         }
 
         ValueStorage(const ValueStorage& rhs) {

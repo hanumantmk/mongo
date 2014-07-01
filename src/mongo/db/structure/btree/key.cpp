@@ -279,7 +279,7 @@ namespace mongo {
                 break;
             case jstOID:
                 b.appendUChar(coid|bits);
-                b.appendBuf(&e.__oid(), sizeof(OID));
+                b.appendBuf(e.__oid().ptr(), OID::size);
                 break;
             case BinData:
                 {
@@ -399,7 +399,7 @@ namespace mongo {
                         break;
                     }
                 case coid:
-                    b.appendOID("", (OID *) p);
+                    b.appendOID("", (char *)p);
                     p += sizeof(OID);
                     break;
                 case cbindata:

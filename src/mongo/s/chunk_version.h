@@ -121,7 +121,7 @@ namespace mongo {
 
         // Incrementing an epoch creates a new, randomly generated identifier
         void incEpoch() {
-            _epoch = OID::gen();
+            _epoch = OIDPrivate<>::gen();
             _major = 0;
             _minor = 0;
         }

@@ -31,12 +31,31 @@
 
 #include <string>
 
+#include "mongo/util/encoded_value.h"
 #include "mongo/bson/util/misc.h"
 #include "mongo/util/hex.h"
 
 namespace mongo {
 
-#pragma pack(1)
+#include "mongo/bson/encoded_value_machine_and_pid.h"
+
+    ENCODED_VALUE_WRAPPER_CLASS_BEGIN(MachineAndPidPrivate, MachineAndPidGenerated)
+
+        ENCODED_VALUE_CONST_METHODS_BEGIN
+        public:
+            bool operator!=(const T_CReference& rhs) const;
+        ENCODED_VALUE_CONST_METHODS_END
+
+        ENCODED_VALUE_REFERENCE_METHODS_BEGIN
+        ENCODED_VALUE_REFERENCE_METHODS_END
+
+        ENCODED_VALUE_VALUE_METHODS_BEGIN
+        ENCODED_VALUE_VALUE_METHODS_END
+
+    ENCODED_VALUE_WRAPPER_CLASS_END
+
+#include "mongo/bson/encoded_value_oid.h"
+
     /** Object ID type.
         BSON objects typically have an _id field for the object id.  This field should be the first
         member of the object when present.  class OID is a special type that is a 12 byte id which
@@ -51,111 +70,125 @@ namespace mongo {
         be stored big endian unlike the rest of BSON. This is because they are compared byte-by-byte and we want to ensure
         a mostly increasing order.
     */
-    class OID {
-    public:
-        OID() : a(0), b(0) { }
+    ENCODED_VALUE_WRAPPER_CLASS_BEGIN(OIDPrivate, OIDGenerated)
 
         enum {
             kOIDSize = 12,
             kIncSize = 3
         };
 
-        /** init from a 24 char hex std::string */
-        explicit OID(const std::string &s) { init(s); }
+        typedef MachineAndPidPrivate<convertEndian> MachineAndPid;
 
-        /** init from a reference to a 12-byte array */
-        explicit OID(const unsigned char (&arr)[kOIDSize]) {
-            memcpy(data, arr, sizeof(arr));
-        }
+        friend class MachineAndPidPrivate<convertEndian>;
 
-        /** initialize to 'null' */
-        void clear() { a = 0; b = 0; }
 
-        const unsigned char *getData() const { return data; }
+        ENCODED_VALUE_CONST_METHODS_BEGIN
 
-        bool operator==(const OID& r) const { return a==r.a && b==r.b; }
-        bool operator!=(const OID& r) const { return a!=r.a || b!=r.b; }
-        int compare( const OID& other ) const { return memcmp( data , other.data , kOIDSize ); }
-        bool operator<( const OID& other ) const { return compare( other ) < 0; }
-        bool operator<=( const OID& other ) const { return compare( other ) <= 0; }
+        public:
+            const unsigned char *getData() const { return (const unsigned char *)this->data().ptr(); }
 
-        /** @return the object ID output as 24 hex digits */
-        std::string str() const { return toHexLower(data, kOIDSize); }
-        std::string toString() const { return str(); }
-        /** @return the random/sequential part of the object ID as 6 hex digits */
-        std::string toIncString() const { return toHexLower(_inc, kIncSize); }
+            bool operator==(const T_CReference& r) const { return this->a()==r.a() && this->b()==r.b(); }
+            bool operator!=(const T_CReference& r) const { return this->a()!=r.a() || this->b()!=r.b(); }
+            int compare( const T_CReference& other ) const { return memcmp( this->data().ptr() , other.data().ptr() , kOIDSize ); }
+            bool operator<( const T_CReference& other ) const { return this->compare( other ) < 0; }
+            bool operator<=( const T_CReference& other ) const { return this->compare( other ) <= 0; }
 
-        static OID gen() { OID o; o.init(); return o; }
+            /** @return the object ID output as 24 hex digits */
+            std::string str() const { return toHexLower(this->data().ptr(), kOIDSize); }
+            std::string toString() const { return this->str(); }
+            /** @return the random/sequential part of the object ID as 6 hex digits */
+            std::string toIncString() const { return toHexLower(this->_inc(), kIncSize); }
 
-        /** sets the contents to a new oid / randomized value */
-        void init();
+            /**
+             * this is not consistent
+             * do not store on disk
+             */
+            void hash_combine(std::size_t &seed) const;
 
-        /** sets the contents to a new oid
-         * guaranteed to be sequential
-         * NOT guaranteed to be globally unique
-         *     only unique for this process
-         * */
-        void initSequential();
+            time_t asTimeT() const;
+            Date_t asDateT() const { return this->asTimeT() * (long long)1000; }
 
-        /** init from a 24 char hex std::string */
-        void init( const std::string& s );
+            bool isSet() const { return this->a() || this->b(); }
 
-        /** Set to the min/max OID that could be generated at given timestamp. */
-        void init( Date_t date, bool max=false );
+        ENCODED_VALUE_CONST_METHODS_END
 
-        time_t asTimeT();
-        Date_t asDateT() { return asTimeT() * (long long)1000; }
+        ENCODED_VALUE_REFERENCE_METHODS_BEGIN
 
-        bool isSet() const { return a || b; }
+        public:
+            /** initialize to 'null' */
+            void clear() { this->a() = 0; this->b() = 0; }
 
-        /**
-         * this is not consistent
-         * do not store on disk
-         */
-        void hash_combine(size_t &seed) const;
 
-        /** call this after a fork to update the process id */
-        static void justForked();
+        ENCODED_VALUE_REFERENCE_METHODS_END
+
+        ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN
+        public:
+            T_Value() {
+                this->a() = 0;
+                this->b() = 0;
+            }
+
+            T_Value(const char * _ptr) {
+                memcpy(this->storage, _ptr, this->size);
+            }
+
+            T_Value& operator=(const T_Value& rhs) {
+                memcpy(this->storage, rhs.ptr(), this->size);
+                return *this;
+            }
+
+            /** init from a 24 char hex std::string */
+            explicit T_Value(const std::string &s) { this->init(s); }
+
+            /** init from a reference to a 12-byte array */
+            explicit T_Value(const unsigned char (&arr)[kOIDSize]) {
+                memcpy(this->data().ptr(), arr, sizeof(arr));
+            }
+
+            /** sets the contents to a new oid / randomized value */
+            void init();
+
+            /** sets the contents to a new oid
+             * guaranteed to be sequential
+             * NOT guaranteed to be globally unique
+             *     only unique for this process
+             * */
+            void initSequential();
+
+            /** init from a 24 char hex std::string */
+            void init( const std::string& s );
+
+            /** Set to the min/max OID that could be generated at given timestamp. */
+            void init( Date_t date, bool max=false );
+
+
+        ENCODED_VALUE_VALUE_METHODS_END
+
+        static Value gen() { Value o; o.init(); return o; }
 
         static unsigned getMachineId(); // features command uses
         static void regenMachineId(); // used by unit tests
 
     private:
-        struct MachineAndPid {
-            unsigned char _machineNumber[3];
-            unsigned short _pid;
-            bool operator!=(const OID::MachineAndPid& rhs) const;
-        };
-        static MachineAndPid ourMachine, ourMachineAndPid;
-        union {
-            struct {
-                // 12 bytes total
-                unsigned char _time[4];
-                MachineAndPid _machineAndPid;
-                unsigned char _inc[3];
-            };
-            struct {
-                long long a;
-                unsigned b;
-            };
-            struct {
-                // TODO: get rid of this eventually
-                //       this is a hack because of hash_combine with older versions of boost
-                //       on 32-bit platforms
-                int x;
-                int y;
-                int z;
-            };
-            unsigned char data[kOIDSize];
-        };
+        /** call this after a fork to update the process id */
+        static void justForked();
 
-        static void foldInPid(MachineAndPid& x);
-        static MachineAndPid genMachineAndPid();
-    };
-#pragma pack()
+        static typename MachineAndPid::Value ourMachine, ourMachineAndPid;
 
-    std::ostream& operator<<( std::ostream &s, const OID &o );
-    inline StringBuilder& operator<< (StringBuilder& s, const OID& o) { return (s << o.str()); }
+        template <class T>
+        static void foldInPid(typename MachineAndPidPrivate<convertEndian>::template T_Reference<T>& x);
+        static typename MachineAndPid::Value genMachineAndPid();
+
+
+    ENCODED_VALUE_WRAPPER_CLASS_END
+
+    typedef OIDPrivate<>::Value OID;
+
+    template <class T>
+    std::ostream& operator<<( std::ostream &s, const typename OID::template T_CReference<T>& o );
+
+    template <class T>
+    inline StringBuilder& operator<< (StringBuilder& s, const typename OID::template T_CReference<T>& o) { return (s << o.str()); }
 
     /** Formatting mode for generating JSON from BSON.
         See <http://dochub.mongodb.org/core/mongodbextendedjson>

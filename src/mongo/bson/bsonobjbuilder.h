@@ -34,10 +34,12 @@
 
 #pragma once
 
-#include <boost/static_assert.hpp>
-#include <map>
-#include <cmath>
-#include <limits>
+//#include <boost/static_assert.hpp>
+//#include <map>
+//#include <cmath>
+//#include <limits>
+//
+#include "mongo/bson/oid.h"
 
 #include "mongo/base/parse_number.h"
 #include "mongo/bson/bsonelement.h"
@@ -279,18 +281,19 @@ namespace mongo {
             @deprecated Generally, it is preferred to use the append append(name, oid)
             method for this.
         */
-        BSONObjBuilder& appendOID(const StringData& fieldName, OID *oid = 0 , bool generateIfBlank = false ) {
+
+        BSONObjBuilder& appendOID(const StringData& fieldName, OIDPrivate<>::Pointer oid = 0 , bool generateIfBlank = false ) {
             _b.appendNum((char) jstOID);
             _b.appendStr(fieldName);
             if ( oid )
-                _b.appendBuf( (void *) oid, 12 );
+                _b.appendBuf( (void *)oid->ptr(), 12 );
             else {
                 OID tmp;
                 if ( generateIfBlank )
                     tmp.init();
                 else
                     tmp.clear();
-                _b.appendBuf( (void *) &tmp, 12 );
+                _b.appendBuf( (void *)tmp.ptr(), 12 );
             }
             return *this;
         }
@@ -300,10 +303,10 @@ namespace mongo {
         @param fieldName Field name, e.g., "_id".
         @returns the builder object
         */
-        BSONObjBuilder& append( const StringData& fieldName, OID oid ) {
+        BSONObjBuilder& append( const StringData& fieldName, const OID& oid ) {
             _b.appendNum((char) jstOID);
             _b.appendStr(fieldName);
-            _b.appendBuf( (void *) &oid, 12 );
+            _b.appendBuf( oid.ptr(), 12 );
             return *this;
         }
 
@@ -312,7 +315,7 @@ namespace mongo {
         _id should be the first element in the object for good performance.
         */
         BSONObjBuilder& genOID() {
-            return append("_id", OID::gen());
+            return append("_id", OIDPrivate<>::gen().ptr());
         }
 
         /** Append a time_t date.
@@ -482,7 +485,7 @@ namespace mongo {
             _b.appendStr( fieldName );
             _b.appendNum( (int) ns.size() + 1 );
             _b.appendStr( ns );
-            _b.appendBuf( (void *) &oid, 12 );
+            _b.appendBuf( (void *) oid.ptr(), 12 );
             return *this;
         }
 

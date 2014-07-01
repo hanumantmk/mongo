@@ -740,8 +740,8 @@ dodouble:
         case DBRef:
             s << "DBRef('" << valuestr() << "',";
             {
-                mongo::OID *x = (mongo::OID *) (valuestr() + valuestrsize());
-                s << *x << ')';
+                mongo::OIDPrivate<>::CReference x(valuestr() + valuestrsize());
+                s << x << ')';
             }
             break;
         case jstOID:
