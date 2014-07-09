@@ -81,7 +81,7 @@ namespace CountTests {
                 BSONObjBuilder b;
                 OID oid;
                 oid.init();
-                b.appendOID( "_id", &oid );
+                b.appendOID( "_id", oid.ptr() );
                 b.appendElements( o );
                 _collection->insertDocument( &_txn, b.obj(), false );
             }

@@ -38,5 +38,20 @@ namespace encoded_value {
         static const int result = A > B ? A : B;
     };
 
+    template <typename T>
+    struct storage_is_array {
+        static const bool result = true;
+    };
+
+    template <>
+    struct storage_is_array<char *> {
+        static const bool result = false;
+    };
+
+    template <>
+    struct storage_is_array<const char *> {
+        static const bool result = false;
+    };
+
 } // namespace encoded_value
 } // namespace mongo

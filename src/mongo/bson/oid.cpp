@@ -44,20 +44,24 @@ BOOST_STATIC_ASSERT( mongo::OIDPrivate<>::size == 12 );
 
 namespace mongo {
 
-    ENCODED_VALUE_CONST_METHOD(void, OIDPrivate)::hash_combine(size_t &seed) const {
+    ENCODED_VALUE_CONST_METHOD(void, OIDPrivate)::hash_combine(std::size_t seed) const {
         boost::hash_combine(seed, this->x());
         boost::hash_combine(seed, this->y());
         boost::hash_combine(seed, this->z());
     }
 
     // machine # before folding in the process id
-    template<>
-    OIDPrivate<>::MachineAndPid::Value OIDPrivate<>::ourMachine;
+    template<encoded_value::endian::ConvertEndian ce>
+    typename OIDPrivate<ce>::MachineAndPid::Value OIDPrivate<ce>::ourMachine;
 
-    ostream& operator<<( ostream &s, const OID &o ) {
+    template <class T>
+    std::ostream& operator<<( std::ostream &s, const typename OID::template T_CReference<T>& o ) {
         s << o.str();
         return s;
     }
+
+    template
+    std::ostream& operator<<( std::ostream &s, const typename OID::template T_CReference<OIDGenerated<>::Value>& o );
 
     template<>
     template<class T>
@@ -89,7 +93,7 @@ namespace mongo {
     OIDPrivate<>::MachineAndPid::Value OIDPrivate<>::ourMachineAndPid = OIDPrivate<>::genMachineAndPid();
 
     template<>
-    void OIDPrivate<>::regenMachineId() {
+    void OID::regenMachineId() {
         ourMachineAndPid = genMachineAndPid();
     }
 
@@ -98,7 +102,7 @@ namespace mongo {
     }
 
     template<>
-    unsigned OIDPrivate<>::getMachineId() {
+    unsigned OID::getMachineId() {
         return ourMachineAndPid._machineNumber();
     }
 
@@ -162,10 +166,12 @@ namespace mongo {
         int time = (int) (date / 1000);
         this->_time() = time;
 
+        encoded_value::Reference<long long> tmp(this->data().ptr() + 4);
+
         if (max)
-            encoded_value::Reference<long long>(this->data() + 4) = 0xFFFFFFFFFFFFFFFFll;
+            tmp = 0xFFFFFFFFFFFFFFFFll;
         else
-            encoded_value::Reference<long long>(this->data() + 4) = 0x0000000000000000ll;
+            tmp = 0x0000000000000000ll;
     }
 
     ENCODED_VALUE_CONST_METHOD(time_t, OIDPrivate)::asTimeT() const {
@@ -189,5 +195,8 @@ namespace mongo {
     // I've tested just making numStrs a char[][], but the overhead of constructing the strings each time was too high
     // numStrsReady will be 0 until after numStrs is initialized because it is a static variable
     bool BSONObjBuilder::numStrsReady = (numStrs[0].size() > 0);
+
+    ENCODED_VALUE_INSTANTIATE(MachineAndPidPrivate, kDefault)
+    ENCODED_VALUE_INSTANTIATE(OIDPrivate, kDefault)
 
 }

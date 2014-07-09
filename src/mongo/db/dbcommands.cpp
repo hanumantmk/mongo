@@ -1359,7 +1359,7 @@ namespace mongo {
         void appendGLEHelperData(BSONObjBuilder& bob, const OpTime& opTime, const OID& oid) {
             BSONObjBuilder subobj(bob.subobjStart(kGLEStatsFieldName));
             subobj.appendTimestamp(kGLEStatsLastOpTimeFieldName, opTime.asDate());
-            subobj.appendOID(kGLEStatsElectionIdFieldName, const_cast<OID*>(&oid));
+            subobj.appendOID(kGLEStatsElectionIdFieldName, oid.ptr());
             subobj.done();
         }
     }

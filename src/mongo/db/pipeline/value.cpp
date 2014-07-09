@@ -725,7 +725,7 @@ namespace mongo {
         }
 
         case jstOID:
-            getOid().hash_combine(seed);
+            getOid().hash_combine((std::size_t)seed);
             break;
 
         case Code:
@@ -749,7 +749,7 @@ namespace mongo {
 
         case DBRef:
             boost::hash_combine(seed, _storage.getDBRef()->ns);
-            _storage.getDBRef()->oid.hash_combine(seed);
+            _storage.getDBRef()->oid.hash_combine((std::size_t)seed);
             break;
 
 
@@ -976,7 +976,7 @@ namespace mongo {
             break;
 
         case DBRef:
-            buf.appendBuf(_storage.getDBRef()->oid.ptr(), OID::size);
+            buf.appendBuf(_storage.getDBRef()->oid.ptr(), sizeof(OID));
             buf.appendStr(_storage.getDBRef()->ns, /*NUL byte*/ true);
             break;
 

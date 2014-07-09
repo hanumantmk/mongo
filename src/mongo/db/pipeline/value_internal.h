@@ -92,7 +92,7 @@ namespace mongo {
             zero();
             type = t;
             memcpy(oid, o.ptr(), sizeof(oid));
-            BOOST_STATIC_ASSERT(OID::size == sizeof(oid));
+            BOOST_STATIC_ASSERT(sizeof(OID) == sizeof(oid));
         }
 
         ValueStorage(const ValueStorage& rhs) {

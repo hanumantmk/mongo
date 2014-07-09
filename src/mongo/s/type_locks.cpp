@@ -124,7 +124,7 @@ namespace mongo {
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isProcessSet = fieldState == FieldParser::FIELD_SET;
 
-        fieldState = FieldParser::extract(source, lockID, &_lockID, errMsg);
+        fieldState = FieldParser::extract(source, lockID, stdx::addressof(_lockID), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isLockIDSet = fieldState == FieldParser::FIELD_SET;
 

@@ -150,7 +150,7 @@ namespace mongo {
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isNoBalanceSet = fieldState == FieldParser::FIELD_SET;
 
-        fieldState = FieldParser::extract(source, epoch, &_epoch, errMsg);
+        fieldState = FieldParser::extract(source, epoch, stdx::addressof(_epoch), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isEpochSet = fieldState == FieldParser::FIELD_SET;
 
@@ -175,7 +175,7 @@ namespace mongo {
 
         // 'lastmodEpoch' was a transition format to 'epoch', up to 2.2
         OID lastmodEpoch;
-        fieldState = FieldParser::extract(source, DEPRECATED_lastmodEpoch, &lastmodEpoch, errMsg);
+        fieldState = FieldParser::extract(source, DEPRECATED_lastmodEpoch, stdx::addressof(lastmodEpoch), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
 
         if (fieldState == FieldParser::FIELD_SET && _isEpochSet == false) {

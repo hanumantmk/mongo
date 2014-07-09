@@ -52,6 +52,10 @@ namespace mongo {
         ENCODED_VALUE_VALUE_METHODS_BEGIN
         ENCODED_VALUE_VALUE_METHODS_END
 
+        ENCODED_VALUE_CONST_CONSTRUCTORS_DEFAULT
+        ENCODED_VALUE_REFERENCE_CONSTRUCTORS_DEFAULT
+        ENCODED_VALUE_VALUE_CONSTRUCTORS_DEFAULT
+
     ENCODED_VALUE_WRAPPER_CLASS_END
 
 #include "mongo/bson/encoded_value_oid.h"
@@ -97,13 +101,13 @@ namespace mongo {
             std::string str() const { return toHexLower(this->data().ptr(), kOIDSize); }
             std::string toString() const { return this->str(); }
             /** @return the random/sequential part of the object ID as 6 hex digits */
-            std::string toIncString() const { return toHexLower(this->_inc(), kIncSize); }
+            std::string toIncString() const { return toHexLower(this->_inc().ptr(), kIncSize); }
 
             /**
              * this is not consistent
              * do not store on disk
              */
-            void hash_combine(std::size_t &seed) const;
+            void hash_combine(std::size_t seed) const;
 
             time_t asTimeT() const;
             Date_t asDateT() const { return this->asTimeT() * (long long)1000; }
@@ -121,30 +125,8 @@ namespace mongo {
 
         ENCODED_VALUE_REFERENCE_METHODS_END
 
-        ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN
+        ENCODED_VALUE_VALUE_METHODS_BEGIN
         public:
-            T_Value() {
-                this->a() = 0;
-                this->b() = 0;
-            }
-
-            T_Value(const char * _ptr) {
-                memcpy(this->storage, _ptr, this->size);
-            }
-
-            T_Value& operator=(const T_Value& rhs) {
-                memcpy(this->storage, rhs.ptr(), this->size);
-                return *this;
-            }
-
-            /** init from a 24 char hex std::string */
-            explicit T_Value(const std::string &s) { this->init(s); }
-
-            /** init from a reference to a 12-byte array */
-            explicit T_Value(const unsigned char (&arr)[kOIDSize]) {
-                memcpy(this->data().ptr(), arr, sizeof(arr));
-            }
-
             /** sets the contents to a new oid / randomized value */
             void init();
 
@@ -164,10 +146,39 @@ namespace mongo {
 
         ENCODED_VALUE_VALUE_METHODS_END
 
-        static Value gen() { Value o; o.init(); return o; }
+        ENCODED_VALUE_CONST_CONSTRUCTORS_DEFAULT
+        ENCODED_VALUE_REFERENCE_CONSTRUCTORS_DEFAULT
 
-        static unsigned getMachineId(); // features command uses
-        static void regenMachineId(); // used by unit tests
+        ENCODED_VALUE_VALUE_CONSTRUCTORS_BEGIN {
+        public:
+            Value() {
+                this->a() = 0;
+                this->b() = 0;
+            }
+
+            Value(const char * _ptr) {
+                memcpy(this->storage, _ptr, this->size);
+            }
+
+            Value& operator=(const Value& rhs) {
+                memcpy(this->storage, rhs.ptr(), this->size);
+                return *this;
+            }
+
+            /** init from a 24 char hex std::string */
+            explicit Value(const std::string &s) { this->init(s); }
+
+            /** init from a reference to a 12-byte array */
+            explicit Value(const unsigned char (&arr)[kOIDSize]) {
+                memcpy(this->data().ptr(), arr, sizeof(arr));
+            }
+
+            static Value gen() { Value o; o.init(); return o; }
+
+            static unsigned getMachineId(); // features command uses
+            static void regenMachineId(); // used by unit tests
+
+        };
 
     private:
         /** call this after a fork to update the process id */
@@ -178,7 +189,6 @@ namespace mongo {
         template <class T>
         static void foldInPid(typename MachineAndPidPrivate<convertEndian>::template T_Reference<T>& x);
         static typename MachineAndPid::Value genMachineAndPid();
-
 
     ENCODED_VALUE_WRAPPER_CLASS_END
 

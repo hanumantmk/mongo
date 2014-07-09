@@ -480,7 +480,7 @@ namespace mongo {
             builder.append( el );
         }
         builder.appendTimestamp( "wOpTime", opTime.asDate() );
-        builder.appendOID( "wElectionId", const_cast<OID*>(&electionId) );
+        builder.appendOID( "wElectionId", electionId.ptr() );
         return builder.obj();
     }
 

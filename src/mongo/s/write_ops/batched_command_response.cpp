@@ -96,7 +96,7 @@ namespace mongo {
         }
 
         if (_isLastOpSet) builder.append(lastOp(), _lastOp);
-        if (_isElectionIdSet) builder.appendOID(electionId(), const_cast<OID*>(&_electionId));
+        if (_isElectionIdSet) builder.appendOID(electionId(), _electionId.ptr());
 
         if (_writeErrorDetails.get()) {
             BSONArrayBuilder errDetailsBuilder(builder.subarrayStart(writeErrors()));
@@ -176,7 +176,7 @@ namespace mongo {
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isLastOpSet = fieldState == FieldParser::FIELD_SET;
 
-        fieldState = FieldParser::extract(source, electionId, &_electionId, errMsg);
+        fieldState = FieldParser::extract(source, electionId, stdx::addressof(_electionId), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isElectionIdSet = fieldState == FieldParser::FIELD_SET;
 

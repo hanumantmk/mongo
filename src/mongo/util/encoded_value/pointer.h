@@ -58,14 +58,6 @@ namespace Impl {
     class Pointer {
         S _ptr;
 
-        /* This stuff takes care of providing the safe bool idiom for pointers.
-         * I.e. usefulness in if (ptr) without automatic upgrade into other
-         * integral contexts.  Basically, you provide an operator T() overload for
-         * a really specific pointer type as an alternative to operator bool() or
-         * operator void *() */
-        typedef void (Pointer::*bool_type)() const;
-        void _magic_bool_func() const {}
-
     public:
         typedef R Reference;
 
@@ -156,9 +148,8 @@ namespace Impl {
             return ReferencePointer(_ptr);
         }
 
-        /* here's the safe bool magic */
-        operator bool_type() const {
-            return ptr() ? &Pointer::_magic_bool_func : 0;
+        operator void *() const {
+            return (void *)ptr();
         }
     };
 

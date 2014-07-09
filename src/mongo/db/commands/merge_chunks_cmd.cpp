@@ -156,7 +156,7 @@ namespace mongo {
             //
 
             OID epoch;
-            if ( !FieldParser::extract( cmdObj, epochField, &epoch, &errmsg ) ) {
+            if ( !FieldParser::extract( cmdObj, epochField, stdx::addressof(epoch), &errmsg ) ) {
                 return false;
             }
 

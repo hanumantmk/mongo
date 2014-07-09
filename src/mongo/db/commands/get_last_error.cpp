@@ -152,7 +152,7 @@ namespace mongo {
             OID electionId;
             BSONField<OID> wElectionIdField("wElectionId");
             extracted = FieldParser::extract(cmdObj, wElectionIdField, 
-                                             &electionId, &errmsg);
+                                             stdx::addressof(electionId), &errmsg);
             if (!extracted) {
                 result.append("badGLE", cmdObj);
                 appendCommandStatus(result, false, errmsg);

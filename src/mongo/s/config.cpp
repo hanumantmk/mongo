@@ -1191,7 +1191,7 @@ namespace mongo {
         try {
             // get this entry's ID so we can use on the exception code path too
             stringstream id;
-            id << getHostNameCached() << "-" << terseCurrentTime() << "-" << OIDPrivate<>::gen();
+            id << getHostNameCached() << "-" << terseCurrentTime() << "-" << OID::gen();
             changeID = id.str();
 
             // send a copy of the message to the log in case it doesn't manage to reach config.changelog

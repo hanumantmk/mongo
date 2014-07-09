@@ -28,44 +28,62 @@
 
 #pragma once
 
-#define ENCODED_VALUE_CONST_METHODS_NO_CONSTRUCTORS_BEGIN \
-    template <class T> \
-    class T_CReference : public T {
-
 #define ENCODED_VALUE_CONST_METHODS_BEGIN \
-    ENCODED_VALUE_CONST_METHODS_NO_CONSTRUCTORS_BEGIN \
+    template <class T> \
+    class T_CReference : public T { \
     public: \
-        T_CReference(const char * _ptr) { this->storage = _ptr; } \
         T_CReference() {} \
-    private:
+        CPointer operator &() const { return CPointer(this->storage); }
 
 #define ENCODED_VALUE_CONST_METHODS_END };
 
-#define ENCODED_VALUE_REFERENCE_METHODS_NO_CONSTRUCTORS_BEGIN \
-    template <class T> \
-    class T_Reference : public T_CReference<T> {
-
 #define ENCODED_VALUE_REFERENCE_METHODS_BEGIN \
-    ENCODED_VALUE_REFERENCE_METHODS_NO_CONSTRUCTORS_BEGIN \
+    template <class T> \
+    class T_Reference : public T_CReference<T> { \
     public: \
-        T_Reference(char * _ptr) { this->storage = _ptr; } \
         T_Reference() {} \
-    private:
+        Pointer operator &() { return Pointer(this->storage); }
 
 #define ENCODED_VALUE_REFERENCE_METHODS_END };
 
-#define ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN \
-    template <class T> \
-    class T_Value : public T_Reference<T> {
-
 #define ENCODED_VALUE_VALUE_METHODS_BEGIN \
-    ENCODED_VALUE_VALUE_METHODS_NO_CONSTRUCTORS_BEGIN \
+    template <class T> \
+    class T_Value : public T_Reference<T> { \
     public: \
-        T_Value(const char * _ptr) { memcpy(this->storage, _ptr, this->size); } \
-        T_Value() {} \
-    private:
+        T_Value() {}
 
 #define ENCODED_VALUE_VALUE_METHODS_END };
+
+#define ENCODED_VALUE_CONST_CONSTRUCTORS_BEGIN \
+    class CReference : public T_CReference<typename superclass::CReference>
+
+#define ENCODED_VALUE_REFERENCE_CONSTRUCTORS_BEGIN \
+    class Reference : public T_Reference<typename superclass::Reference>
+
+#define ENCODED_VALUE_VALUE_CONSTRUCTORS_BEGIN \
+    class Value : public T_Value<typename superclass::Value>
+
+#define ENCODED_VALUE_CONST_CONSTRUCTORS_DEFAULT \
+    ENCODED_VALUE_CONST_CONSTRUCTORS_BEGIN { \
+    public: \
+         CReference(const char * _ptr) { this->storage = _ptr; } \
+         CReference() { } \
+    };
+
+#define ENCODED_VALUE_REFERENCE_CONSTRUCTORS_DEFAULT \
+    ENCODED_VALUE_REFERENCE_CONSTRUCTORS_BEGIN { \
+    public: \
+         Reference(char * _ptr) { this->storage = _ptr; } \
+         Reference() { } \
+    };
+
+#define ENCODED_VALUE_VALUE_CONSTRUCTORS_DEFAULT \
+    ENCODED_VALUE_VALUE_CONSTRUCTORS_BEGIN { \
+    public: \
+         Value(const char * _ptr) { memcpy(this->storage, _ptr, size); } \
+         Value() { } \
+    };
+
 
 #define ENCODED_VALUE_WRAPPER_CLASS_BEGIN(name, sc) \
 template <encoded_value::endian::ConvertEndian convertEndian = encoded_value::endian::kDefault> \
@@ -76,11 +94,11 @@ public:\
     template <class T> class T_CReference; \
     template <class T> class T_Reference; \
     template <class T> class T_Value; \
-    typedef T_CReference<typename superclass::CReference> CReference; \
-    typedef T_Reference<typename superclass::Reference> Reference; \
-    typedef T_Value<typename superclass::Value> Value; \
-    typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<thisclass>, Reference, char * > Pointer; \
-    typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<thisclass>, CReference, const char * > CPointer; \
+    class CReference; \
+    class Reference; \
+    class Value; \
+    typedef encoded_value::EV::Pointer<thisclass, convertEndian> Pointer; \
+    typedef encoded_value::EV::Pointer<thisclass, convertEndian> CPointer; \
     static const int size = superclass::size; \
 
 #define ENCODED_VALUE_WRAPPER_CLASS_END \
@@ -103,6 +121,9 @@ public:\
 
 #define ENCODED_VALUE_INSTANTIATE(name, ce) \
     template class name<encoded_value::endian::ce>; \
-    template class name<encoded_value::endian::ce>::template T_Reference<name<encoded_value::endian::ce>::superclass::Reference>; \
     template class name<encoded_value::endian::ce>::template T_CReference<name<encoded_value::endian::ce>::superclass::CReference>; \
+    template class name<encoded_value::endian::ce>::template T_CReference<name<encoded_value::endian::ce>::superclass::Reference>; \
+    template class name<encoded_value::endian::ce>::template T_CReference<name<encoded_value::endian::ce>::superclass::Value>; \
+    template class name<encoded_value::endian::ce>::template T_Reference<name<encoded_value::endian::ce>::superclass::Reference>; \
+    template class name<encoded_value::endian::ce>::template T_Reference<name<encoded_value::endian::ce>::superclass::Value>; \
     template class name<encoded_value::endian::ce>::template T_Value<name<encoded_value::endian::ce>::superclass::Value>;

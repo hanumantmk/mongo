@@ -279,7 +279,7 @@ namespace mongo {
                 break;
             case jstOID:
                 b.appendUChar(coid|bits);
-                b.appendBuf(e.__oid().ptr(), OID::size);
+                b.appendBuf(e.__oid().ptr(), sizeof(OID));
                 break;
             case BinData:
                 {

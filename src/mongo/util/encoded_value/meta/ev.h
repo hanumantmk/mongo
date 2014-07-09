@@ -38,12 +38,13 @@
  * */
 
 #include <cstring>
+#include "mongo/util/encoded_value/endian.h"
 
 namespace mongo {
 namespace encoded_value {
 namespace Meta {
 
-    template <typename T>
+    template <class T, enum endian::ConvertEndian ce>
     class EV {
     public:
         static const std::size_t size = T::size;

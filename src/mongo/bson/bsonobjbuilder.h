@@ -282,7 +282,7 @@ namespace mongo {
             method for this.
         */
 
-        BSONObjBuilder& appendOID(const StringData& fieldName, OIDPrivate<>::Pointer oid = 0 , bool generateIfBlank = false ) {
+        BSONObjBuilder& appendOID(const StringData& fieldName, OIDPrivate<>::CPointer oid = 0 , bool generateIfBlank = false ) {
             _b.appendNum((char) jstOID);
             _b.appendStr(fieldName);
             if ( oid )
@@ -315,7 +315,7 @@ namespace mongo {
         _id should be the first element in the object for good performance.
         */
         BSONObjBuilder& genOID() {
-            return append("_id", OIDPrivate<>::gen().ptr());
+            return append("_id", OID::gen().ptr());
         }
 
         /** Append a time_t date.

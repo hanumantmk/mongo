@@ -131,11 +131,11 @@ namespace mongo {
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isExcludingMongoVersionsSet = fieldState == FieldParser::FIELD_SET;
 
-        fieldState = FieldParser::extract(source, clusterId, &_clusterId, errMsg);
+        fieldState = FieldParser::extract(source, clusterId, stdx::addressof(_clusterId), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isClusterIdSet = fieldState == FieldParser::FIELD_SET;
 
-        fieldState = FieldParser::extract(source, upgradeId, &_upgradeId, errMsg);
+        fieldState = FieldParser::extract(source, upgradeId, stdx::addressof(_upgradeId), errMsg);
         if (fieldState == FieldParser::FIELD_INVALID) return false;
         _isUpgradeIdSet = fieldState == FieldParser::FIELD_SET;
 

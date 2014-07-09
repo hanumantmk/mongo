@@ -134,8 +134,8 @@ class CLASS:
         out.extend(["    class Reference;\n\n"])
         out.extend(["    class CReference;\n\n"])
 
-        out.extend(["    typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<", self.name, "<convertEndian> >, Reference, char * > Pointer;\n\n"])
-        out.extend(["    typedef encoded_value::Impl::Pointer<encoded_value::Meta::EV<", self.name, "<convertEndian> >, CReference, const char * > CPointer;\n\n"])
+        out.extend(["    typedef encoded_value::EV::Pointer<", self.name, "<convertEndian>, convertEndian> Pointer;\n\n"])
+        out.extend(["    typedef encoded_value::EV::CPointer<", self.name, "<convertEndian>, convertEndian> CPointer;\n\n"])
 
         offset = []
 

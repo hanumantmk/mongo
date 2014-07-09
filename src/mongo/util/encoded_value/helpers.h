@@ -78,6 +78,14 @@ namespace encoded_value {
                 const char*
             >(in)
         {}
+
+        CPointer(Pointer<T, ce> in) :
+            Impl::Pointer<
+                Meta::Memcpy<T, ce>,
+                Impl::Reference<Meta::Memcpy<T, ce>, const char*>,
+                const char*
+            >(in.ptr())
+        {}
     };
 
     template <class T, enum endian::ConvertEndian ce = endian::kDefault>
@@ -116,6 +124,13 @@ namespace encoded_value {
                 Meta::Memcpy<T, ce>,
                 const char*
             >(in)
+        {}
+
+        CReference(Reference<T, ce> in) :
+            Impl::Reference<
+                Meta::Memcpy<T, ce>,
+                const char*
+            >(in.ptr())
         {}
     };
 
@@ -158,6 +173,14 @@ namespace encoded_value {
                     Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, const char*>,
                     const char*
                 >(in)
+            {}
+
+            CPointer(Pointer<T, Base, offset, bits, ce> in) :
+                Impl::Pointer<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    Impl::Reference<Meta::BitField<T, Base, offset, bits, ce>, const char*>,
+                    const char*
+                >(in.ptr())
             {}
         };
 
@@ -203,6 +226,13 @@ namespace encoded_value {
                     Meta::BitField<T, Base, offset, bits, ce>,
                     const char*
                 >(in)
+            {}
+
+            CReference(Reference<T, Base, offset, bits, ce> in) :
+                Impl::Reference<
+                    Meta::BitField<T, Base, offset, bits, ce>,
+                    const char*
+                >(in.ptr())
             {}
         };
 
@@ -248,6 +278,14 @@ namespace encoded_value {
                     const char*
                 >(in)
             {}
+
+            CPointer(Pointer<T, bytes, ce> in) :
+                Impl::Pointer<
+                    Meta::ShortInt<T, bytes, ce>,
+                    Impl::Reference<Meta::ShortInt<T, bytes, ce>, const char*>,
+                    const char*
+                >(in.ptr())
+            {}
         };
 
         template <
@@ -293,9 +331,62 @@ namespace encoded_value {
                     const char*
                 >(in)
             {}
+
+            CReference(Reference<T, bytes, ce> in) :
+                Impl::Reference<
+                    Meta::ShortInt<T, bytes, ce>,
+                    const char*
+                >(in.ptr())
+            {}
         };
 
     } // namespace ShortInt
+
+    namespace EV {
+
+        template <class T, enum endian::ConvertEndian ce = endian::kDefault>
+        class Pointer :
+            public Impl::Pointer<
+                Meta::EV<T, ce>,
+                typename T::Reference,
+                char*
+            > {
+        public:
+            Pointer(char* in) :
+                Impl::Pointer<
+                    Meta::EV<T, ce>,
+                    typename T::Reference,
+                    char*
+                >(in)
+            {}
+        };
+
+        template <class T, enum endian::ConvertEndian ce = endian::kDefault>
+        class CPointer :
+            public Impl::Pointer<
+                Meta::EV<T, ce>,
+                typename T::CReference,
+                const char*
+            > {
+        public:
+            CPointer(const char* in) :
+                Impl::Pointer<
+                    Meta::EV<T, ce>,
+                    typename T::CReference,
+                    const char*
+                >(in)
+            {}
+
+            CPointer(Pointer<T, ce> in) :
+                Impl::Pointer<
+                    Meta::EV<T, ce>,
+                    typename T::CReference,
+                    const char*
+                >(in.ptr())
+            {}
+        };
+
+    }
 
 } // namespace encoded_value
 } // namespace mongo

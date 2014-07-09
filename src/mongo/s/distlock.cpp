@@ -861,7 +861,7 @@ namespace mongo {
                 << LocksType::process(_processId)
                 << "when" << jsTime()
                 << LocksType::why(why)
-                << LocksType::lockID(OIDPrivate<>::gen()) );
+                << LocksType::lockID(OID::gen()) );
         BSONObj whatIWant = BSON( "$set" << lockDetails );
 
         BSONObj query = queryBuilder.obj();

@@ -424,7 +424,7 @@ namespace repl {
                                    "who" << me.fullName() <<
                                    "whoid" << me.hbinfo().id() <<
                                    "cfgver" << rs._cfg->version <<
-                                   "round" << OIDPrivate<>::gen() /* this is just for diagnostics */
+                                   "round" << OID::gen() /* this is just for diagnostics */
                                );
 
             int configVersion;
