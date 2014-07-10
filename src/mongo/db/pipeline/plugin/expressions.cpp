@@ -200,8 +200,6 @@ namespace mongo {
 
         lua_getglobal(L, "foo");
 
-        std::cout << "got here " << __LINE__ << "\n";
-
         for (size_t i = 1; i < n; i++) {
             const Value arg = vpOperand[i]->evaluateInternal(vars);
 
@@ -217,10 +215,8 @@ namespace mongo {
                 uassert(-1, "shouldn't be here", 0);
             }
         }
-        std::cout << "got here " << __LINE__ << "\n";
 
-        lua_call(L, n - 1, 1);
-        std::cout << "got here " << __LINE__ << "\n";
+        uassert(-1, "failure in pcall", ! lua_pcall(L, n - 1, 1, 0));
 
         switch(lua_type(L, -1)) {
             case LUA_TNUMBER:
@@ -235,7 +231,6 @@ namespace mongo {
             default:
                 break;
         }
-        std::cout << "got here " << __LINE__ << "\n";
 
         lua_pop(L, 1);
 
