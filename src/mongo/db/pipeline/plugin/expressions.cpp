@@ -26,6 +26,8 @@
  * it in the license file.
  */
 
+#include <libtcc.h>
+
 #include "mongo/pch.h"
 
 #include "mongo/db/pipeline/expression.h"
@@ -118,6 +120,54 @@ namespace mongo {
     const char *ExpressionAddAndMul2::getOpName() const {
         return "$addAndMul2";
     }
+
+    class ExpressionTCC : public ExpressionFixedArity<ExpressionTCC, 2> {
+    public:
+        // virtuals from ExpressionNary
+        virtual Value evaluateInternal(Variables* vars) const;
+        virtual const char *getOpName() const;
+        virtual ~ExpressionTCC() {}
+    };
+
+    Value ExpressionTCC::evaluateInternal(Variables* vars) const {
+        const Value code = vpOperand[0]->evaluateInternal(vars);
+        const Value input = vpOperand[1]->evaluateInternal(vars);
+        uassert(-1, str::stream() << getOpName() << "'s first argument must be a string, but is "
+                                     << typeName(code.getType()),
+                code.getType() == String);
+        uassert(-1, str::stream() << getOpName() << "'s second argument must be a double, but is "
+                                     << typeName(input.getType()),
+                input.getType() == NumberDouble);
+
+        StringBuilder result;
+
+        TCCState *s;
+        double (*func)(double);
+
+        s = tcc_new();
+
+        tcc_set_output_type(s, TCC_OUTPUT_MEMORY);
+
+        result << "double foo(double x) { return (" << code.coerceToString() << "); }";
+
+        uassert(-1, "invalid program", tcc_compile_string(s, result.str().c_str()) != -1);
+
+        uassert(-1, "invalid relocation", tcc_relocate(s, TCC_RELOCATE_AUTO) >= 0);
+
+        *(void **) (&func) = tcc_get_symbol(s, "foo");
+
+        uassert(-1, "couldn't get func", func);
+
+        double out = (*func)(input.coerceToDouble());
+
+        tcc_delete(s);
+
+        return Value(out);
+    }
+
+    const char *ExpressionTCC::getOpName() const {
+        return "$tcc";
+    }
 }
 
 extern "C" void mongo_add_expressions(void * in) {
@@ -126,6 +176,7 @@ extern "C" void mongo_add_expressions(void * in) {
     std::cout << "slurped some crap" << std::endl;
 
     expressionParserMap["$addAndMul2"] = mongo::ExpressionAddAndMul2::parse;
+    expressionParserMap["$tcc"] = mongo::ExpressionTCC::parse;
 
     return;
 }

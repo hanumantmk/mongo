@@ -23,7 +23,8 @@ db.test.aggregate([
     {
         $project : {
             add : { $add : [ "$sum", 2 ] },
-            addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] }
+            addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] },
+            tcc : { $tcc : [ "(int)x % 9", "$sum" ] }
         }
     }
 ]).forEach(printjson);
