@@ -175,25 +175,20 @@ namespace mongo {
         return "$tcc";
     }
 
-    class ExpressionLUA : public ExpressionFixedArity<ExpressionLUA, 2> {
+    class ExpressionLUA : public ExpressionVariadic<ExpressionLUA> {
     public:
         // virtuals from ExpressionNary
         virtual Value evaluateInternal(Variables* vars) const;
         virtual const char *getOpName() const;
+        virtual bool isAssociativeAndCommutative() const { return false; }
         virtual ~ExpressionLUA() {}
     };
 
     Value ExpressionLUA::evaluateInternal(Variables* vars) const {
+        Value out;
         const Value code = vpOperand[0]->evaluateInternal(vars);
-        const Value input = vpOperand[1]->evaluateInternal(vars);
-        uassert(-1, str::stream() << getOpName() << "'s first argument must be a string, but is "
-                                     << typeName(code.getType()),
-                code.getType() == String);
-        uassert(-1, str::stream() << getOpName() << "'s second argument must be a double, but is "
-                                     << typeName(input.getType()),
-                input.getType() == NumberDouble);
 
-        StringBuilder result;
+        size_t n = vpOperand.size();
 
         lua_State* L;
 
@@ -201,22 +196,52 @@ namespace mongo {
 
         luaL_openlibs(L);
 
-        result << "function foo ( x )\nreturn (" << code.coerceToString() << ")\nend\n";
-
-        uassert(-1, "failure in compiling lua", ! luaL_dostring(L, result.str().c_str()));
+        uassert(-1, "failure in compiling lua", ! luaL_dostring(L, code.coerceToString().c_str()));
 
         lua_getglobal(L, "foo");
 
-        lua_pushnumber(L, input.coerceToDouble());
+        std::cout << "got here " << __LINE__ << "\n";
 
-        lua_call(L, 1, 1);
+        for (size_t i = 1; i < n; i++) {
+            const Value arg = vpOperand[i]->evaluateInternal(vars);
 
-        double out = lua_tonumber(L, -1);
+            if (arg.getType() == NumberDouble) {
+                lua_pushnumber(L, arg.coerceToDouble());
+            } else if (arg.getType() == NumberLong) {
+                lua_pushinteger(L, arg.coerceToLong());
+            } else if (arg.getType() == NumberInt) {
+                lua_pushinteger(L, arg.coerceToInt());
+            } else if (arg.getType() == String) {
+                lua_pushstring(L, arg.coerceToString().c_str());
+            } else {
+                uassert(-1, "shouldn't be here", 0);
+            }
+        }
+        std::cout << "got here " << __LINE__ << "\n";
+
+        lua_call(L, n - 1, 1);
+        std::cout << "got here " << __LINE__ << "\n";
+
+        switch(lua_type(L, -1)) {
+            case LUA_TNUMBER:
+                out = Value(lua_tonumber(L, -1));
+                break;
+            case LUA_TBOOLEAN:
+                out = Value(lua_toboolean(L, -1));
+                break;
+            case LUA_TSTRING:
+                out = Value(lua_tostring(L, -1));
+                break;
+            default:
+                break;
+        }
+        std::cout << "got here " << __LINE__ << "\n";
+
         lua_pop(L, 1);
 
         lua_close(L);
 
-        return Value(out);
+        return out;
     }
 
     const char *ExpressionLUA::getOpName() const {

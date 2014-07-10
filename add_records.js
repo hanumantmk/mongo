@@ -25,7 +25,8 @@ db.test.aggregate([
             add : { $add : [ "$sum", 2 ] },
             addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] },
             tcc : { $tcc : [ "(int)x % 9", "$sum" ] },
-            lua : { $lua : [ "x + 9", "$sum" ] }
+            lua : { $lua : [ "function foo ( a, b, c )\nreturn a + b + c\nend\n", "$sum", 1000, 10000 ] },
+            luastr : { $lua : [ "function foo ( s )\nreturn string.len(s)\nend\n", "$sum" ] }
         }
     }
 ]).forEach(printjson);
