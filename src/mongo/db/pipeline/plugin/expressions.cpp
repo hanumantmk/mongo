@@ -242,6 +242,44 @@ namespace mongo {
     const char *ExpressionLUA::getOpName() const {
         return "$lua";
     }
+
+    class ExpressionSHELL : public ExpressionVariadic<ExpressionSHELL> {
+    public:
+        // virtuals from ExpressionNary
+        virtual Value evaluateInternal(Variables* vars) const;
+        virtual const char *getOpName() const;
+        virtual bool isAssociativeAndCommutative() const { return false; }
+        virtual ~ExpressionSHELL() {}
+    };
+
+    Value ExpressionSHELL::evaluateInternal(Variables* vars) const {
+        size_t n = vpOperand.size();
+
+        StringBuilder cmd;
+        StringBuilder result;
+
+        for (size_t i = 0; i < n; i++) {
+            cmd << " " << vpOperand[i]->evaluateInternal(vars).coerceToString();
+        }
+
+        FILE* pipe = popen(cmd.str().c_str(), "r");
+        uassert(-1, "couldn't open pipe", pipe);
+
+        char buffer[128];
+        while (!feof(pipe)) {
+            if (fgets(buffer, 128, pipe) != NULL) {
+                result << buffer;
+            }
+        }
+
+        pclose(pipe);
+
+        return Value(result.str());
+    }
+
+    const char *ExpressionSHELL::getOpName() const {
+        return "$shell";
+    }
 }
 
 extern "C" void mongo_add_expressions(void * in) {
@@ -252,6 +290,7 @@ extern "C" void mongo_add_expressions(void * in) {
     expressionParserMap["$addAndMul2"] = mongo::ExpressionAddAndMul2::parse;
     expressionParserMap["$tcc"] = mongo::ExpressionTCC::parse;
     expressionParserMap["$lua"] = mongo::ExpressionLUA::parse;
+    expressionParserMap["$shell"] = mongo::ExpressionSHELL::parse;
 
     return;
 }

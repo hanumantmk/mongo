@@ -26,7 +26,19 @@ db.test.aggregate([
             addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] },
             tcc : { $tcc : [ "(int)x % 9", "$sum" ] },
             lua : { $lua : [ "function foo ( a, b, c )\nreturn a + b + c\nend\n", "$sum", 1000, 10000 ] },
-            luastr : { $lua : [ "function foo ( s )\nreturn string.len(s)\nend\n", "$sum" ] }
+            luastr : { $lua : [ "function foo ( s )\nreturn string.len(s)\nend\n", "$sum" ] },
+            shell : { $shell : [ "figlet", "Welcome to the Mongo" ] }
         }
     }
-]).forEach(printjson);
+]).forEach(function (doc) {
+    shell = doc.shell;
+    delete doc["shell"];
+
+    print( "------------------------------------------" );
+    print( "json: " + tojson(doc) )
+    print( );
+    print( "shell:\n" + shell );
+    print( "------------------------------------------" );
+    print( );
+    print( );
+});
