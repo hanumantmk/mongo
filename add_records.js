@@ -17,7 +17,13 @@ db.test.aggregate([
             },
             negativeSum: {
                 $negativeSum : "$val"
-            }
+            },
+        }
+    },
+    {
+        $project : {
+            add : { $add : [ "$sum", 2 ] },
+            addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] }
         }
     }
 ]).forEach(printjson);

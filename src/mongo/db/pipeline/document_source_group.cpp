@@ -262,8 +262,6 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SetUpGroupOpTable, ("MongodOptions_Store"))
             uassert(-1, "couldn't get symbol", dlerror() == NULL);
 
             (*slurp)(&table);
-
-//            dlclose(handle);
         }
 
         std::sort(table.begin(), table.end(), GroupOpDescSortByName);

@@ -108,6 +108,7 @@ env.Library('bson', [
 
 env.SharedLibrary('plugin', [
         'db/pipeline/plugin/accumulators.cpp',
+        'db/pipeline/plugin/expressions.cpp',
         ])
 
 env.Library('mutable_bson_test_utils', [

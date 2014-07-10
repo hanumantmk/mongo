@@ -30,6 +30,7 @@
 
 #include "mongo/pch.h"
 
+#include "mongo/stdx/functional.h"
 #include "mongo/db/pipeline/dependencies.h"
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/field_path.h"
@@ -954,6 +955,9 @@ namespace mongo {
         virtual Value evaluateInternal(Variables* vars) const;
         virtual const char *getOpName() const;
     };
+
+    typedef stdx::function<intrusive_ptr<Expression>(BSONElement, const VariablesParseState&)>
+            ExpressionParser;
 }
 
 

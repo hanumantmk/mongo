@@ -26,6 +26,8 @@
  * it in the license file.
  */
 
+#include <dlfcn.h>
+
 #include "pch.h"
 
 #include "db/pipeline/expression.h"
@@ -39,12 +41,15 @@
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/value.h"
+#include "mongo/db/server_options.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/util/string_map.h"
 #include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
     using namespace mongoutils;
+
+    StringMap<ExpressionParser> expressionParserMap;
 
     /// Helper function to easily wrap constants with $const.
     static Value serializeConstant(Value val) {
@@ -297,11 +302,24 @@ namespace mongo {
         return pExpression;
     }
 
-namespace {
-    typedef stdx::function<intrusive_ptr<Expression>(BSONElement, const VariablesParseState&)>
-            ExpressionParser;
-    StringMap<ExpressionParser> expressionParserMap;
-}
+MONGO_INITIALIZER_WITH_PREREQUISITES(SetUpExpressionParserMap, ("MongodOptions_Store"))
+    (::mongo::InitializerContext* context) {
+        if (! serverGlobalParams.aggregatePlugin.empty()) {
+            void (* slurp)(void *);
+            void * handle = dlopen(serverGlobalParams.aggregatePlugin.c_str(), RTLD_LAZY);
+
+            uassert(-1, "couldn't open handle", handle);
+
+            dlerror();
+
+            *(void **) (&slurp) = dlsym(handle, "mongo_add_expressions");
+
+            uassert(-1, "couldn't get symbol", dlerror() == NULL);
+
+            (*slurp)(&expressionParserMap);
+        }
+        return Status::OK();
+    }
 
 /** Registers an ExpressionParser so it can be called from parseExpression and friends.
  *
