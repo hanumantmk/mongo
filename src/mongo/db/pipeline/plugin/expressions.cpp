@@ -28,6 +28,12 @@
 
 #include <libtcc.h>
 
+extern "C" {
+#include <luajit-2.0/lua.h>
+#include <luajit-2.0/lualib.h>
+#include <luajit-2.0/lauxlib.h>
+}
+
 #include "mongo/pch.h"
 
 #include "mongo/db/pipeline/expression.h"
@@ -168,6 +174,54 @@ namespace mongo {
     const char *ExpressionTCC::getOpName() const {
         return "$tcc";
     }
+
+    class ExpressionLUA : public ExpressionFixedArity<ExpressionLUA, 2> {
+    public:
+        // virtuals from ExpressionNary
+        virtual Value evaluateInternal(Variables* vars) const;
+        virtual const char *getOpName() const;
+        virtual ~ExpressionLUA() {}
+    };
+
+    Value ExpressionLUA::evaluateInternal(Variables* vars) const {
+        const Value code = vpOperand[0]->evaluateInternal(vars);
+        const Value input = vpOperand[1]->evaluateInternal(vars);
+        uassert(-1, str::stream() << getOpName() << "'s first argument must be a string, but is "
+                                     << typeName(code.getType()),
+                code.getType() == String);
+        uassert(-1, str::stream() << getOpName() << "'s second argument must be a double, but is "
+                                     << typeName(input.getType()),
+                input.getType() == NumberDouble);
+
+        StringBuilder result;
+
+        lua_State* L;
+
+        L = luaL_newstate();
+
+        luaL_openlibs(L);
+
+        result << "function foo ( x )\nreturn (" << code.coerceToString() << ")\nend\n";
+
+        uassert(-1, "failure in compiling lua", ! luaL_dostring(L, result.str().c_str()));
+
+        lua_getglobal(L, "foo");
+
+        lua_pushnumber(L, input.coerceToDouble());
+
+        lua_call(L, 1, 1);
+
+        double out = lua_tonumber(L, -1);
+        lua_pop(L, 1);
+
+        lua_close(L);
+
+        return Value(out);
+    }
+
+    const char *ExpressionLUA::getOpName() const {
+        return "$lua";
+    }
 }
 
 extern "C" void mongo_add_expressions(void * in) {
@@ -177,6 +231,7 @@ extern "C" void mongo_add_expressions(void * in) {
 
     expressionParserMap["$addAndMul2"] = mongo::ExpressionAddAndMul2::parse;
     expressionParserMap["$tcc"] = mongo::ExpressionTCC::parse;
+    expressionParserMap["$lua"] = mongo::ExpressionLUA::parse;
 
     return;
 }
