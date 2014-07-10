@@ -174,6 +174,9 @@ namespace mongo {
                                          .setDefault(moe::Value(std::string("/data/db")));
 
 #endif
+        general_options.addOptionChaining("aggregatePlugin", "aggregatePlugin", moe::String,
+                "path to aggregatePlugin");
+                                         
         general_options.addOptionChaining("storage.directoryPerDB", "directoryperdb", moe::Switch,
                 "each database will be stored in a separate directory");
 
@@ -917,6 +920,9 @@ namespace mongo {
         }
         if (params.count("cpu")) {
             serverGlobalParams.cpu = params["cpu"].as<bool>();
+        }
+        if (params.count("aggregatePlugin")) {
+            serverGlobalParams.aggregatePlugin = params["aggregatePlugin"].as<std::string>();
         }
         if (params.count("security.authorization") &&
             params["security.authorization"].as<std::string>() == "disabled") {

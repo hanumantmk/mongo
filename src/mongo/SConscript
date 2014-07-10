@@ -106,6 +106,10 @@ env.Library('bson', [
         '$BUILD_DIR/mongo/platform/platform',
         ])
 
+env.SharedLibrary('plugin', [
+        'db/pipeline/plugin/accumulators.cpp',
+        ])
+
 env.Library('mutable_bson_test_utils', [
         'bson/mutable/mutable_bson_test_utils.cpp'
         ], LIBDEPS=['bson'])

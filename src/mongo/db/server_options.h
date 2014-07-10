@@ -78,6 +78,8 @@ namespace mongo {
         int defaultLocalThresholdMillis;    // --localThreshold in ms to consider a node local
         bool moveParanoia;     // for move chunk paranoia
 
+        std::string aggregatePlugin;
+
         bool noUnixSocket;     // --nounixsocket
         bool doFork;           // --fork
         std::string socket;    // UNIX domain socket directory

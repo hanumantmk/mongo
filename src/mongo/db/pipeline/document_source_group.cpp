@@ -26,8 +26,9 @@
 *    it in the license file.
 */
 
-#include "mongo/pch.h"
+#include <dlfcn.h>
 
+#include "mongo/pch.h"
 
 #include "mongo/db/jsobj.h"
 #include "mongo/db/pipeline/accumulator.h"
@@ -36,6 +37,8 @@
 #include "mongo/db/pipeline/expression.h"
 #include "mongo/db/pipeline/expression_context.h"
 #include "mongo/db/pipeline/value.h"
+#include "mongo/base/init.h"
+#include "mongo/db/pipeline/document_source_group.h"
 
 namespace mongo {
     const char DocumentSourceGroup::groupName[] = "$group";
@@ -210,11 +213,9 @@ namespace mongo {
         vpExpression.push_back(pExpression);
     }
 
-
-    struct GroupOpDesc {
-        const char* name;
-        intrusive_ptr<Accumulator> (*factory)();
-    };
+    static bool GroupOpDescSortByName(const struct GroupOpDesc& lhs, const struct GroupOpDesc& rhs) {
+        return strcmp(lhs.name, rhs.name) < 0;
+    }
 
     static int GroupOpDescCmp(const void *pL, const void *pR) {
         return strcmp(((const GroupOpDesc *)pL)->name,
@@ -225,18 +226,53 @@ namespace mongo {
       Keep these sorted alphabetically so we can bsearch() them using
       GroupOpDescCmp() above.
     */
-    static const GroupOpDesc GroupOpTable[] = {
-        {"$addToSet", AccumulatorAddToSet::create},
-        {"$avg", AccumulatorAvg::create},
-        {"$first", AccumulatorFirst::create},
-        {"$last", AccumulatorLast::create},
-        {"$max", AccumulatorMinMax::createMax},
-        {"$min", AccumulatorMinMax::createMin},
-        {"$push", AccumulatorPush::create},
-        {"$sum", AccumulatorSum::create},
-    };
+    static GroupOpDesc * GroupOpTable;
 
-    static const size_t NGroupOp = sizeof(GroupOpTable)/sizeof(GroupOpTable[0]);
+    static size_t NGroupOp;
+
+MONGO_INITIALIZER_WITH_PREREQUISITES(SetUpGroupOpTable, ("MongodOptions_Store"))
+    (::mongo::InitializerContext* context) {
+        static GroupOpDesc baseOps[] = {
+            {"$addToSet", AccumulatorAddToSet::create},
+            {"$sum", AccumulatorSum::create},
+            {"$avg", AccumulatorAvg::create},
+            {"$first", AccumulatorFirst::create},
+            {"$last", AccumulatorLast::create},
+            {"$max", AccumulatorMinMax::createMax},
+            {"$min", AccumulatorMinMax::createMin},
+            {"$push", AccumulatorPush::create},
+        };
+
+        static std::vector<GroupOpDesc> table;
+
+        for (size_t i = 0; i < (sizeof(baseOps) / sizeof(baseOps[0])); i++) {
+            table.push_back(baseOps[i]);
+        }
+
+        if (! serverGlobalParams.aggregatePlugin.empty()) {
+            void (* slurp)(void *);
+            void * handle = dlopen(serverGlobalParams.aggregatePlugin.c_str(), RTLD_LAZY);
+
+            uassert(-1, "couldn't open handle", handle);
+
+            dlerror();
+
+            *(void **) (&slurp) = dlsym(handle, "mongo_add_accumulators");
+
+            uassert(-1, "couldn't get symbol", dlerror() == NULL);
+
+            (*slurp)(&table);
+
+//            dlclose(handle);
+        }
+
+        std::sort(table.begin(), table.end(), GroupOpDescSortByName);
+
+        GroupOpTable = &table[0];
+        NGroupOp = table.size();
+
+        return Status::OK();
+    }
 
     intrusive_ptr<DocumentSource> DocumentSourceGroup::createFromBson(
             BSONElement elem,
