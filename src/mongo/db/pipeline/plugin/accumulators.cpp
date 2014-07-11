@@ -42,7 +42,7 @@ namespace mongo {
         virtual void reset();
         virtual ~AccumulatorNegativeSum() {}
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorNegativeSum();
@@ -76,7 +76,7 @@ namespace mongo {
         }
     }
 
-    intrusive_ptr<Accumulator> AccumulatorNegativeSum::create() {
+    intrusive_ptr<Accumulator> AccumulatorNegativeSum::create(const Value& input) {
         return new AccumulatorNegativeSum();
     }
 

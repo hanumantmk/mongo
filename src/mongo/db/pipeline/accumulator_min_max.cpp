@@ -61,11 +61,11 @@ namespace mongo {
         _memUsageBytes = sizeof(*this);
     }
 
-    intrusive_ptr<Accumulator> AccumulatorMinMax::createMin() {
+    intrusive_ptr<Accumulator> AccumulatorMinMax::createMin(const Value& input) {
         return new AccumulatorMinMax(1);
     }
 
-    intrusive_ptr<Accumulator> AccumulatorMinMax::createMax() {
+    intrusive_ptr<Accumulator> AccumulatorMinMax::createMax(const Value& input) {
         return new AccumulatorMinMax(-1);
     }
 

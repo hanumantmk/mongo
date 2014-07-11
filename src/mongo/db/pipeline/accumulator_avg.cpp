@@ -58,7 +58,7 @@ namespace {
         }
     }
 
-    intrusive_ptr<Accumulator> AccumulatorAvg::create() {
+    intrusive_ptr<Accumulator> AccumulatorAvg::create(const Value& input) {
         return new AccumulatorAvg();
     }
 

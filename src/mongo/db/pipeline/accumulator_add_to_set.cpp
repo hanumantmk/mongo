@@ -73,7 +73,7 @@ namespace mongo {
         _memUsageBytes = sizeof(*this);
     }
 
-    intrusive_ptr<Accumulator> AccumulatorAddToSet::create() {
+    intrusive_ptr<Accumulator> AccumulatorAddToSet::create(const Value& input) {
         return new AccumulatorAddToSet();
     }
 

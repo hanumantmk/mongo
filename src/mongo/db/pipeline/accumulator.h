@@ -71,6 +71,21 @@ namespace mongo {
         int _memUsageBytes;
     };
 
+    class AccumulatorFactory {
+    public:
+        AccumulatorFactory(
+            intrusive_ptr<Accumulator> (*f)(const Value&),
+            Value * i
+        ) : input(i == NULL ? Value(false) : *i), factory(f) {}
+
+        intrusive_ptr<Accumulator> operator()() const {
+            return (*factory)(input);
+        }
+
+    private:
+        Value input;
+        intrusive_ptr<Accumulator> (*factory)(const Value&);
+    };
 
     class AccumulatorAddToSet : public Accumulator {
     public:
@@ -79,7 +94,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorAddToSet();
@@ -95,7 +110,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorFirst();
@@ -112,7 +127,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorLast();
@@ -127,7 +142,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorSum();
@@ -145,8 +160,8 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> createMin();
-        static intrusive_ptr<Accumulator> createMax();
+        static intrusive_ptr<Accumulator> createMin(const Value& input);
+        static intrusive_ptr<Accumulator> createMax(const Value& input);
 
     private:
         AccumulatorMinMax(int theSense);
@@ -163,7 +178,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorPush();
@@ -179,7 +194,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorAvg();

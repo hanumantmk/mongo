@@ -206,7 +206,7 @@ namespace mongo {
 
     void DocumentSourceGroup::addAccumulator(
             const std::string& fieldName,
-            intrusive_ptr<Accumulator> (*pAccumulatorFactory)(),
+            AccumulatorFactory pAccumulatorFactory,
             const intrusive_ptr<Expression> &pExpression) {
         vFieldName.push_back(fieldName);
         vpAccumulatorFactory.push_back(pAccumulatorFactory);
@@ -353,7 +353,7 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SetUpGroupOpTable, ("MongodOptions_Store"))
                         pGroupExpr = Expression::parseOperand(subElement, vps);
                     }
 
-                    pGroup->addAccumulator(pFieldName, pOp->factory, pGroupExpr);
+                    pGroup->addAccumulator(pFieldName, AccumulatorFactory(pOp->factory, NULL), pGroupExpr);
                 }
 
                 uassert(15954, str::stream() <<
