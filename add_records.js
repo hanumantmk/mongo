@@ -18,10 +18,28 @@ db.test.aggregate([
             negativeSum: {
                 $negativeSum : "$val"
             },
+            lua: {
+                $lua : ["x = 0\n" +
+                        "function mget ()\n" +
+                            "return x\n" +
+                       "end\n" +
+                       "function get ()\n" +
+                            "return x\n" +
+                       "end\n" +
+                       "function mprocess (y)\n" +
+                           "x = x + tonumber(y)\n" +
+                       "end\n" +
+                       "function process (y)\n" +
+                           "x = x + tonumber(y)\n" +
+                       "end\n" +
+                       "function reset ()\n" +
+                       "end\n", "$val"]
+            }
         }
     },
     {
         $project : {
+            lua_group : "$lua",
             add : { $add : [ "$sum", 2 ] },
             addAndMul2 : { $addAndMul2 : [ "$sum", 2 ] },
             tcc : { $tcc : [ "(int)x % 9", "$sum" ] },

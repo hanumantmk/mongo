@@ -33,6 +33,7 @@
 #include <boost/unordered_set.hpp>
 
 #include "mongo/bson/bsontypes.h"
+#include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/value.h"
 
 namespace mongo {
@@ -61,6 +62,10 @@ namespace mongo {
         /// Reset this accumulator to a fresh state ready to receive input.
         virtual void reset() = 0;
 
+        virtual Value serialize(const Value& in) {
+            return Value(DOC(getOpName() << in));
+        }
+
     protected:
         Accumulator() : _memUsageBytes(0) {}
 
@@ -76,11 +81,14 @@ namespace mongo {
         AccumulatorFactory(
             intrusive_ptr<Accumulator> (*f)(const Value&),
             Value * i
-        ) : input(i == NULL ? Value(false) : *i), factory(f) {}
+        ) : input(i == NULL ? Value(false) : *i), factory(f) {
+        }
 
         intrusive_ptr<Accumulator> operator()() const {
             return (*factory)(input);
         }
+
+        AccumulatorFactory(const AccumulatorFactory& rhs) : input(rhs.input), factory(rhs.factory) { }
 
     private:
         Value input;

@@ -159,8 +159,7 @@ namespace mongo {
         const size_t n = vFieldName.size();
         for(size_t i = 0; i < n; ++i) {
             intrusive_ptr<Accumulator> accum = vpAccumulatorFactory[i]();
-            insides[vFieldName[i]] =
-                Value(DOC(accum->getOpName() << vpExpression[i]->serialize(explain)));
+            insides[vFieldName[i]] = accum->serialize(vpExpression[i]->serialize(explain));
         }
 
         if (_doingMerge) {
@@ -340,20 +339,24 @@ MONGO_INITIALIZER_WITH_PREREQUISITES(SetUpGroupOpTable, ("MongodOptions_Store"))
 
                     intrusive_ptr<Expression> pGroupExpr;
 
+                    Value * factoryParamPtr = NULL;
+                    Value factoryParam;
+
                     BSONType elementType = subElement.type();
                     if (elementType == Object) {
                         Expression::ObjectCtx oCtx(Expression::ObjectCtx::DOCUMENT_OK);
                         pGroupExpr = Expression::parseObject(subElement.Obj(), &oCtx, vps);
                     }
                     else if (elementType == Array) {
-                        uasserted(15953, str::stream()
-                                << "aggregating group operators are unary (" << key.name << ")");
+                        pGroupExpr = Expression::parseOperand(subElement.Array()[1], vps);
+                        factoryParam = Value(subElement.Array()[0]);
+                        factoryParamPtr = &factoryParam;
                     }
                     else { /* assume its an atomic single operand */
                         pGroupExpr = Expression::parseOperand(subElement, vps);
                     }
 
-                    pGroup->addAccumulator(pFieldName, AccumulatorFactory(pOp->factory, NULL), pGroupExpr);
+                    pGroup->addAccumulator(pFieldName, AccumulatorFactory(pOp->factory, factoryParamPtr), pGroupExpr);
                 }
 
                 uassert(15954, str::stream() <<

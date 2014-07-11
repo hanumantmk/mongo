@@ -26,6 +26,12 @@
  * it in the license file.
  */
 
+extern "C" {
+#include <luajit-2.0/lua.h>
+#include <luajit-2.0/lualib.h>
+#include <luajit-2.0/lauxlib.h>
+}
+
 #include "mongo/pch.h"
 
 #include "mongo/db/pipeline/accumulator.h"
@@ -128,6 +134,117 @@ namespace mongo {
     const char *AccumulatorNegativeSum::getOpName() const {
         return "$negativeSum";
     }
+
+    class AccumulatorLua : public Accumulator {
+    public:
+        virtual void processInternal(const Value& input, bool merging);
+        virtual Value getValue(bool toBeMerged) const;
+        virtual const char* getOpName() const;
+        virtual void reset();
+        ~AccumulatorLua();
+        virtual Value serialize(const Value& in) {
+            return Value(DOC(getOpName() << DOC_ARRAY(input << in)));
+        }
+
+        static intrusive_ptr<Accumulator> create(const Value& input);
+
+    private:
+        AccumulatorLua(const Value& input);
+
+        Value input;
+        lua_State* L;
+    };
+
+
+    void AccumulatorLua::processInternal(const Value& arg, bool merging) {
+        if (merging) {
+            lua_getglobal(L, "mprocess");
+        } else {
+            lua_getglobal(L, "process");
+        }
+
+        if (arg.getType() == NumberDouble) {
+            lua_pushnumber(L, arg.coerceToDouble());
+        } else if (arg.getType() == NumberLong) {
+            lua_pushinteger(L, arg.coerceToLong());
+        } else if (arg.getType() == NumberInt) {
+            lua_pushinteger(L, arg.coerceToInt());
+        } else if (arg.getType() == String) {
+            lua_pushstring(L, arg.coerceToString().c_str());
+        } else {
+            uassert(-1, "shouldn't be here", 0);
+        }
+
+        if (lua_pcall(L, 1, 0, 0)) {
+            std::cout << "error is: " << lua_tostring(L, -1) << "\n";
+        }
+
+    }
+
+    intrusive_ptr<Accumulator> AccumulatorLua::create(const Value& input) {
+        return new AccumulatorLua(input);
+    }
+
+    Value AccumulatorLua::getValue(bool toBeMerged) const {
+        if (toBeMerged) {
+            lua_getglobal(L, "mget");
+        } else {
+            lua_getglobal(L, "get");
+        }
+
+        if (lua_pcall(L, 0, 1, 0)) {
+            std::cout << "error is: " << lua_tostring(L, -1) << "\n";
+        }
+
+        Value out;
+
+        switch(lua_type(L, -1)) {
+            case LUA_TNUMBER:
+                out = Value(lua_tonumber(L, -1));
+                break;
+            case LUA_TBOOLEAN:
+                out = Value(lua_toboolean(L, -1));
+                break;
+            case LUA_TSTRING:
+                out = Value(lua_tostring(L, -1));
+                break;
+            default:
+                break;
+        }
+
+        lua_pop(L, 1);
+
+        return out;
+    }
+
+    AccumulatorLua::~AccumulatorLua() {
+        lua_close(L);
+    }
+
+    AccumulatorLua::AccumulatorLua(const Value& i) : input(i)
+    {
+        // This is a fixed size Accumulator so we never need to update this
+        _memUsageBytes = sizeof(*this);
+
+        L = luaL_newstate();
+
+        luaL_openlibs(L);
+
+        uassert(-1, "failure in compiling lua", ! luaL_dostring(L, input.coerceToString().c_str()));
+
+    }
+
+    void AccumulatorLua::reset() {
+        lua_getglobal(L, "reset");
+
+        if (lua_pcall(L, 0, 0, 0)) {
+            std::cout << "error is: " << lua_tostring(L, -1) << "\n";
+        }
+    }
+
+    const char *AccumulatorLua::getOpName() const {
+        return "$lua";
+    }
 }
 
 extern "C" void mongo_add_accumulators(void * in) {
@@ -135,6 +252,7 @@ extern "C" void mongo_add_accumulators(void * in) {
 
     struct mongo::GroupOpDesc accumulators[] = {
         { "$negativeSum", mongo::AccumulatorNegativeSum::create },
+        { "$lua", mongo::AccumulatorLua::create },
     };
 
     for (std::size_t i = 0; i < sizeof(accumulators) / sizeof(accumulators[0]); i++) {
