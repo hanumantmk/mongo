@@ -33,7 +33,7 @@ __        __   _                            _          _   _
 json: {
 	"_id" : 1,
 	"lua" : 11990,
-	"lua_group" : 1940,
+	"lua_group" : 990,
 	"add" : 992,
 	"addAndMul2" : 1996,
 	"tcc" : 0,
@@ -61,7 +61,7 @@ __        __   _                            _          _   _
 json: {
 	"_id" : 2,
 	"lua" : 12030,
-	"lua_group" : 2970,
+	"lua_group" : 1030,
 	"add" : 1032,
 	"addAndMul2" : 2076,
 	"tcc" : 4,
@@ -89,7 +89,7 @@ __        __   _                            _          _   _
 json: {
 	"_id" : 3,
 	"lua" : 12070,
-	"lua_group" : 4040,
+	"lua_group" : 1070,
 	"add" : 1072,
 	"addAndMul2" : 2156,
 	"tcc" : 8,
@@ -117,7 +117,7 @@ __        __   _                            _          _   _
 json: {
 	"_id" : 4,
 	"lua" : 12110,
-	"lua_group" : 5150,
+	"lua_group" : 1110,
 	"add" : 1112,
 	"addAndMul2" : 2236,
 	"tcc" : 3,

@@ -33,6 +33,7 @@ db.test.aggregate([
                            "x = x + tonumber(y)\n" +
                        "end\n" +
                        "function reset ()\n" +
+                           "x = 0\n" +
                        "end\n", "$val"]
             }
         }
