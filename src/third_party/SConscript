@@ -130,6 +130,16 @@ if usev8:
             'shim_v8.cpp',
         ])
 
+LuaEnv = env.Clone(
+    SYSLIBDEPS=[
+        env['LIBDEPS_LUA_SYSLIBDEP'],
+    ])
+
+LuaEnv.Library(
+    target="shim_lua",
+    source=[
+        'shim_lua.cpp',
+    ])
 
 gperftoolsEnv = env
 if (GetOption("allocator") == "tcmalloc"):

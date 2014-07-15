@@ -497,6 +497,7 @@ coredbEnv.Library("coredb", [
                            'db/index/key_generator',
                            '$BUILD_DIR/mongo/foundation',
                            '$BUILD_DIR/third_party/shim_snappy',
+                           '$BUILD_DIR/third_party/shim_lua',
                            'server_options',
                            '$BUILD_DIR/mongo/util/cmdline_utils/cmdline_utils',
                            'clientdriver',

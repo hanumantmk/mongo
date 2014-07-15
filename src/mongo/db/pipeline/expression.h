@@ -30,6 +30,12 @@
 
 #include "mongo/pch.h"
 
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
 #include "mongo/db/pipeline/dependencies.h"
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/field_path.h"
@@ -630,6 +636,20 @@ namespace mongo {
 
         VariableMap _variables;
         intrusive_ptr<Expression> _subExpression;
+    };
+
+    class ExpressionLua : public ExpressionVariadic<ExpressionLua> {
+    public:
+        // virtuals from ExpressionNary
+        virtual Value evaluateInternal(Variables* vars) const;
+        virtual const char *getOpName() const;
+        virtual bool isAssociativeAndCommutative() const { return false; }
+        virtual intrusive_ptr<Expression> optimize();
+        ExpressionLua();
+        virtual ~ExpressionLua();
+
+    private:
+        lua_State* L;
     };
 
     class ExpressionMap : public Expression {

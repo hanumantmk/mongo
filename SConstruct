@@ -1718,6 +1718,8 @@ def doConfigure(myenv):
     if solaris:
         conf.CheckLib( "nsl" )
 
+    conf.FindSysLibDep( "lua", ["lua"] )
+
     if usev8 and use_system_version_of_library("v8"):
         if debugBuild:
             v8_lib_choices = ["v8_g", "v8"]

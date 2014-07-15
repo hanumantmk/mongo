@@ -868,6 +868,85 @@ namespace {
         return "$divide";
     }
 
+    /* ---------------------- ExpressionLua --------------------------- */
+
+    ExpressionLua::ExpressionLua() {
+        L = luaL_newstate();
+
+        luaL_openlibs(L);
+    }
+
+    ExpressionLua::~ExpressionLua() {
+        lua_close(L);
+    }
+    
+    intrusive_ptr<Expression> ExpressionLua::optimize() {
+        intrusive_ptr<Expression> pE(ExpressionNary::optimize());
+
+        ExpressionLua *pLua = dynamic_cast<ExpressionLua*>(pE.get());
+        uassert(-1, "only support constant lua functions", pLua);
+
+        if (ExpressionConstant* ec = dynamic_cast<ExpressionConstant*>(pLua->vpOperand[0].get())) {
+            const Value code = ec->getValue();
+
+            uassert(-1, "failure in compiling lua", ! luaL_dostring(L, code.coerceToString().c_str()));
+        } else {
+            uassert(-1, "only support constant lua functions", 0);
+        }
+
+        return pLua;
+    }
+
+    Value ExpressionLua::evaluateInternal(Variables* vars) const {
+        Value out;
+
+        size_t n = vpOperand.size();
+
+        lua_getglobal(L, "expression");
+
+        for (size_t i = 1; i < n; i++) {
+            const Value arg = vpOperand[i]->evaluateInternal(vars);
+
+            if (arg.getType() == NumberDouble) {
+                lua_pushnumber(L, arg.coerceToDouble());
+            } else if (arg.getType() == NumberLong) {
+                lua_pushinteger(L, arg.coerceToLong());
+            } else if (arg.getType() == NumberInt) {
+                lua_pushinteger(L, arg.coerceToInt());
+            } else if (arg.getType() == String) {
+                lua_pushstring(L, arg.coerceToString().c_str());
+            } else {
+                uassert(-1, "shouldn't be here", 0);
+            }
+        }
+
+        uassert(-1, "failure in pcall", ! lua_pcall(L, n - 1, 1, 0));
+
+        switch(lua_type(L, -1)) {
+            case LUA_TNUMBER:
+                out = Value(lua_tonumber(L, -1));
+                break;
+            case LUA_TBOOLEAN:
+                out = Value(lua_toboolean(L, -1));
+                break;
+            case LUA_TSTRING:
+                out = Value(lua_tostring(L, -1));
+                break;
+            default:
+                break;
+        }
+
+        lua_pop(L, 1);
+
+        return out;
+    }
+
+    const char *ExpressionLua::getOpName() const {
+        return "$lua";
+    }
+
+    REGISTER_EXPRESSION("$lua", ExpressionLua::parse);
+
     /* ---------------------- ExpressionObject --------------------------- */
 
     intrusive_ptr<ExpressionObject> ExpressionObject::create() {
