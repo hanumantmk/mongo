@@ -56,7 +56,7 @@ namespace mongo {
         }
     }
 
-    intrusive_ptr<Accumulator> AccumulatorSum::create() {
+    intrusive_ptr<Accumulator> AccumulatorSum::create(const Value& input) {
         return new AccumulatorSum();
     }
 

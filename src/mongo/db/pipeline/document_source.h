@@ -37,6 +37,7 @@
 #include "mongo/db/clientcursor.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/matcher/matcher.h"
+#include "mongo/db/pipeline/accumulator.h"
 #include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/dependencies.h"
 #include "mongo/db/pipeline/expression_context.h"
@@ -455,7 +456,7 @@ namespace mongo {
                 group field
          */
         void addAccumulator(const std::string& fieldName,
-                            intrusive_ptr<Accumulator> (*pAccumulatorFactory)(),
+                            AccumulatorFactory pAccumulatorFactory,
                             const intrusive_ptr<Expression> &pExpression);
 
         /// Tell this source if it is doing a merge from shards. Defaults to false.
@@ -534,7 +535,7 @@ namespace mongo {
           These three vectors parallel each other.
         */
         std::vector<std::string> vFieldName;
-        std::vector<intrusive_ptr<Accumulator> (*)()> vpAccumulatorFactory;
+        std::vector<AccumulatorFactory> vpAccumulatorFactory;
         std::vector<intrusive_ptr<Expression> > vpExpression;
 
 

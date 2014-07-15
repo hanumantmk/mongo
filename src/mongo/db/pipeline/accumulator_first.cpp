@@ -60,7 +60,7 @@ namespace mongo {
     }
 
 
-    intrusive_ptr<Accumulator> AccumulatorFirst::create() {
+    intrusive_ptr<Accumulator> AccumulatorFirst::create(const Value& input) {
         return new AccumulatorFirst();
     }
 

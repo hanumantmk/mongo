@@ -52,7 +52,7 @@ namespace mongo {
         _last = Value();
     }
 
-    intrusive_ptr<Accumulator> AccumulatorLast::create() {
+    intrusive_ptr<Accumulator> AccumulatorLast::create(const Value& input) {
         return new AccumulatorLast();
     }
 

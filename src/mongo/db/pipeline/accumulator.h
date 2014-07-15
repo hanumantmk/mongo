@@ -28,11 +28,18 @@
 
 #pragma once
 
+extern "C" {
+#include <lua.h>
+#include <lualib.h>
+#include <lauxlib.h>
+}
+
 #include "mongo/pch.h"
 
 #include <boost/unordered_set.hpp>
 
 #include "mongo/bson/bsontypes.h"
+#include "mongo/db/pipeline/document.h"
 #include "mongo/db/pipeline/value.h"
 
 namespace mongo {
@@ -61,6 +68,10 @@ namespace mongo {
         /// Reset this accumulator to a fresh state ready to receive input.
         virtual void reset() = 0;
 
+        virtual Value serialize(const Value& in) {
+            return Value(DOC(getOpName() << in));
+        }
+
     protected:
         Accumulator() : _memUsageBytes(0) {}
 
@@ -71,6 +82,24 @@ namespace mongo {
         int _memUsageBytes;
     };
 
+    class AccumulatorFactory {
+    public:
+        AccumulatorFactory(
+            intrusive_ptr<Accumulator> (*f)(const Value&),
+            Value * i
+        ) : input(i == NULL ? Value(false) : *i), factory(f) {
+        }
+
+        intrusive_ptr<Accumulator> operator()() const {
+            return (*factory)(input);
+        }
+
+        AccumulatorFactory(const AccumulatorFactory& rhs) : input(rhs.input), factory(rhs.factory) { }
+
+    private:
+        Value input;
+        intrusive_ptr<Accumulator> (*factory)(const Value&);
+    };
 
     class AccumulatorAddToSet : public Accumulator {
     public:
@@ -79,7 +108,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorAddToSet();
@@ -95,7 +124,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorFirst();
@@ -112,11 +141,32 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorLast();
         Value _last;
+    };
+
+
+    class AccumulatorLua : public Accumulator {
+    public:
+        virtual void processInternal(const Value& input, bool merging);
+        virtual Value getValue(bool toBeMerged) const;
+        virtual const char* getOpName() const;
+        virtual void reset();
+        ~AccumulatorLua();
+        virtual Value serialize(const Value& in) {
+            return Value(DOC(getOpName() << DOC_ARRAY(input << in)));
+        }
+
+        static intrusive_ptr<Accumulator> create(const Value& input);
+
+    private:
+        AccumulatorLua(const Value& input);
+
+        Value input;
+        lua_State* L;
     };
 
 
@@ -127,7 +177,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorSum();
@@ -145,8 +195,8 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> createMin();
-        static intrusive_ptr<Accumulator> createMax();
+        static intrusive_ptr<Accumulator> createMin(const Value& input);
+        static intrusive_ptr<Accumulator> createMax(const Value& input);
 
     private:
         AccumulatorMinMax(int theSense);
@@ -163,7 +213,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorPush();
@@ -179,7 +229,7 @@ namespace mongo {
         virtual const char* getOpName() const;
         virtual void reset();
 
-        static intrusive_ptr<Accumulator> create();
+        static intrusive_ptr<Accumulator> create(const Value& input);
 
     private:
         AccumulatorAvg();
