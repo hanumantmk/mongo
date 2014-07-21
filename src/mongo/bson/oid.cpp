@@ -39,15 +39,16 @@
 
 #define verify MONGO_verify
 
-BOOST_STATIC_ASSERT( sizeof(mongo::OID) == mongo::OID::kOIDSize );
+BOOST_STATIC_ASSERT( sizeof(mongo::OID) == mongo::OID_EV::kOIDSize );
 BOOST_STATIC_ASSERT( sizeof(mongo::OID) == 12 );
 
 namespace mongo {
 
-    void OID::hash_combine(size_t &seed) const {
-        boost::hash_combine(seed, x);
-        boost::hash_combine(seed, y);
-        boost::hash_combine(seed, z);
+    template <class T>
+    void OID_EV::const_methods<T>::hash_combine(size_t &seed) const {
+        boost::hash_combine(seed, x());
+        boost::hash_combine(seed, y());
+        boost::hash_combine(seed, z());
     }
 
     size_t OID::Hasher::operator() (const OID& oid) const {
@@ -66,9 +67,9 @@ namespace mongo {
 
     void OID::foldInPid(OID::MachineAndPid& x) {
         unsigned p = ProcessId::getCurrent().asUInt32();
-        x._pid ^= static_cast<unsigned short>(p);
+        x._pid(x._pid() ^ static_cast<unsigned short>(p));
         // when the pid is greater than 16 bits, let the high bits modulate the machine id field.
-        unsigned short& rest = (unsigned short &) x._machineNumber[1];
+        unsigned short& rest = (unsigned short &) x._machineNumber()[1];
         rest ^= p >> 16;
     }
 
@@ -90,15 +91,16 @@ namespace mongo {
         ourMachineAndPid = genMachineAndPid();
     }
 
-    inline bool OID::MachineAndPid::operator!=(const OID::MachineAndPid& rhs) const {
-        return _pid != rhs._pid || _machineNumber != rhs._machineNumber;
+    template <class T>
+    bool MachineAndPid_EV::const_methods<T>::operator!=(const cview& rhs) const {
+        return _pid() != rhs._pid() || _machineNumber() != rhs._machineNumber();
     }
 
     unsigned OID::getMachineId() {
         unsigned char x[4];
-        x[0] = ourMachineAndPid._machineNumber[0];
-        x[1] = ourMachineAndPid._machineNumber[1];
-        x[2] = ourMachineAndPid._machineNumber[2];
+        x[0] = ourMachineAndPid._machineNumber()[0];
+        x[1] = ourMachineAndPid._machineNumber()[1];
+        x[2] = ourMachineAndPid._machineNumber()[2];
         x[3] = 0;
         return (unsigned&) x[0];
     }
@@ -121,20 +123,20 @@ namespace mongo {
         {
             unsigned t = (unsigned) time(0);
             unsigned char *T = (unsigned char *) &t;
-            _time[0] = T[3]; // big endian order because we use memcmp() to compare OID's
-            _time[1] = T[2];
-            _time[2] = T[1];
-            _time[3] = T[0];
+            _time()[0] = T[3]; // big endian order because we use memcmp() to compare OID's
+            _time()[1] = T[2];
+            _time()[2] = T[1];
+            _time()[3] = T[0];
         }
 
-        _machineAndPid = ourMachineAndPid;
+        _machineAndPid() = ourMachineAndPid;
 
         {
             int new_inc = inc.fetchAndAdd(1);
             unsigned char *T = (unsigned char *) &new_inc;
-            _inc[0] = T[2];
-            _inc[1] = T[1];
-            _inc[2] = T[0];
+            _inc()[0] = T[2];
+            _inc()[1] = T[1];
+            _inc()[2] = T[0];
         }
     }
 
@@ -144,17 +146,17 @@ namespace mongo {
         {
             unsigned t = (unsigned) time(0);
             unsigned char *T = (unsigned char *) &t;
-            _time[0] = T[3]; // big endian order because we use memcmp() to compare OID's
-            _time[1] = T[2];
-            _time[2] = T[1];
-            _time[3] = T[0];
+            _time()[0] = T[3]; // big endian order because we use memcmp() to compare OID's
+            _time()[1] = T[2];
+            _time()[2] = T[1];
+            _time()[3] = T[0];
         }
         
         {
             unsigned long long nextNumber = _initSequential_sequence.fetchAndAdd(1);
             unsigned char* numberData = reinterpret_cast<unsigned char*>(&nextNumber);
             for ( int i=0; i<8; i++ ) {
-                data[4+i] = numberData[7-i];
+                data()[4+i] = numberData[7-i];
             }
         }
     }
@@ -162,8 +164,8 @@ namespace mongo {
     void OID::init( const std::string& s ) {
         verify( s.size() == 24 );
         const char *p = s.c_str();
-        for( size_t i = 0; i < kOIDSize; i++ ) {
-            data[i] = fromHex(p);
+        for( size_t i = 0; i < OID_EV::kOIDSize; i++ ) {
+            data()[i] = fromHex(p);
             p += 2;
         }
     }
@@ -171,24 +173,25 @@ namespace mongo {
     void OID::init(Date_t date, bool max) {
         int time = (int) (date / 1000);
         char* T = (char *) &time;
-        data[0] = T[3];
-        data[1] = T[2];
-        data[2] = T[1];
-        data[3] = T[0];
+        data()[0] = T[3];
+        data()[1] = T[2];
+        data()[2] = T[1];
+        data()[3] = T[0];
 
         if (max)
-            *(long long*)(data + 4) = 0xFFFFFFFFFFFFFFFFll;
+            *(long long*)(data() + 4) = 0xFFFFFFFFFFFFFFFFll;
         else
-            *(long long*)(data + 4) = 0x0000000000000000ll;
+            *(long long*)(data() + 4) = 0x0000000000000000ll;
     }
 
-    time_t OID::asTimeT() {
+    template <class X>
+    time_t OID_EV::const_methods<X>::asTimeT() const {
         int time;
         char* T = (char *) &time;
-        T[0] = data[3];
-        T[1] = data[2];
-        T[2] = data[1];
-        T[3] = data[0];
+        T[0] = data()[3];
+        T[1] = data()[2];
+        T[2] = data()[1];
+        T[3] = data()[0];
         return time;
     }
 
@@ -210,4 +213,6 @@ namespace mongo {
     // numStrsReady will be 0 until after numStrs is initialized because it is a static variable
     bool BSONObjBuilder::numStrsReady = (numStrs[0].size() > 0);
 
+    EV_INSTANTIATE(MachineAndPid_EV)
+    EV_INSTANTIATE(OID_EV)
 }
