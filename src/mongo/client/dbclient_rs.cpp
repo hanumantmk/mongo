@@ -987,9 +987,9 @@ namespace {
             return false;
 
         if ( ns ) {
-            QueryResult * res = (QueryResult*)response.singleData();
-            if ( res->nReturned == 1 ) {
-                BSONObj x(res->data() );
+            QueryResult::view res = view2ptr(response.singleData());
+            if ( res.nReturned() == 1 ) {
+                BSONObj x(res.data() );
                 if ( str::contains( ns , "$cmd" ) ) {
                     if ( isNotMasterErrorString( x["errmsg"] ) )
                         isntMaster();

@@ -85,7 +85,7 @@ namespace mongo {
         if( getsAResponse ){
             verify( dbresponse );
             BufBuilder b( 32768 );
-            b.skip( sizeof( QueryResult ) );
+            b.skip( sizeof( QueryResult::value ) );
             {
                 BSONObjBuilder bob;
 
@@ -99,20 +99,20 @@ namespace mongo {
                 b.appendBuf( obj.objdata() , obj.objsize() );
             }
 
-            QueryResult *qr = (QueryResult*)b.buf();
-            qr->_resultFlags() = ResultFlag_ErrSet | ResultFlag_ShardConfigStale;
-            qr->len = b.len();
-            qr->setOperation( opReply );
-            qr->cursorId = 0;
-            qr->startingFrom = 0;
-            qr->nReturned = 1;
+            QueryResult::view qr = b.buf();
+            qr._resultFlags() = ResultFlag_ErrSet | ResultFlag_ShardConfigStale;
+            qr.msgdata().len(b.len());
+            qr.msgdata().setOperation( opReply );
+            qr.cursorId(0);
+            qr.startingFrom(0);
+            qr.nReturned(1);
             b.decouple();
 
             Message * resp = new Message();
-            resp->setData( qr , true );
+            resp->setData( view2ptr(qr) , true );
 
             dbresponse->response = resp;
-            dbresponse->responseTo = m.header()->id;
+            dbresponse->responseTo = m.header().id();
             return true;
         }
 
@@ -139,8 +139,8 @@ namespace mongo {
         wanted.addToBSON( b );
         received.addToBSON( b, "yourVersion" );
 
-        b.appendBinData( "msg" , m.header()->len , bdtCustom , (char*)(m.singleData()) );
-        LOG(2) << "writing back msg with len: " << m.header()->len << " op: " << m.operation() << endl;
+        b.appendBinData( "msg" , m.header().len() , bdtCustom , view2ptr(m.singleData()) );
+        LOG(2) << "writing back msg with len: " << m.header().len() << " op: " << m.operation() << endl;
         
         // we pass the builder to queueWriteBack so that it can select the writebackId
         // this is important so that the id is guaranteed to be ascending 

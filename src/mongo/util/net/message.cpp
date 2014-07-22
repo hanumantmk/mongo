@@ -45,8 +45,8 @@ namespace mongo {
         if ( empty() ) {
             return;
         }
-        if ( _buf != 0 ) {
-            p.send( (char*)_buf, _buf->len, context );
+        if ( _buf_ptr != 0 ) {
+            p.send( _buf_ptr, _buf_view().len(), context );
         }
         else {
             p.send( _data, context );

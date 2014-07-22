@@ -87,8 +87,8 @@ namespace mongo {
     MONGO_LOG_DEFAULT_COMPONENT_FILE(::mongo::logger::LogComponent::kCommands);
 
     // for diaglog
-    inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop((char *) m.singleData(), m.header()->len); }
-    inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop((char *) m.singleData(), m.header()->len); }
+    inline void opread(Message& m) { if( _diaglog.getLevel() & 2 ) _diaglog.readop(view2ptr(m.singleData()), m.header().len()); }
+    inline void opwrite(Message& m) { if( _diaglog.getLevel() & 1 ) _diaglog.writeop(view2ptr(m.singleData()), m.header().len()); }
 
     void receivedKillCursors(OperationContext* txn, Message& m);
     void receivedUpdate(OperationContext* txn, Message& m, CurOp& op);
@@ -227,7 +227,7 @@ namespace mongo {
 
     static bool receivedQuery(OperationContext* txn, Client& c, DbResponse& dbresponse, Message& m ) {
         bool ok = true;
-        MSGID responseTo = m.header()->id;
+        MSGID responseTo = m.header().id();
 
         DbMessage d(m);
         QueryMessage q(d);
@@ -284,26 +284,26 @@ namespace mongo {
             }
 
             BufBuilder b;
-            b.skip(sizeof(QueryResult));
+            b.skip(sizeof(QueryResult::value));
             b.appendBuf((void*) errObj.objdata(), errObj.objsize());
 
             // todo: call replyToQuery() from here instead of this!!! see dbmessage.h
-            QueryResult * msgdata = (QueryResult *) b.buf();
+            QueryResult::view msgdata = b.buf();
             b.decouple();
-            QueryResult *qr = msgdata;
-            qr->_resultFlags() = ResultFlag_ErrSet;
-            if( scex ) qr->_resultFlags() |= ResultFlag_ShardConfigStale;
-            qr->len = b.len();
-            qr->setOperation(opReply);
-            qr->cursorId = 0;
-            qr->startingFrom = 0;
-            qr->nReturned = 1;
+            QueryResult::view qr = msgdata;
+            qr._resultFlags() = ResultFlag_ErrSet;
+            if( scex ) qr._resultFlags() |= ResultFlag_ShardConfigStale;
+            qr.msgdata().len(b.len());
+            qr.msgdata().setOperation(opReply);
+            qr.cursorId(0);
+            qr.startingFrom(0);
+            qr.nReturned(1);
             resp.reset( new Message() );
-            resp->setData( msgdata, true );
+            resp->setData( view2ptr(msgdata), true );
 
         }
 
-        op.debug().responseLength = resp->header()->dataLen();
+        op.debug().responseLength = resp->header().dataLen();
 
         dbresponse.response = resp.release();
         dbresponse.responseTo = responseTo;
@@ -330,7 +330,7 @@ namespace mongo {
         // before we lock...
         int op = m.operation();
         bool isCommand = false;
-        const char *ns = m.singleData()->_data + 4;
+        const char *ns = m.singleData()._data() + 4;
 
         Client& c = cc();
         if (!c.isGod()) {
@@ -426,7 +426,7 @@ namespace mongo {
         }
         else if ( op == dbMsg ) {
             // deprecated - replaced by commands
-            char *p = m.singleData()->_data;
+            char *p = m.singleData()._data();
             int len = strlen(p);
             if ( len > 400 )
                 log() << curTimeMillis64() % 10000 <<
@@ -439,7 +439,7 @@ namespace mongo {
                 resp->setData( opReply , "i am fine - dbMsg deprecated");
 
             dbresponse.response = resp;
-            dbresponse.responseTo = m.header()->id;
+            dbresponse.responseTo = m.header().id();
         }
         else {
             try {
@@ -514,7 +514,7 @@ namespace mongo {
     } /* assembleResponse() */
 
     void receivedKillCursors(OperationContext* txn, Message& m) {
-        int *x = (int *) m.singleData()->_data;
+        int *x = (int *) m.singleData()._data();
         x++; // reserved
         int n = *x++;
 
@@ -568,11 +568,11 @@ namespace mongo {
         BSONObj query = d.nextJsObj();
 
         verify( d.moreJSObjs() );
-        verify( query.objsize() < m.header()->dataLen() );
+        verify( query.objsize() < m.header().dataLen() );
         BSONObj toupdate = d.nextJsObj();
         uassert( 10055 , "update object too large", toupdate.objsize() <= BSONObjMaxUserSize);
-        verify( toupdate.objsize() < m.header()->dataLen() );
-        verify( query.objsize() + toupdate.objsize() < m.header()->dataLen() );
+        verify( toupdate.objsize() < m.header().dataLen() );
+        verify( query.objsize() + toupdate.objsize() < m.header().dataLen() );
         bool upsert = flags & UpdateOption_Upsert;
         bool multi = flags & UpdateOption_Multi;
         bool broadcast = flags & UpdateOption_Broadcast;
@@ -656,7 +656,7 @@ namespace mongo {
         wunit.commit();
     }
 
-    QueryResult* emptyMoreResult(long long);
+    QueryResult::view emptyMoreResult(long long);
 
     bool receivedGetMore(OperationContext* txn, DbResponse& dbresponse, Message& m, CurOp& curop ) {
         bool ok = true;
@@ -675,7 +675,7 @@ namespace mongo {
         scoped_ptr<Timer> timer;
         int pass = 0;
         bool exhaust = false;
-        QueryResult* msgdata = 0;
+        QueryResult::view msgdata = 0;
         OpTime last;
         while( 1 ) {
             bool isCursorAuthorized = false;
@@ -725,7 +725,7 @@ namespace mongo {
                 break;
             }
             
-            if (msgdata == 0) {
+            if (view2ptr(msgdata) == 0) {
                 // this should only happen with QueryOption_AwaitData
                 exhaust = false;
                 massert(13073, "shutting down", !inShutdown() );
@@ -762,18 +762,18 @@ namespace mongo {
             curop.debug().exceptionInfo = ex->getInfo();
 
             replyToQuery(ResultFlag_ErrSet, m, dbresponse, errObj);
-            curop.debug().responseLength = dbresponse.response->header()->dataLen();
+            curop.debug().responseLength = dbresponse.response->header().dataLen();
             curop.debug().nreturned = 1;
             return ok;
         }
 
         Message *resp = new Message();
-        resp->setData(msgdata, true);
-        curop.debug().responseLength = resp->header()->dataLen();
-        curop.debug().nreturned = msgdata->nReturned;
+        resp->setData(view2ptr(msgdata), true);
+        curop.debug().responseLength = resp->header().dataLen();
+        curop.debug().nreturned = msgdata.nReturned();
 
         dbresponse.response = resp;
-        dbresponse.responseTo = m.header()->id;
+        dbresponse.responseTo = m.header().id();
         
         if( exhaust ) {
             curop.debug().exhaust = true;

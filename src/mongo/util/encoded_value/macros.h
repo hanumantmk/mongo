@@ -65,13 +65,14 @@
 
 #define EV_DECL_NS_END \
     class cview : public const_methods<encoded_value::const_pointer_storage_type<layout_type> > { \
-        friend const void* view2ptr(cview c); \
+        friend const char* cview2ptr(cview c); \
     public: \
         cview(const char* base = NULL) { \
             _storage.bytes = base; \
         } \
     }; \
     class view : public mutable_methods<encoded_value::pointer_storage_type<layout_type> > { \
+        friend char* view2ptr(view v); \
     public: \
         view(char* base = NULL) { \
             _storage.bytes = base; \
@@ -95,8 +96,11 @@
         typedef cview ev_cview_type; \
         typedef view ev_view_type; \
     }; \
-    inline const void* view2ptr(cview c) { \
+    inline const char* cview2ptr(cview c) { \
         return c._storage.bytes; \
+    } \
+    inline char* view2ptr(view v) { \
+        return v._storage.bytes; \
     } \
 };
 

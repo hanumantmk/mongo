@@ -91,30 +91,51 @@ namespace mongo {
    Note that the update field layout is very similar layout to Query.
 */
 
+    EV_DECL_NS_BEGIN(QueryResult)
 
 #pragma pack(1)
-    struct QueryResult : public MsgData {
-        long long cursorId;
-        int startingFrom;
-        int nReturned;
-        const char *data() {
-            return (char *) (((int *)&nReturned)+1);
-        }
-        int resultFlags() {
-            return dataAsInt();
-        }
-        int& _resultFlags() {
-            return dataAsInt();
-        }
-        void setResultFlagsToOk() {
-            _resultFlags() = ResultFlag_AwaitCapable;
-        }
-        void initializeResultFlags() {
-            _resultFlags() = 0;   
-        }
-    };
-
+        /* see http://dochub.mongodb.org/core/mongowireprotocol
+        */
+        EV_DECL_STRUCT {
+            MsgData::value msgdata;
+            long long cursorId;
+            int startingFrom;
+            int nReturned;
+        };
 #pragma pack()
+
+        EV_DECL_CONST_METHODS_BEGIN
+        public:
+            EV_DECL_VIEW_ACCESSOR(msgdata)
+            EV_DECL_ACCESSOR(cursorId)
+            EV_DECL_ACCESSOR(startingFrom)
+            EV_DECL_ACCESSOR(nReturned)
+            const char *data() const {
+                return _storage.bytes + sizeof(layout_type);
+            }
+        EV_DECL_CONST_METHODS_END
+
+        EV_DECL_MUTABLE_METHODS_BEGIN
+        public:
+            EV_DECL_VIEW_MUTATOR(msgdata)
+            EV_DECL_MUTATOR(cursorId)
+            EV_DECL_MUTATOR(startingFrom)
+            EV_DECL_MUTATOR(nReturned)
+            int resultFlags() {
+                return msgdata().dataAsInt();
+            }
+            int& _resultFlags() {
+                return msgdata().dataAsInt();
+            }
+            void setResultFlagsToOk() {
+                _resultFlags() = ResultFlag_AwaitCapable;
+            }
+            void initializeResultFlags() {
+                _resultFlags() = 0;   
+            }
+        EV_DECL_MUTABLE_METHODS_END
+
+    EV_DECL_NS_END
 
     /* For the database/server protocol, these objects and functions encapsulate
        the various messages transmitted over the connection.
@@ -125,8 +146,8 @@ namespace mongo {
     public:
         DbMessage(const Message& _m) : m(_m) , mark(0) {
             // for received messages, Message has only one buffer
-            theEnd = _m.singleData()->_data + _m.header()->dataLen();
-            char *r = _m.singleData()->_data;
+            theEnd = _m.singleData()._data() + _m.header().dataLen();
+            char *r = _m.singleData()._data();
             reserved = (int *) r;
             data = r + 4;
             nextjsobj = data;
@@ -276,7 +297,7 @@ namespace mongo {
             if ( d.moreJSObjs() ) {
                 fields = d.nextJsObj();
             }
-            queryOptions = d.msg().header()->dataAsInt();
+            queryOptions = d.msg().header().dataAsInt();
         }
     };
 
