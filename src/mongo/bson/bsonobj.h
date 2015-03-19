@@ -37,8 +37,11 @@
 #include <vector>
 
 #include "mongo/bson/bsonelement.h"
+#include "mongo/base/data_range.h"
+#include "mongo/base/data_type.h"
 #include "mongo/base/data_view.h"
 #include "mongo/base/disallow_copying.h"
+#include "mongo/base/error_codes.h"
 #include "mongo/base/string_data.h"
 #include "mongo/bson/util/builder.h"
 #include "mongo/platform/atomic_word.h"
@@ -744,4 +747,63 @@ namespace mongo {
      */
 #define BSONForEach(elemName, obj) for (BSONElement elemName : (obj))
 
+    template <>
+    struct DataType<BSONObj> {
+        static Status load(BSONObj* bson, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            auto len = ConstDataRange(ptr, ptr + length).readLE<uint32_t>();
+            BSONObj tmp;
+            bool require_out;
+
+            if (len.isOK()) {
+                if ((len.getValue() > length) || (len.getValue() < 5)) {
+                    return Status(ErrorCodes::BadValue, "Out of Range");
+                }
+            } else {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            if (bson) {
+                require_out = true;
+            } else {
+                bson = &tmp;
+                require_out = false;
+            }
+
+            try {
+                new (bson) BSONObj(ptr);
+            }
+            catch ( ... ) {
+                return Status(ErrorCodes::FailedToParse, "Invalid BSON");
+            }
+
+            if (advanced) {
+                *advanced = len.getValue();
+            }
+
+            if (! require_out) {
+                delete bson;
+            }
+
+            return Status::OK();
+        }
+
+        static Status store(const BSONObj& bson, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (bson.objsize() > static_cast<int>(length)) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            if (ptr) {
+                std::memcpy(ptr, bson.objdata(), bson.objsize());
+            }
+
+            if (advanced) {
+                *advanced = bson.objsize();
+            }
+
+            return Status::OK();
+        }
+
+    };
 }
