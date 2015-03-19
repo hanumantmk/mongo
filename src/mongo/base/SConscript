@@ -32,7 +32,10 @@ env.CppUnitTest('base_test',
                  'status_test.cpp',
                  'encoded_value_storage_test.cpp',
                  'data_view_test.cpp',
+                 'data_range_test.cpp',
                  'data_cursor_test.cpp',
+                 'data_range_cursor_test.cpp',
+                 'data_type_range_test.cpp',
                  'counter_test.cpp',
                  'string_data_test.cpp'
                 ])

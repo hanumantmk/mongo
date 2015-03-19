@@ -29,7 +29,9 @@
 
 #include <cstddef>
 #include <cstring>
+#include <limits>
 
+#include "mongo/base/data_type.h"
 #include "mongo/base/data_view.h"
 #include "mongo/platform/endian.h"
 
@@ -84,20 +86,31 @@ namespace mongo {
 
         template <typename T>
         ConstDataCursor& skip() {
-            *this = view() + sizeof(T);
+            size_t advance = 0;
+
+            auto x = DataType<T>::load(nullptr, view(), std::numeric_limits<size_t>::max(), &advance);
+            if (x.isOK()) {
+                *this += advance;
+            }
+
             return *this;
         }
 
         template <typename T>
         ConstDataCursor& readNativeAndAdvance(T* t) {
-            readNative(t);
-            skip<T>();
+            size_t advance = 0;
+
+            auto x = DataType<T>::load(t, view(), std::numeric_limits<size_t>::max(), &advance);
+            if (x.isOK()) {
+                *this += advance;
+            }
+
             return *this;
         }
 
         template <typename T>
         T readNativeAndAdvance() {
-            T out;
+            T out{};
             readNativeAndAdvance(&out);
             return out;
         }
@@ -166,20 +179,31 @@ namespace mongo {
 
         template <typename T>
         DataCursor& skip() {
-            *this = view() + sizeof(T);
+            size_t advance = 0;
+
+            auto x = DataType<T>::load(nullptr, view(), std::numeric_limits<size_t>::max(), &advance);
+            if (x.isOK()) {
+                *this += advance;
+            }
+
             return *this;
         }
 
         template <typename T>
         DataCursor& readNativeAndAdvance(T* t) {
-            readNative(t);
-            skip<T>();
+            size_t advance = 0;
+
+            auto x = DataType<T>::load(t, view(), std::numeric_limits<size_t>::max(), &advance);
+            if (x.isOK()) {
+                *this += advance;
+            }
+
             return *this;
         }
 
         template <typename T>
         T readNativeAndAdvance() {
-            T out;
+            T out{};
             readNativeAndAdvance(&out);
             return out;
         }
@@ -196,8 +220,14 @@ namespace mongo {
 
         template <typename T>
         DataCursor& writeNativeAndAdvance(const T& value) {
-            writeNative(value);
-            skip<T>();
+            size_t advance = 0;
+
+            auto x = DataType<T>::store(value, view(), std::numeric_limits<size_t>::max(), &advance);
+
+            if (x.isOK()) {
+                *this += advance;
+            }
+
             return *this;
         }
 
