@@ -98,10 +98,6 @@ namespace mongo {
 
         template<typename T>
         DataView& writeNative(const T& value, std::size_t offset = 0) {
-#if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
-            static_assert(std::is_trivially_copyable<T>::value,
-                          "Type for DataView::writeNative must be trivially copyable");
-#endif
             DataType<T>::store(value, view(offset), std::numeric_limits<size_t>::max());
 
             return *this;

@@ -41,7 +41,9 @@ namespace mongo {
         {
 #if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
             static_assert(std::is_trivially_copyable<T>::value,
-                          "Type for read must be trivially copyable");
+                          "The generic DataType implementation requires values "
+                          "to be trivially copiable.  You may specialize the "
+                          "template to use it with other types.");
 #endif
 
             if (sizeof (T) > length) {
@@ -63,7 +65,9 @@ namespace mongo {
         {
 #if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
             static_assert(std::is_trivially_copyable<T>::value,
-                          "Type for write must be trivially copyable");
+                          "The generic DataType implementation requires values "
+                          "to be trivially copiable.  You may specialize the "
+                          "template to use it with other types.");
 #endif
 
             if (sizeof (T) > length) {

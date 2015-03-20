@@ -36,6 +36,7 @@ env.CppUnitTest('base_test',
                  'data_cursor_test.cpp',
                  'data_range_cursor_test.cpp',
                  'data_type_range_test.cpp',
+                 'data_builder_test.cpp',
                  'counter_test.cpp',
                  'string_data_test.cpp'
                 ])
