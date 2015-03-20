@@ -159,7 +159,7 @@ namespace mongo {
                 if (advance > length() - offset) {
 
                     // subtract the remaining bytes from the object size
-                    return advance - (length() - offset);
+                    return advance - (length() - (offset + 1));
                 } else {
 
                     // object fits, just put it in

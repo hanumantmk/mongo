@@ -45,7 +45,8 @@ namespace mongo {
     class ConstDataTypeRange {
 
     public:
-        class const_iterator : public std::iterator<std::input_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
+        class const_iterator : public std::iterator<
+            std::input_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
         public:
             const_iterator()
                 : _cdrc(nullptr) {
