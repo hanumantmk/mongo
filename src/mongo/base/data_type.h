@@ -32,10 +32,16 @@
 
 #include "mongo/base/error_codes.h"
 #include "mongo/base/status_with.h"
+#include "mongo/platform/endian.h"
 
 namespace mongo {
 
-    template <typename T>
+    namespace {
+        template <typename T>
+        struct VoidWrapper {};
+    };
+
+    template <typename T, template <typename> class X = VoidWrapper>
     struct DataType {
         static Status load(T* t, const char *ptr, size_t length, size_t *advanced = nullptr)
         {
@@ -83,6 +89,64 @@ namespace mongo {
             }
 
             return Status::OK();
+        }
+
+    };
+
+    template <typename T>
+    struct BigEndian {
+        T value;
+    };
+
+    template <typename T>
+    struct LittleEndian {
+        T value;
+    };
+
+    template <typename T>
+    struct DataType<BigEndian<T>> {
+        static Status load(BigEndian<T>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (t) {
+                Status x = DataType<T>::load(&t->value, ptr, length, advanced);
+
+                if (x.isOK()) {
+                    t->value = endian::bigToNative(t->value);
+                }
+
+                return x;
+            } else {
+                return DataType<T>::load(nullptr, ptr, length, advanced);
+            }
+        }
+
+        static Status store(const BigEndian<T>& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            return DataType<T>::store(endian::nativeToBig(t.value), ptr, length, advanced);
+        }
+
+    };
+
+    template <typename T>
+    struct DataType<LittleEndian<T>> {
+        static Status load(LittleEndian<T>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (t) {
+                Status x = DataType<T>::load(&t->value, ptr, length, advanced);
+
+                if (x.isOK()) {
+                    t->value = endian::littleToNative(t->value);
+                }
+
+                return x;
+            } else {
+                return DataType<T>::load(nullptr, ptr, length, advanced);
+            }
+        }
+
+        static Status store(const LittleEndian<T>& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            return DataType<T>::store(endian::nativeToLittle(t.value), ptr, length, advanced);
         }
 
     };

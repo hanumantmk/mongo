@@ -53,6 +53,8 @@ namespace mongo {
         ASSERT_EQUALS(native, cdv.readNative<uint32_t>());
         ASSERT_EQUALS(native, cdv.readLE<uint32_t>(sizeof(uint32_t)));
         ASSERT_EQUALS(native, cdv.readBE<uint32_t>(sizeof(uint32_t) * 2));
+
+        ASSERT_EQUALS(native, cdv.readNative<BigEndian<uint32_t>>(sizeof(uint32_t) * 2).value);
     }
 
     TEST(DataView, DataView) {
@@ -63,7 +65,8 @@ namespace mongo {
 
         dv.writeNative(native);
         dv.writeLE(native, sizeof(uint32_t));
-        dv.writeBE(native, sizeof(uint32_t) * 2);
+//        dv.writeBE(native, sizeof(uint32_t) * 2);
+        dv.writeNative(BigEndian<uint32_t>{native}, sizeof(uint32_t) * 2);
 
         ASSERT_EQUALS(buf, dv.view());
         ASSERT_EQUALS(buf + 5, dv.view(5));
