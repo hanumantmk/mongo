@@ -54,12 +54,35 @@ namespace mongo {
         ASSERT_EQUALS(buf + sizeof(uint32_t), cdrc.view().getValue());
         ASSERT_EQUALS(true, cdrc.advance(10).isOK());
         ASSERT_EQUALS(false, cdrc.readNativeAndAdvance<char>().isOK());
+
+        cdrc = backup;
+        auto x = cdrc.readNativeAndAdvance<std::tuple<uint16_t, LittleEndian<uint32_t>, BigEndian<uint64_t>>>();
+        ASSERT_EQUALS(true, x.isOK());
+        ASSERT_EQUALS(1u, std::get<0>(x.getValue()));
+        ASSERT_EQUALS(2u, std::get<1>(x.getValue()).value);
+        ASSERT_EQUALS(3u, std::get<2>(x.getValue()).value);
+
+        uint16_t first;
+        LittleEndian<uint32_t> second;
+        BigEndian<uint64_t> third;
+
+        auto y = std::tie(first, second, third);
+
+        cdrc = backup;
+        auto z = cdrc.readNativeAndAdvance(&y);
+
+        ASSERT_EQUALS(true, z.isOK());
+
+        ASSERT_EQUALS(1u, first);
+        ASSERT_EQUALS(2u, second.value);
+        ASSERT_EQUALS(3u, third.value);
     }
 
     TEST(DataRangeCursor, DataRangeCursor) {
         char buf[100] = { 0 };
 
         DataRangeCursor dc(buf, buf + 14);
+        DataRangeCursor write_backup = dc;
 
         ASSERT_EQUALS(true, dc.writeNativeAndAdvance<uint16_t>(1).isOK());
         ASSERT_EQUALS(true, dc.writeLEAndAdvance<uint32_t>(2).isOK());
@@ -67,11 +90,34 @@ namespace mongo {
         ASSERT_EQUALS(false, dc.writeNativeAndAdvance<char>(1).isOK());
 
         ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
+        ConstDataRangeCursor read_backup = cdrc;
 
         ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readNativeAndAdvance<uint16_t>().getValue());
         ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readLEAndAdvance<uint32_t>().getValue());
         ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readBEAndAdvance<uint64_t>().getValue());
         ASSERT_EQUALS(static_cast<char>(0), cdrc.readNativeAndAdvance<char>().getValue());
+
+        dc = write_backup;
+        cdrc = read_backup;
+
+        std::memset(buf, 0, sizeof(buf));
+
+        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, LittleEndian<uint32_t>{2u}, BigEndian<uint64_t>{3u}));
+        ASSERT_EQUALS(true, x.isOK());
+
+        uint16_t first;
+        LittleEndian<uint32_t> second;
+        BigEndian<uint64_t> third;
+
+        auto out = std::tie(first, second, third);
+
+        x = cdrc.readNativeAndAdvance(&out);
+
+        ASSERT_EQUALS(true, x.isOK());
+
+        ASSERT_EQUALS(1u, first);
+        ASSERT_EQUALS(2u, second.value);
+        ASSERT_EQUALS(3u, third.value);
     }
 
 } // namespace mongo

@@ -36,12 +36,13 @@
 
 namespace mongo {
 
-    namespace {
-        template <typename T>
-        struct VoidWrapper {};
-    };
+    template <typename T>
+    Status data_type_load(T* t, const char *ptr, size_t length, size_t *advanced);
 
-    template <typename T, template <typename> class X = VoidWrapper>
+    template <typename T>
+    Status data_type_store(const T& t, char *ptr, size_t length, size_t *advanced);
+
+    template <typename T>
     struct DataType {
         static Status load(T* t, const char *ptr, size_t length, size_t *advanced = nullptr)
         {
@@ -108,7 +109,7 @@ namespace mongo {
         static Status load(BigEndian<T>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
         {
             if (t) {
-                Status x = DataType<T>::load(&t->value, ptr, length, advanced);
+                Status x = data_type_load(&t->value, ptr, length, advanced);
 
                 if (x.isOK()) {
                     t->value = endian::bigToNative(t->value);
@@ -116,13 +117,13 @@ namespace mongo {
 
                 return x;
             } else {
-                return DataType<T>::load(nullptr, ptr, length, advanced);
+                return data_type_load(decltype(&t->value){nullptr}, ptr, length, advanced);
             }
         }
 
         static Status store(const BigEndian<T>& t, char *ptr, size_t length, size_t *advanced = nullptr)
         {
-            return DataType<T>::store(endian::nativeToBig(t.value), ptr, length, advanced);
+            return data_type_store(endian::nativeToBig(t.value), ptr, length, advanced);
         }
 
     };
@@ -132,7 +133,7 @@ namespace mongo {
         static Status load(LittleEndian<T>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
         {
             if (t) {
-                Status x = DataType<T>::load(&t->value, ptr, length, advanced);
+                Status x = data_type_load(&t->value, ptr, length, advanced);
 
                 if (x.isOK()) {
                     t->value = endian::littleToNative(t->value);
@@ -140,15 +141,110 @@ namespace mongo {
 
                 return x;
             } else {
-                return DataType<T>::load(nullptr, ptr, length, advanced);
+                return data_type_load(decltype(&t->value){nullptr}, ptr, length, advanced);
             }
         }
 
         static Status store(const LittleEndian<T>& t, char *ptr, size_t length, size_t *advanced = nullptr)
         {
-            return DataType<T>::store(endian::nativeToLittle(t.value), ptr, length, advanced);
+            return data_type_store(endian::nativeToLittle(t.value), ptr, length, advanced);
         }
 
     };
+
+    template <typename... Args>
+    struct DataType<std::tuple<Args...>> {
+        using tuple_type = std::tuple<Args...>;
+
+        static Status load(tuple_type* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            size_t tmp = 0;
+
+            Status x = _load<0>(t, ptr, length, &tmp);
+
+            if (advanced && x.isOK()) {
+                *advanced = tmp;
+            }
+
+            return x;
+        }
+
+        static Status store(const tuple_type& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            size_t tmp = 0;
+
+            Status x = _store<0>(t, ptr, length, &tmp);
+
+            if (advanced && x.isOK()) {
+                *advanced = tmp;
+            }
+
+            return x;
+        }
+
+    private:
+
+        template <size_t N> static
+        typename std::enable_if<N != sizeof...(Args), Status>::type
+        _load(tuple_type* t, const char *ptr, size_t length, size_t *advanced)
+        {
+            size_t local_advanced;
+            auto t_ptr = t ? &std::get<N>(*t) : nullptr;
+
+            Status x = data_type_load(t_ptr, ptr + *advanced, length - *advanced, &local_advanced);
+
+            if (x.isOK()) {
+                *advanced += local_advanced;
+
+                x = _load<N+1>(t, ptr, length, advanced);
+            }
+
+            return x;
+        }
+
+        template <size_t N> static
+        typename std::enable_if<N != sizeof...(Args), Status>::type
+        _store(const tuple_type& t, char *ptr, size_t length, size_t *advanced)
+        {
+            size_t local_advanced;
+            char *adjusted_ptr = ptr ? ptr + *advanced : nullptr;
+
+            Status x = data_type_store(std::get<N>(t), adjusted_ptr, length - *advanced, &local_advanced);
+
+            if (x.isOK()) {
+                *advanced += local_advanced;
+
+                x = _store<N+1>(t, ptr, length, advanced);
+            }
+
+            return x;
+        }
+
+        template <size_t N> static
+        typename std::enable_if<N == sizeof...(Args), Status>::type
+        _load(tuple_type* t, const char *ptr, size_t length, size_t *advanced)
+        {
+            return Status::OK();
+        }
+
+        template <size_t N> static
+        typename std::enable_if<N == sizeof...(Args), Status>::type
+        _store(const tuple_type& t, char *ptr, size_t length, size_t *advanced)
+        {
+            return Status::OK();
+        }
+    };
+
+    template <typename T>
+    Status data_type_load(T* t, const char *ptr, size_t length, size_t *advanced)
+    {
+        return DataType<T>::load(t, ptr, length, advanced);
+    }
+
+    template <typename T>
+    Status data_type_store(const T& t, char *ptr, size_t length, size_t *advanced)
+    {
+        return DataType<T>::store(t, ptr, length, advanced);
+    }
 
 } // namespace mongo
