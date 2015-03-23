@@ -111,7 +111,8 @@ namespace mongo {
         LittleEndian<uint32_t> third;
         BigEndian<uint64_t> fourth;
 
-        auto out = std::tie(first, second, third, fourth);
+        auto helper = std::tie(second, third, fourth);
+        auto out = std::tie(first, helper);
 
         x = cdrc.readNativeAndAdvance(&out);
 
