@@ -98,20 +98,21 @@ namespace mongo {
         ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readBEAndAdvance<uint64_t>().getValue());
         ASSERT_EQUALS(static_cast<char>(0), cdrc.readNativeAndAdvance<char>().getValue());
 
-        dc = DataRangeCursor(buf, buf + 18);
+        dc = DataRangeCursor(buf, buf + 20);
         cdrc = read_backup;
 
         std::memset(buf, 0, sizeof(buf));
 
-        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, Terminated<'\0'>{"foo", 3}, LittleEndian<uint32_t>{2u}, BigEndian<uint64_t>{3u}));
+        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, Terminated<'\0'>{"foo", 3}, LittleEndian<uint32_t>{2u}, Sized<2>{"XX"}, BigEndian<uint64_t>{3u}));
         ASSERT_EQUALS(true, x.isOK());
 
         uint16_t first;
         Terminated<'\0'> second;
         LittleEndian<uint32_t> third;
-        BigEndian<uint64_t> fourth;
+        Sized<2> fourth;
+        BigEndian<uint64_t> fifth;
 
-        auto helper = std::tie(second, third, fourth);
+        auto helper = std::tie(second, third, fourth, fifth);
         auto out = std::tie(first, helper);
 
         x = cdrc.readNativeAndAdvance(&out);
@@ -122,7 +123,8 @@ namespace mongo {
         ASSERT_EQUALS(3u, second.len);
         ASSERT_EQUALS(0, std::memcmp("foo", second.ptr, 3));
         ASSERT_EQUALS(2u, third.value);
-        ASSERT_EQUALS(3u, fourth.value);
+        ASSERT_EQUALS(0, std::memcmp("XX", fourth.ptr, 2));
+        ASSERT_EQUALS(3u, fifth.value);
 
         ASSERT_EQUALS(false, dc.writeNativeAndAdvance(uint8_t{1u}).isOK());
     }

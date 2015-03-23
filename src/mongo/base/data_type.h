@@ -201,6 +201,48 @@ namespace mongo {
         }
     };
 
+    template <size_t len>
+    struct Sized {
+        const char* ptr;
+    };
+
+    template <size_t len>
+    struct DataType<Sized<len>> {
+        static Status load(Sized<len>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (len > length) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            if (t) {
+                *t = Sized<len>{ptr};
+            }
+
+            if (advanced) {
+                *advanced = len;
+            }
+
+            return Status::OK();
+        }
+
+        static Status store(const Sized<len>& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (len > length) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            if (ptr) {
+                std::memcpy(ptr, t.ptr, len);
+            }
+
+            if (advanced) {
+                *advanced = len;
+            }
+
+            return Status::OK();
+        }
+    };
+
     template <typename... Args>
     struct DataType<std::tuple<Args...>> {
         using tuple_type = std::tuple<Args...>;
