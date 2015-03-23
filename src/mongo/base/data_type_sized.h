@@ -38,6 +38,8 @@ namespace mongo {
 
     template <size_t len>
     struct Sized {
+        Sized() {}
+        Sized(const char *p) : ptr(p) {}
         const char* ptr;
     };
 
@@ -50,7 +52,7 @@ namespace mongo {
             }
 
             if (t) {
-                *t = Sized<len>{ptr};
+                *t = Sized<len>(ptr);
             }
 
             if (advanced) {

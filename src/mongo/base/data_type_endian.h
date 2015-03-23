@@ -39,11 +39,15 @@ namespace mongo {
 
     template <typename T>
     struct BigEndian {
+        BigEndian() {}
+        BigEndian(T t) : value(t) {}
         T value;
     };
 
     template <typename T>
     struct LittleEndian {
+        LittleEndian() {}
+        LittleEndian(T t) : value(t) {}
         T value;
     };
 

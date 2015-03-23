@@ -108,7 +108,7 @@ namespace mongo {
 
         std::memset(buf, 0, sizeof(buf));
 
-        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, Terminated<'\0'>{"foo", 3}, LittleEndian<uint32_t>{2u}, Sized<2>{"XX"}, BigEndian<uint64_t>{3u}));
+        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t(1u), Terminated<'\0'>("foo", 3), LittleEndian<uint32_t>(2u), Sized<2>("XX"), BigEndian<uint64_t>(3ul)));
         ASSERT_EQUALS(true, x.isOK());
 
         uint16_t first;
@@ -131,7 +131,7 @@ namespace mongo {
         ASSERT_EQUALS(0, std::memcmp("XX", fourth.ptr, 2));
         ASSERT_EQUALS(3u, fifth.value);
 
-        ASSERT_EQUALS(false, dc.writeNativeAndAdvance(uint8_t{1u}).isOK());
+        ASSERT_EQUALS(false, dc.writeNativeAndAdvance(uint8_t(1u)).isOK());
     }
 
 } // namespace mongo

@@ -38,6 +38,9 @@ namespace mongo {
 
     template <char byte>
     struct Terminated {
+        Terminated() {}
+        Terminated(const char *p, size_t l) : ptr(p), len(l) {}
+
         const char* ptr;
         size_t len;
     };
@@ -55,7 +58,7 @@ namespace mongo {
             size_t t_len = x - ptr;
 
             if (t) {
-                *t = Terminated<byte>{ptr, t_len};
+                *t = Terminated<byte>(ptr, t_len);
             }
 
             if (advanced) {
