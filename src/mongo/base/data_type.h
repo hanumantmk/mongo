@@ -30,6 +30,7 @@
 #include <cstring>
 #include <iostream>
 #include <type_traits>
+#include <tuple>
 
 #include "mongo/base/error_codes.h"
 #include "mongo/base/status_with.h"
@@ -163,7 +164,7 @@ namespace mongo {
     struct DataType<Terminated<byte>> {
         static Status load(Terminated<byte>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
         {
-            char* x = static_cast<char *>(std::memchr(ptr, byte, length));
+            const char* x = static_cast<const char *>(std::memchr(ptr, byte, length));
 
             if (! x) {
                 return Status(ErrorCodes::BadValue, "Out of Range");
@@ -279,7 +280,7 @@ namespace mongo {
         typename std::enable_if<N != sizeof...(Args), Status>::type
         _load(tuple_type* t, const char *ptr, size_t length, size_t *advanced)
         {
-            size_t local_advanced;
+            size_t local_advanced = 0;
             auto t_ptr = t ? &std::get<N>(*t) : nullptr;
 
             Status x = data_type_load(t_ptr, ptr + *advanced, length - *advanced, &local_advanced);
@@ -297,7 +298,7 @@ namespace mongo {
         typename std::enable_if<N != sizeof...(Args), Status>::type
         _store(const tuple_type& t, char *ptr, size_t length, size_t *advanced)
         {
-            size_t local_advanced;
+            size_t local_advanced = 0;
             char *adjusted_ptr = ptr ? ptr + *advanced : nullptr;
 
             Status x = data_type_store(std::get<N>(t), adjusted_ptr, length - *advanced, &local_advanced);
