@@ -32,6 +32,7 @@
 
 #include "mongo/base/data_type_endian.h"
 #include "mongo/base/data_type_sized.h"
+#include "mongo/base/data_type_status_or.h"
 #include "mongo/base/data_type_terminated.h"
 #include "mongo/base/data_type_tuple.h"
 
@@ -108,7 +109,7 @@ namespace mongo {
 
         std::memset(buf, 0, sizeof(buf));
 
-        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t(1u), Terminated<'\0'>("foo", 3), LittleEndian<uint32_t>(2u), Sized<2>("XX"), BigEndian<uint64_t>(3ul)));
+        auto x = dc.writeNative(std::make_tuple(uint16_t(1u), Terminated<'\0'>("foo", 3), LittleEndian<uint32_t>(2u), Sized<2>("XX"), BigEndian<uint64_t>(3ul)));
         ASSERT_EQUALS(true, x.isOK());
 
         uint16_t first;
@@ -120,7 +121,7 @@ namespace mongo {
         auto helper = std::tie(second, third, fourth, fifth);
         auto out = std::tie(first, helper);
 
-        x = cdrc.readNativeAndAdvance(&out);
+        x = cdrc.readNative(&out);
 
         ASSERT_EQUALS(true, x.isOK());
 
@@ -131,7 +132,15 @@ namespace mongo {
         ASSERT_EQUALS(0, std::memcmp("XX", fourth.ptr, 2));
         ASSERT_EQUALS(3u, fifth.value);
 
-        ASSERT_EQUALS(false, dc.writeNativeAndAdvance(uint8_t(1u)).isOK());
+        uint8_t sixth;
+
+        auto last_tuple = StatusOr<uint8_t>(sixth, Status(ErrorCodes::BadValue, "foo"));
+        auto last_fails = std::tie(first, helper, last_tuple);
+
+        x = dc.readNative(&last_fails);
+
+        ASSERT_EQUALS(false, x.isOK());
+        ASSERT_EQUALS("foo", x.reason());
     }
 
 } // namespace mongo
