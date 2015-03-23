@@ -28,6 +28,7 @@
 #pragma once
 
 #include <cstring>
+#include <iostream>
 #include <type_traits>
 
 #include "mongo/base/error_codes.h"
@@ -150,6 +151,54 @@ namespace mongo {
             return data_type_store(endian::nativeToLittle(t.value), ptr, length, advanced);
         }
 
+    };
+
+    template <char byte>
+    struct Terminated {
+        const char* ptr;
+        size_t len;
+    };
+
+    template <char byte>
+    struct DataType<Terminated<byte>> {
+        static Status load(Terminated<byte>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            char* x = static_cast<char *>(std::memchr(ptr, byte, length));
+
+            if (! x) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            size_t t_len = x - ptr;
+
+            if (t) {
+                *t = Terminated<byte>{ptr, t_len};
+            }
+
+            if (advanced) {
+                *advanced = t_len + 1;
+            }
+
+            return Status::OK();
+        }
+
+        static Status store(const Terminated<byte>& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (t.len + 1 > length) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
+
+            if (ptr) {
+                std::memcpy(ptr, t.ptr, t.len);
+                ptr[t.len] = byte;
+            }
+
+            if (advanced) {
+                *advanced = t.len + 1;
+            }
+
+            return Status::OK();
+        }
     };
 
     template <typename... Args>

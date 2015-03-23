@@ -28,6 +28,8 @@
 
 #include "mongo/base/data_range_cursor.h"
 
+#include <cstring>
+
 #include "mongo/platform/endian.h"
 #include "mongo/unittest/unittest.h"
 
@@ -82,7 +84,6 @@ namespace mongo {
         char buf[100] = { 0 };
 
         DataRangeCursor dc(buf, buf + 14);
-        DataRangeCursor write_backup = dc;
 
         ASSERT_EQUALS(true, dc.writeNativeAndAdvance<uint16_t>(1).isOK());
         ASSERT_EQUALS(true, dc.writeLEAndAdvance<uint32_t>(2).isOK());
@@ -97,27 +98,32 @@ namespace mongo {
         ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readBEAndAdvance<uint64_t>().getValue());
         ASSERT_EQUALS(static_cast<char>(0), cdrc.readNativeAndAdvance<char>().getValue());
 
-        dc = write_backup;
+        dc = DataRangeCursor(buf, buf + 18);
         cdrc = read_backup;
 
         std::memset(buf, 0, sizeof(buf));
 
-        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, LittleEndian<uint32_t>{2u}, BigEndian<uint64_t>{3u}));
+        auto x = dc.writeNativeAndAdvance(std::make_tuple(uint16_t{1u}, Terminated<'\0'>{"foo", 3}, LittleEndian<uint32_t>{2u}, BigEndian<uint64_t>{3u}));
         ASSERT_EQUALS(true, x.isOK());
 
         uint16_t first;
-        LittleEndian<uint32_t> second;
-        BigEndian<uint64_t> third;
+        Terminated<'\0'> second;
+        LittleEndian<uint32_t> third;
+        BigEndian<uint64_t> fourth;
 
-        auto out = std::tie(first, second, third);
+        auto out = std::tie(first, second, third, fourth);
 
         x = cdrc.readNativeAndAdvance(&out);
 
         ASSERT_EQUALS(true, x.isOK());
 
         ASSERT_EQUALS(1u, first);
-        ASSERT_EQUALS(2u, second.value);
-        ASSERT_EQUALS(3u, third.value);
+        ASSERT_EQUALS(3u, second.len);
+        ASSERT_EQUALS(0, std::memcmp("foo", second.ptr, 3));
+        ASSERT_EQUALS(2u, third.value);
+        ASSERT_EQUALS(3u, fourth.value);
+
+        ASSERT_EQUALS(false, dc.writeNativeAndAdvance(uint8_t{1u}).isOK());
     }
 
 } // namespace mongo
