@@ -30,6 +30,11 @@
 
 #include <cstring>
 
+#include "mongo/base/data_type_endian.h"
+#include "mongo/base/data_type_sized.h"
+#include "mongo/base/data_type_terminated.h"
+#include "mongo/base/data_type_tuple.h"
+
 #include "mongo/platform/endian.h"
 #include "mongo/unittest/unittest.h"
 

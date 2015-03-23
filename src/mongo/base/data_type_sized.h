@@ -1,5 +1,4 @@
-/**
- *    Copyright (C) 2014 MongoDB Inc.
+/*    Copyright 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -26,51 +25,57 @@
  *    then also delete it in the license file.
  */
 
-#include "mongo/base/data_view.h"
+#pragma once
 
 #include <cstring>
+#include <type_traits>
 
-#include "mongo/platform/endian.h"
-#include "mongo/unittest/unittest.h"
+#include "mongo/base/data_type.h"
+#include "mongo/base/error_codes.h"
+#include "mongo/base/status_with.h"
 
 namespace mongo {
 
-    TEST(DataView, ConstDataView) {
-        char buf[sizeof(uint32_t) * 3];
-        uint32_t native = 1234;
-        uint32_t le = endian::nativeToLittle(native);
-        uint32_t be = endian::nativeToBig(native);
+    template <size_t len>
+    struct Sized {
+        const char* ptr;
+    };
 
-        std::memcpy(buf, &native, sizeof(uint32_t));
-        std::memcpy(buf + sizeof(uint32_t), &le, sizeof(uint32_t));
-        std::memcpy(buf + sizeof(uint32_t) * 2, &be, sizeof(uint32_t));
+    template <size_t len>
+    struct DataType<Sized<len>> {
+        static Status load(Sized<len>* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (len > length) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
 
-        ConstDataView cdv(buf);
+            if (t) {
+                *t = Sized<len>{ptr};
+            }
 
-        ASSERT_EQUALS(buf, cdv.view());
-        ASSERT_EQUALS(buf + 5, cdv.view(5));
+            if (advanced) {
+                *advanced = len;
+            }
 
-        ASSERT_EQUALS(native, cdv.readNative<uint32_t>());
-        ASSERT_EQUALS(native, cdv.readLE<uint32_t>(sizeof(uint32_t)));
-        ASSERT_EQUALS(native, cdv.readBE<uint32_t>(sizeof(uint32_t) * 2));
-    }
+            return Status::OK();
+        }
 
-    TEST(DataView, DataView) {
-        char buf[sizeof(uint32_t) * 3];
-        uint32_t native = 1234;
+        static Status store(const Sized<len>& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        {
+            if (len > length) {
+                return Status(ErrorCodes::BadValue, "Out of Range");
+            }
 
-        DataView dv(buf);
+            if (ptr) {
+                std::memcpy(ptr, t.ptr, len);
+            }
 
-        dv.writeNative(native);
-        dv.writeLE(native, sizeof(uint32_t));
-        dv.writeBE(native, sizeof(uint32_t) * 2);
+            if (advanced) {
+                *advanced = len;
+            }
 
-        ASSERT_EQUALS(buf, dv.view());
-        ASSERT_EQUALS(buf + 5, dv.view(5));
-
-        ASSERT_EQUALS(native, dv.readNative<uint32_t>());
-        ASSERT_EQUALS(native, dv.readLE<uint32_t>(sizeof(uint32_t)));
-        ASSERT_EQUALS(native, dv.readBE<uint32_t>(sizeof(uint32_t) * 2));
-    }
+            return Status::OK();
+        }
+    };
 
 } // namespace mongo
