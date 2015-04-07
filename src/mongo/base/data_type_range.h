@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -45,15 +45,15 @@ namespace mongo {
     class ConstDataTypeRange {
 
     public:
-        class const_iterator : public std::iterator<
+        class iterator : public std::iterator<
             std::input_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
         public:
-            const_iterator()
-                : _cdrc(nullptr) {
+            iterator()
+                : _cdtr(nullptr) {
             }
 
-            explicit const_iterator(ConstDataRangeCursor* cdr)
-                : _cdrc(cdr) {
+            explicit iterator(ConstDataTypeRange* cdtr)
+                : _cdtr(cdtr) {
                 ++(*this);
             }
 
@@ -65,9 +65,12 @@ namespace mongo {
                 return &_t;
             }
 
-            const_iterator& operator++() {
-                if (! _cdrc->readNativeAndAdvance<T>(&_t).isOK()) {
-                    _cdrc = nullptr;
+            iterator& operator++() {
+                auto status = _cdtr->_cdrc->readAndAdvance(&_t);
+
+                if (! status.isOK()) {
+                    _cdtr->_status = std::move(status);
+                    _cdtr = nullptr;
                 }
 
                 return *this;
@@ -77,47 +80,58 @@ namespace mongo {
                 ++(*this);
             }
 
-            friend bool operator==(const const_iterator& lhs, const const_iterator& rhs) {
-                if (lhs._cdrc && rhs._cdrc) {
-                    return ((lhs._cdrc == rhs._cdrc) || (*lhs._cdrc == *rhs._cdrc));
+            friend bool operator==(const iterator& lhs, const iterator& rhs) {
+                if (lhs._cdtr && rhs._cdtr) {
+                    return ((lhs._cdtr == rhs._cdtr) || (*lhs._cdtr == *rhs._cdtr));
                 } else {
-                    return lhs._cdrc == rhs._cdrc;
+                    return lhs._cdtr == rhs._cdtr;
                 }
             }
 
-            friend bool operator!=(const const_iterator& lhs, const const_iterator& rhs) {
+            friend bool operator!=(const iterator& lhs, const iterator& rhs) {
                 return !(lhs == rhs);
             }
 
         private:
-            ConstDataRangeCursor* _cdrc;
+            ConstDataTypeRange* _cdtr;
             T _t;
         };
 
-        using iterator = const_iterator;
-
         ConstDataTypeRange(ConstDataRangeCursor* cdrc)
-            : _cdrc(cdrc) {
+            : _cdrc(cdrc), _status(Status::OK()) {
         }
 
-        const_iterator cbegin() const {
-            return const_iterator(_cdrc);
+        iterator begin() {
+            return iterator(this);
         }
 
-        const_iterator cend() const {
-            return const_iterator();
-        }
-
-        iterator begin() const {
-            return iterator(_cdrc);
-        }
-
-        iterator end() const {
+        iterator end() {
             return iterator();
+        }
+
+        Status& status() {
+            return _status;
+        }
+
+        const Status& status() const {
+            return _status;
+        }
+
+        friend bool operator==(const ConstDataTypeRange& lhs, const ConstDataTypeRange& rhs) {
+            if (lhs._cdrc && rhs._cdrc) {
+                return ((lhs._cdrc == rhs._cdrc) || (*lhs._cdrc == *rhs._cdrc));
+            } else {
+                return lhs._cdrc == rhs._cdrc;
+            }
+        }
+
+        friend bool operator!=(const ConstDataTypeRange& lhs, const ConstDataTypeRange& rhs) {
+            return !(lhs == rhs);
         }
 
     private:
         ConstDataRangeCursor* _cdrc;
+        Status _status;
     };
 
 } // namespace mongo

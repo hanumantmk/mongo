@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -43,8 +43,8 @@ namespace mongo {
     public:
         typedef const char* bytes_type;
 
-        ConstDataRange(bytes_type begin, bytes_type end)
-            : _begin(begin), _end(end) {
+        ConstDataRange(bytes_type begin, bytes_type end, std::ptrdiff_t debug_offset = 0)
+            : _begin(begin), _end(end), _debug_offset(debug_offset) {
         }
 
         StatusWith<bytes_type> view(std::size_t offset = 0) const {
@@ -64,49 +64,22 @@ namespace mongo {
         }
 
         template<typename T>
-        Status readNative(T* t, size_t offset = 0) const {
+        Status read(T* t, size_t offset = 0) const {
             if (offset > length()) {
                 Status(ErrorCodes::BadValue, "Out of range");
             }
 
-            return DataType<T>::load(t, _begin + offset, length() - offset);
+            return data_type_load(t, _begin + offset, length() - offset, nullptr,
+                                  offset + _debug_offset);
         }
 
         template<typename T>
-        StatusWith<T> readNative(std::size_t offset = 0) const {
-            T t{};
-            Status s = readNative(&t, offset);
+        StatusWith<T> read(std::size_t offset = 0) const {
+            T t(data_type_default_construct<T>());
+            Status s = read(&t, offset);
 
             if (s.isOK()) {
-                return StatusWith<T>(t);
-            } else {
-                return StatusWith<T>(std::move(s));
-            }
-        }
-
-        template<typename T>
-        StatusWith<T> readLE(std::size_t offset = 0) const {
-            T t{};
-            Status s = readNative(&t, offset);
-
-            if (s.isOK()) {
-                t = endian::littleToNative(t);
-
-                return StatusWith<T>(t);
-            } else {
-                return StatusWith<T>(std::move(s));
-            }
-        }
-
-        template<typename T>
-        StatusWith<T> readBE(std::size_t offset = 0) const {
-            T t{};
-            Status s = readNative(&t, offset);
-
-            if (s.isOK()) {
-                t = endian::bigToNative(t);
-
-                return StatusWith<T>(t);
+                return StatusWith<T>(std::move(t));
             } else {
                 return StatusWith<T>(std::move(s));
             }
@@ -124,6 +97,8 @@ namespace mongo {
     protected:
         bytes_type _begin;
         bytes_type _end;
+        std::ptrdiff_t _debug_offset;
+
     };
 
     class DataRange : public ConstDataRange {
@@ -131,13 +106,14 @@ namespace mongo {
     public:
         typedef char* bytes_type;
 
-        DataRange(bytes_type begin, bytes_type end)
-            : ConstDataRange(begin, end) {
+        DataRange(bytes_type begin, bytes_type end, std::ptrdiff_t debug_offset = 0)
+            : ConstDataRange(begin, end, debug_offset) {
         }
 
         StatusWith<bytes_type> view(std::size_t offset = 0) const {
-            // It is safe to cast away const here since the pointer stored in our base class was
-            // originally non-const by way of our constructor.
+            // It is safe to cast away const here since the pointer stored in
+            // our base class was originally non-const by way of our
+            // constructor.
             
             if (_begin + offset > _end) {
                 return StatusWith<bytes_type>(ErrorCodes::BadValue, "Out of range");
@@ -150,7 +126,8 @@ namespace mongo {
         size_t additionalBytesNeeded(const T& value, std::size_t offset = 0) {
             size_t advance;
 
-            DataType<T>::store(value, nullptr, std::numeric_limits<size_t>::max(), &advance);
+            data_type_store(value, nullptr, std::numeric_limits<size_t>::max(), &advance,
+                            offset + _debug_offset);
 
             // if there are bytes left in the range
             if (length() > offset) {
@@ -173,23 +150,15 @@ namespace mongo {
         }
 
         template<typename T>
-        Status writeNative(const T& value, std::size_t offset = 0) {
+        Status write(const T& value, std::size_t offset = 0) {
             if (offset > length()) {
                 return Status(ErrorCodes::BadValue, "Out of range");
             }
 
-            return DataType<T>::store(value, const_cast<char *>(_begin + offset), length() - offset);
+            return data_type_store(value, const_cast<char *>(_begin + offset), length() - offset,
+                                   nullptr, offset + _debug_offset);
         }
 
-        template<typename T>
-        Status writeLE(const T& value, std::size_t offset = 0) {
-            return writeNative(endian::nativeToLittle(value), offset);
-        }
-
-        template<typename T>
-        Status writeBE(const T& value, std::size_t offset = 0) {
-            return writeNative(endian::nativeToBig(value), offset);
-        }
     };
 
 } // namespace mongo

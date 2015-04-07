@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -88,43 +88,28 @@ namespace mongo {
         ConstDataCursor& skip() {
             size_t advance = 0;
 
-            auto x = DataType<T>::load(nullptr, view(), std::numeric_limits<size_t>::max(), &advance);
-            if (x.isOK()) {
-                *this += advance;
-            }
+            data_type_unsafe_load<T>(nullptr, view(), &advance);
+            *this += advance;
 
             return *this;
         }
 
         template <typename T>
-        ConstDataCursor& readNativeAndAdvance(T* t) {
+        ConstDataCursor& readAndAdvance(T* t) {
             size_t advance = 0;
 
-            auto x = DataType<T>::load(t, view(), std::numeric_limits<size_t>::max(), &advance);
-            if (x.isOK()) {
-                *this += advance;
-            }
+            data_type_unsafe_load(t, view(), &advance);
+            *this += advance;
 
             return *this;
         }
 
         template <typename T>
-        T readNativeAndAdvance() {
-            T out{};
-            readNativeAndAdvance(&out);
+        T readAndAdvance() {
+            T out(data_type_default_construct<T>());
+            readAndAdvance(&out);
             return out;
         }
-
-        template <typename T>
-        T readLEAndAdvance() {
-            return endian::littleToNative(readNativeAndAdvance<T>());
-        }
-
-        template <typename T>
-        T readBEAndAdvance() {
-            return endian::bigToNative(readNativeAndAdvance<T>());
-        }
-
     };
 
     class DataCursor : public DataView {
@@ -181,64 +166,37 @@ namespace mongo {
         DataCursor& skip() {
             size_t advance = 0;
 
-            auto x = DataType<T>::load(nullptr, view(), std::numeric_limits<size_t>::max(), &advance);
-            if (x.isOK()) {
-                *this += advance;
-            }
+            data_type_unsafe_load<T>(nullptr, view(), &advance);
+            *this += advance;
 
             return *this;
         }
 
         template <typename T>
-        DataCursor& readNativeAndAdvance(T* t) {
+        DataCursor& readAndAdvance(T* t) {
             size_t advance = 0;
 
-            auto x = DataType<T>::load(t, view(), std::numeric_limits<size_t>::max(), &advance);
-            if (x.isOK()) {
-                *this += advance;
-            }
+            data_type_unsafe_load(t, view(), &advance);
+            *this += advance;
 
             return *this;
         }
 
         template <typename T>
-        T readNativeAndAdvance() {
-            T out{};
-            readNativeAndAdvance(&out);
+        T readAndAdvance() {
+            T out(data_type_default_construct<T>());
+            readAndAdvance(&out);
             return out;
         }
 
         template <typename T>
-        T readLEAndAdvance() {
-            return endian::littleToNative(readNativeAndAdvance<T>());
-        }
-
-        template <typename T>
-        T readBEAndAdvance() {
-            return endian::bigToNative(readNativeAndAdvance<T>());
-        }
-
-        template <typename T>
-        DataCursor& writeNativeAndAdvance(const T& value) {
+        DataCursor& writeAndAdvance(const T& value) {
             size_t advance = 0;
 
-            auto x = DataType<T>::store(value, view(), std::numeric_limits<size_t>::max(), &advance);
-
-            if (x.isOK()) {
-                *this += advance;
-            }
+            data_type_unsafe_store(value, view(), &advance);
+            *this += advance;
 
             return *this;
-        }
-
-        template <typename T>
-        DataCursor& writeLEAndAdvance(const T& value) {
-            return writeNativeAndAdvance(endian::nativeToLittle(value));
-        }
-
-        template <typename T>
-        DataCursor& writeBEAndAdvance(const T& value) {
-            return writeNativeAndAdvance(endian::nativeToBig(value));
         }
     };
 

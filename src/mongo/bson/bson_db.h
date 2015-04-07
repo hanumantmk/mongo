@@ -60,7 +60,7 @@ namespace mongo {
 
     inline OpTime BSONElement::_opTime() const {
         if( type() == mongo::Date || type() == Timestamp )
-            return OpTime(ConstDataView(value()).readLE<unsigned long long>());
+            return OpTime(ConstDataView(value()).read<LittleEndian<unsigned long long>>().value);
         return OpTime();
     }
 

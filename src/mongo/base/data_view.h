@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -54,29 +54,19 @@ namespace mongo {
         }
 
         template<typename T>
-        const ConstDataView& readNative(T* t, size_t offset = 0) const {
-            DataType<T>::load(t, view(offset), std::numeric_limits<size_t>::max());
+        const ConstDataView& read(T* t, size_t offset = 0) const {
+            data_type_unsafe_load(t, view(offset), nullptr);
 
             return *this;
         }
 
         template<typename T>
-        T readNative(std::size_t offset = 0) const {
-            T t{};
+        T read(std::size_t offset = 0) const {
+            T t(data_type_default_construct<T>());
 
-            readNative<T>(&t, offset);
+            read<T>(&t, offset);
 
-            return std::move(t);
-        }
-
-        template<typename T>
-        T readLE(std::size_t offset = 0) const {
-            return endian::littleToNative(readNative<T>(offset));
-        }
-
-        template<typename T>
-        T readBE(std::size_t offset = 0) const {
-            return endian::bigToNative(readNative<T>(offset));
+            return t;
         }
 
     private:
@@ -99,20 +89,10 @@ namespace mongo {
         }
 
         template<typename T>
-        DataView& writeNative(const T& value, std::size_t offset = 0) {
-            DataType<T>::store(value, view(offset), std::numeric_limits<size_t>::max());
+        DataView& write(const T& value, std::size_t offset = 0) {
+            data_type_unsafe_store(value, view(offset), nullptr);
 
             return *this;
-        }
-
-        template<typename T>
-        DataView& writeLE(const T& value, std::size_t offset = 0) {
-            return writeNative(endian::nativeToLittle(value), offset);
-        }
-
-        template<typename T>
-        DataView& writeBE(const T& value, std::size_t offset = 0) {
-            return writeNative(endian::nativeToBig(value), offset);
         }
     };
 

@@ -39,12 +39,14 @@
 #include "mongo/bson/bsonelement.h"
 #include "mongo/base/data_range.h"
 #include "mongo/base/data_type.h"
+#include "mongo/base/data_type_endian.h"
 #include "mongo/base/data_view.h"
 #include "mongo/base/disallow_copying.h"
 #include "mongo/base/error_codes.h"
 #include "mongo/base/string_data.h"
 #include "mongo/bson/util/builder.h"
 #include "mongo/platform/atomic_word.h"
+#include "mongo/util/assert_util.h"
 #include "mongo/util/bufreader.h"
 #include "mongo/util/shared_buffer.h"
 
@@ -317,7 +319,7 @@ namespace mongo {
 
         /** @return total size of the BSON object in bytes */
         int objsize() const {
-            return ConstDataView(objdata()).readLE<int>();
+            return ConstDataView(objdata()).read<LittleEndian<int>>();
         }
 
         /** performs a cursory check on the object's size only. */
@@ -749,49 +751,54 @@ namespace mongo {
 
     template <>
     struct DataType<BSONObj> {
-        static Status load(BSONObj* bson, const char *ptr, size_t length, size_t *advanced = nullptr)
-        {
-            auto len = ConstDataRange(ptr, ptr + length).readLE<uint32_t>();
-            BSONObj tmp;
-            bool require_out;
+        static Status load(BSONObj* bson, const char *ptr, size_t length, size_t *advanced,
+                           std::ptrdiff_t debug_offset) {
+            auto len = ConstDataRange(ptr, ptr + length).read<LittleEndian<uint32_t>>();
 
             if (len.isOK()) {
-                if ((len.getValue() > length) || (len.getValue() < 5)) {
-                    return Status(ErrorCodes::BadValue, "Out of Range");
+                if (len.getValue() > length) {
+                    std::stringstream ss;
+                    ss << "length (" << len.getValue() << ") greater than buffer size ("
+                       << length << ") at offset: " << debug_offset;
+                    return Status(ErrorCodes::InvalidBSON, ss.str());
+                }
+                else if (len.getValue() < 5) {
+                    std::stringstream ss;
+                    ss << "Invalid bson length (" << len.getValue() << ") at offset: "
+                       << debug_offset;
+                    return Status(ErrorCodes::InvalidBSON, ss.str());
                 }
             } else {
-                return Status(ErrorCodes::BadValue, "Out of Range");
-            }
-
-            if (bson) {
-                require_out = true;
-            } else {
-                bson = &tmp;
-                require_out = false;
+                std::stringstream ss;
+                ss << "buffer size too small to read length at offset: " << debug_offset;
+                return Status(ErrorCodes::InvalidBSON, ss.str());
             }
 
             try {
-                new (bson) BSONObj(ptr);
+                if (bson) {
+                    *bson = BSONObj(ptr);
+                } else {
+                    BSONObj(ptr);
+                }
             }
-            catch ( ... ) {
-                return Status(ErrorCodes::FailedToParse, "Invalid BSON");
+            catch (...) {
+                return exceptionToStatus();
             }
 
             if (advanced) {
                 *advanced = len.getValue();
             }
 
-            if (! require_out) {
-                delete bson;
-            }
-
             return Status::OK();
         }
 
-        static Status store(const BSONObj& bson, char *ptr, size_t length, size_t *advanced = nullptr)
-        {
+        static Status store(const BSONObj& bson, char *ptr, size_t length,
+                            size_t *advanced, std::ptrdiff_t debug_offset) {
             if (bson.objsize() > static_cast<int>(length)) {
-                return Status(ErrorCodes::BadValue, "Out of Range");
+                std::stringstream ss;
+                ss << "buffer too small to write bson of size (" << bson.objsize()
+                   << ") at offset: " << debug_offset;
+                return Status(ErrorCodes::Overflow, ss.str());
             }
 
             if (ptr) {
@@ -805,5 +812,9 @@ namespace mongo {
             return Status::OK();
         }
 
+        static BSONObj default_construct()
+        {
+            return BSONObj();
+        }
     };
 }

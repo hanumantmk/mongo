@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -27,7 +27,10 @@
 
 #pragma once
 
+#include "mongo/config.h"
+
 #include <cstring>
+#include <sstream>
 #include <type_traits>
 
 #include "mongo/base/error_codes.h"
@@ -37,31 +40,41 @@ namespace mongo {
 
     template <typename T>
     struct DataType {
-        static Status load(T* t, const char *ptr, size_t length, size_t *advanced = nullptr)
+
+        static void unsafe_load(T* t, const char* ptr, size_t* advanced)
         {
 #if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
             static_assert(std::is_trivially_copyable<T>::value,
                           "The generic DataType implementation requires values "
-                          "to be trivially copiable.  You may specialize the "
+                          "to be trivially copyable. You may specialize the "
                           "template to use it with other types.");
 #endif
 
-            if (sizeof (T) > length) {
-                return Status(ErrorCodes::BadValue, "Out of Range");
-            }
-
             if (t) {
-                std::memcpy(t, ptr, sizeof (T));
+                std::memcpy(t, ptr, sizeof(T));
             }
 
             if (advanced) {
-                *advanced = sizeof (T);
+                *advanced = sizeof(T);
             }
+        }
+
+        static Status load(T* t, const char* ptr, size_t length, size_t* advanced,
+                           std::ptrdiff_t debug_offset)
+        {
+            if (sizeof(T) > length) {
+                std::stringstream ss;
+                ss << "buffer size too small to read (" << sizeof(T) << ") bytes out of buffer["
+                   << length << "] at offset: " << debug_offset;
+                return Status(ErrorCodes::Overflow, ss.str());
+            }
+
+            unsafe_load(t, ptr, advanced);
 
             return Status::OK();
         }
 
-        static Status store(const T& t, char *ptr, size_t length, size_t *advanced = nullptr)
+        static void unsafe_store(const T& t, char* ptr, size_t* advanced)
         {
 #if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
             static_assert(std::is_trivially_copyable<T>::value,
@@ -70,21 +83,62 @@ namespace mongo {
                           "template to use it with other types.");
 #endif
 
-            if (sizeof (T) > length) {
-                return Status(ErrorCodes::BadValue, "Out of Range");
-            }
-
             if (ptr) {
-                std::memcpy(ptr, &t, sizeof (T));
+                std::memcpy(ptr, &t, sizeof(T));
             }
 
             if (advanced) {
-                *advanced = sizeof (T);
+                *advanced = sizeof(T);
+            }
+        }
+
+        static Status store(const T& t, char* ptr, size_t length, size_t* advanced,
+                            std::ptrdiff_t debug_offset)
+        {
+            if (sizeof(T) > length) {
+                std::stringstream ss;
+                ss << "buffer size too small to write (" << sizeof(T) << ") bytes into buffer["
+                   << length << "] at offset: " << debug_offset;
+                return Status(ErrorCodes::Overflow, ss.str());
             }
 
+            unsafe_store(t, ptr, advanced);
+
             return Status::OK();
+        }
+
+        static T default_construct()
+        {
+            return T{};
         }
 
     };
+
+    template <typename T>
+    Status data_type_load(T* t, const char* ptr, size_t length, size_t* advanced,
+                          std::ptrdiff_t debug_offset) {
+        return DataType<T>::load(t, ptr, length, advanced, debug_offset);
+    }
+
+    template <typename T>
+    Status data_type_store(const T& t, char* ptr, size_t length, size_t* advanced,
+                           std::ptrdiff_t debug_offset) {
+        return DataType<T>::store(t, ptr, length, advanced, debug_offset);
+    }
+
+    template <typename T>
+    void data_type_unsafe_load(T* t, const char* ptr, size_t* advanced) {
+        DataType<T>::unsafe_load(t, ptr, advanced);
+    }
+
+    template <typename T>
+    void data_type_unsafe_store(const T& t, char* ptr, size_t* advanced) {
+        DataType<T>::unsafe_store(t, ptr, advanced);
+    }
+
+    template <typename T>
+    T data_type_default_construct() {
+        return DataType<T>::default_construct();
+    }
 
 } // namespace mongo

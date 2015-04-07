@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2014 MongoDB Inc.
+ *    Copyright (C) 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,6 +28,7 @@
 
 #include "mongo/base/data_range_cursor.h"
 
+#include "mongo/base/data_type_endian.h"
 #include "mongo/platform/endian.h"
 #include "mongo/unittest/unittest.h"
 
@@ -36,24 +37,24 @@ namespace mongo {
     TEST(DataRangeCursor, ConstDataRangeCursor) {
         char buf[14];
 
-        DataView(buf).writeNative<uint16_t>(1);
-        DataView(buf).writeLE<uint32_t>(2, sizeof(uint16_t));
-        DataView(buf).writeBE<uint64_t>(3, sizeof(uint16_t) + sizeof(uint32_t));
+        DataView(buf).write<uint16_t>(1);
+        DataView(buf).write<LittleEndian<uint32_t>>(2, sizeof(uint16_t));
+        DataView(buf).write<BigEndian<uint64_t>>(3, sizeof(uint16_t) + sizeof(uint32_t));
 
         ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
         ConstDataRangeCursor backup(cdrc);
 
-        ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readNativeAndAdvance<uint16_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readLEAndAdvance<uint32_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readBEAndAdvance<uint64_t>().getValue());
-        ASSERT_EQUALS(false, cdrc.readNativeAndAdvance<char>().isOK());
+        ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readAndAdvance<uint16_t>().getValue());
+        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
+        ASSERT_EQUALS(false, cdrc.readAndAdvance<char>().isOK());
 
         // test skip()
         cdrc = backup;
         ASSERT_EQUALS(true, cdrc.skip<uint32_t>().isOK());;
         ASSERT_EQUALS(buf + sizeof(uint32_t), cdrc.view().getValue());
         ASSERT_EQUALS(true, cdrc.advance(10).isOK());
-        ASSERT_EQUALS(false, cdrc.readNativeAndAdvance<char>().isOK());
+        ASSERT_EQUALS(false, cdrc.readAndAdvance<char>().isOK());
     }
 
     TEST(DataRangeCursor, DataRangeCursor) {
@@ -61,17 +62,17 @@ namespace mongo {
 
         DataRangeCursor dc(buf, buf + 14);
 
-        ASSERT_EQUALS(true, dc.writeNativeAndAdvance<uint16_t>(1).isOK());
-        ASSERT_EQUALS(true, dc.writeLEAndAdvance<uint32_t>(2).isOK());
-        ASSERT_EQUALS(true, dc.writeBEAndAdvance<uint64_t>(3).isOK());
-        ASSERT_EQUALS(false, dc.writeNativeAndAdvance<char>(1).isOK());
+        ASSERT_EQUALS(true, dc.writeAndAdvance<uint16_t>(1).isOK());
+        ASSERT_EQUALS(true, dc.writeAndAdvance<LittleEndian<uint32_t>>(2).isOK());
+        ASSERT_EQUALS(true, dc.writeAndAdvance<BigEndian<uint64_t>>(3).isOK());
+        ASSERT_EQUALS(false, dc.writeAndAdvance<char>(1).isOK());
 
         ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
 
-        ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readNativeAndAdvance<uint16_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readLEAndAdvance<uint32_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readBEAndAdvance<uint64_t>().getValue());
-        ASSERT_EQUALS(static_cast<char>(0), cdrc.readNativeAndAdvance<char>().getValue());
+        ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readAndAdvance<uint16_t>().getValue());
+        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
+        ASSERT_EQUALS(static_cast<char>(0), cdrc.readAndAdvance<char>().getValue());
     }
 
 } // namespace mongo

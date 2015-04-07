@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2014 MongoDB Inc.
+ *    Copyright (C) 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -48,7 +48,7 @@ namespace mongo {
         ConstDataTypeRange<uint32_t> cdtr(&cdrc);
 
         ASSERT_EQUALS(cdrc.length(), 14u);
-        auto x = cdtr.cbegin();
+        auto x = cdtr.begin();
         ASSERT_EQUALS(cdrc.length(), 10u);
 
         ASSERT_EQUALS(1u, *x);
@@ -60,7 +60,7 @@ namespace mongo {
         ASSERT_EQUALS(3u, *x);
         x++;
 
-        ASSERT(cdtr.cend() == x);
+        ASSERT(cdtr.end() == x);
 
         ASSERT_EQUALS(cdrc.length(), 2u);
 

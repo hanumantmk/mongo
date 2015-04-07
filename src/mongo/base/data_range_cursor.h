@@ -1,4 +1,4 @@
-/*    Copyright 2014 MongoDB Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -40,8 +40,8 @@ namespace mongo {
     class ConstDataRangeCursor : public ConstDataRange {
     public:
 
-        ConstDataRangeCursor(const char* begin, const char *end)
-            : ConstDataRange(begin, end) {
+        ConstDataRangeCursor(const char* begin, const char* end, std::ptrdiff_t debug_offset = 0)
+            : ConstDataRange(begin, end, debug_offset) {
         }
 
         ConstDataRangeCursor(ConstDataRange cdr)
@@ -51,6 +51,7 @@ namespace mongo {
         Status advance(size_t advance) {
             if (advance <= length()) {
                 _begin += advance;
+                _debug_offset += advance;
 
                 return Status::OK();
             } else {
@@ -62,59 +63,39 @@ namespace mongo {
         Status skip() {
             size_t advanced = 0;
 
-            Status x = DataType<T>::load(nullptr, _begin, _end - _begin, &advanced);
+            Status x = data_type_load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
+                _debug_offset += advanced;
             }
 
             return x;
         }
 
         template <typename T>
-        Status readNativeAndAdvance(T* t) {
+        Status readAndAdvance(T* t) {
             size_t advanced = 0;
 
-            Status x = DataType<T>::load(t, _begin, _end - _begin, &advanced);
+            Status x = data_type_load(t, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
+                _debug_offset += advanced;
             }
 
             return x;
         }
 
         template <typename T>
-        StatusWith<T> readNativeAndAdvance() {
-            T out{};
-            Status x = readNativeAndAdvance(&out);
+        StatusWith<T> readAndAdvance() {
+            T out(data_type_default_construct<T>());
+            Status x = readAndAdvance(&out);
 
             if (x.isOK()) {
-                return StatusWith<T>(out);
+                return StatusWith<T>(std::move(out));
             } else {
-                return StatusWith<T>(x);
-            }
-        }
-
-        template <typename T>
-        StatusWith<T> readLEAndAdvance() {
-            auto x = readNativeAndAdvance<T>();
-
-            if (x.isOK()) {
-                return StatusWith<T>(endian::littleToNative(x.getValue()));
-            } else {
-                return x;
-            }
-        }
-
-        template <typename T>
-        StatusWith<T> readBEAndAdvance() {
-            auto x = readNativeAndAdvance<T>();
-
-            if (x.isOK()) {
-                return StatusWith<T>(endian::bigToNative(x.getValue()));
-            } else {
-                return x;
+                return StatusWith<T>(std::move(x));
             }
         }
 
@@ -123,19 +104,20 @@ namespace mongo {
     class DataRangeCursor : public DataRange {
     public:
 
-        DataRangeCursor(char *begin, char *end)
-            : DataRange(begin, end) {}
+        DataRangeCursor(char *begin, char *end, std::ptrdiff_t debug_offset = 0)
+            : DataRange(begin, end, debug_offset) {}
 
         DataRangeCursor(DataRange range)
             : DataRange(range) {}
 
         operator ConstDataRangeCursor() const {
-            return ConstDataRangeCursor(ConstDataRange(_begin, _end));
+            return ConstDataRangeCursor(ConstDataRange(_begin, _end, _debug_offset));
         }
 
         Status advance(size_t advance) {
             if (advance <= length()) {
                 _begin += advance;
+                _debug_offset += advance;
 
                 return Status::OK();
             } else {
@@ -147,83 +129,55 @@ namespace mongo {
         Status skip() {
             size_t advanced = 0;
 
-            Status x = DataType<T>::load(nullptr, _begin, _end - _begin, &advanced);
+            Status x = data_type_load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
+                _debug_offset += advanced;
             }
 
             return x;
         }
 
         template <typename T>
-        Status readNativeAndAdvance(T* t) {
+        Status readAndAdvance(T* t) {
             size_t advanced = 0;
 
-            Status x = DataType<T>::load(t, _begin, _end - _begin, &advanced);
+            Status x = data_type_load(t, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
+                _debug_offset += advanced;
             }
 
             return x;
         }
 
         template <typename T>
-        StatusWith<T> readNativeAndAdvance() {
-            T out{};
-            Status x = readNativeAndAdvance(&out);
+        StatusWith<T> readAndAdvance() {
+            T out(data_type_default_construct<T>());
+            Status x = readAndAdvance(&out);
 
             if (x.isOK()) {
-                return StatusWith<T>(out);
+                return StatusWith<T>(std::move(out));
             } else {
-                return StatusWith<T>(x);
+                return StatusWith<T>(std::move(x));
             }
         }
 
         template <typename T>
-        StatusWith<T> readLEAndAdvance() {
-            auto x = readNativeAndAdvance<T>();
-
-            if (x.isOK()) {
-                return StatusWith<T>(endian::littleToNative(x.getValue()));
-            } else {
-                return x;
-            }
-        }
-
-        template <typename T>
-        StatusWith<T> readBEAndAdvance() {
-            auto x = readNativeAndAdvance<T>();
-
-            if (x.isOK()) {
-                return StatusWith<T>(endian::bigToNative(x.getValue()));
-            } else {
-                return x;
-            }
-        }
-
-        template <typename T>
-        Status writeNativeAndAdvance(const T& value) {
+        Status writeAndAdvance(const T& value) {
             size_t advanced = 0;
 
-            Status x = DataType<T>::store(value, const_cast<char *>(_begin), _end - _begin, &advanced);
+            Status x = data_type_store(value, const_cast<char *>(_begin), _end - _begin, &advanced,
+                                       _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
+                _debug_offset += advanced;
             }
 
             return x;
-        }
-
-        template <typename T>
-        Status writeLEAndAdvance(const T& value) {
-            return writeNativeAndAdvance(endian::nativeToLittle(value));
-        }
-
-        template <typename T>
-        Status writeBEAndAdvance(const T& value) {
-            return writeNativeAndAdvance(endian::nativeToBig(value));
         }
     };
 
