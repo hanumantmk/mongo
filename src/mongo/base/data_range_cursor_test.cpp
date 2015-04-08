@@ -45,8 +45,10 @@ namespace mongo {
         ConstDataRangeCursor backup(cdrc);
 
         ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readAndAdvance<uint16_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
-        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint32_t>(2),
+                      cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint64_t>(3),
+                      cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
         ASSERT_EQUALS(false, cdrc.readAndAdvance<char>().isOK());
 
         // test skip()
@@ -70,8 +72,10 @@ namespace mongo {
         ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
 
         ASSERT_EQUALS(static_cast<uint16_t>(1), cdrc.readAndAdvance<uint16_t>().getValue());
-        ASSERT_EQUALS(static_cast<uint32_t>(2), cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
-        ASSERT_EQUALS(static_cast<uint64_t>(3), cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint32_t>(2),
+                      cdrc.readAndAdvance<LittleEndian<uint32_t>>().getValue());
+        ASSERT_EQUALS(static_cast<uint64_t>(3),
+                      cdrc.readAndAdvance<BigEndian<uint64_t>>().getValue());
         ASSERT_EQUALS(static_cast<char>(0), cdrc.readAndAdvance<char>().getValue());
     }
 

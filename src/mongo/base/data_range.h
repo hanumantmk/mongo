@@ -35,6 +35,7 @@
 #include "mongo/base/error_codes.h"
 #include "mongo/base/status_with.h"
 #include "mongo/platform/endian.h"
+#include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
@@ -43,13 +44,25 @@ namespace mongo {
     public:
         typedef const char* bytes_type;
 
+        // begin and end should point to the first and last bytes in the range
+        // you wish to view.
+        //
+        // debug_offset provides a way to indicate that the ConstDataRange is
+        // located at an offset into some larger logical buffer. By setting it
+        // to a non-zero value, you'll change the Status messages that are
+        // returned on failure to be offset by the amount passed to this
+        // constructor.
         ConstDataRange(bytes_type begin, bytes_type end, std::ptrdiff_t debug_offset = 0)
             : _begin(begin), _end(end), _debug_offset(debug_offset) {
         }
 
         StatusWith<bytes_type> view(std::size_t offset = 0) const {
             if (_begin + offset > _end) {
-                return StatusWith<bytes_type>(ErrorCodes::BadValue, "Out of range");
+                mongoutils::str::stream ss;
+                ss << "Invalid view(" << offset << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                return StatusWith<bytes_type>(ErrorCodes::Overflow, ss);
             }
 
             return StatusWith<bytes_type>(_begin + offset);
@@ -66,7 +79,11 @@ namespace mongo {
         template<typename T>
         Status read(T* t, size_t offset = 0) const {
             if (offset > length()) {
-                Status(ErrorCodes::BadValue, "Out of range");
+                mongoutils::str::stream ss;
+                ss << "Invalid offset(" << offset << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                Status(ErrorCodes::Overflow, ss);
             }
 
             return data_type_load(t, _begin + offset, length() - offset, nullptr,
@@ -116,7 +133,11 @@ namespace mongo {
             // constructor.
             
             if (_begin + offset > _end) {
-                return StatusWith<bytes_type>(ErrorCodes::BadValue, "Out of range");
+                mongoutils::str::stream ss;
+                ss << "Invalid view(" << offset << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                return StatusWith<bytes_type>(ErrorCodes::Overflow, ss);
             }
 
             return StatusWith<bytes_type>(const_cast<bytes_type>(_begin) + offset);
@@ -152,7 +173,11 @@ namespace mongo {
         template<typename T>
         Status write(const T& value, std::size_t offset = 0) {
             if (offset > length()) {
-                return Status(ErrorCodes::BadValue, "Out of range");
+                mongoutils::str::stream ss;
+                ss << "Invalid offset(" << offset << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                return Status(ErrorCodes::Overflow, ss);
             }
 
             return data_type_store(value, const_cast<char *>(_begin + offset), length() - offset,

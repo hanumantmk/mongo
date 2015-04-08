@@ -34,6 +34,7 @@
 #include "mongo/base/data_type.h"
 #include "mongo/base/data_range.h"
 #include "mongo/platform/endian.h"
+#include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
@@ -55,7 +56,11 @@ namespace mongo {
 
                 return Status::OK();
             } else {
-                return Status(ErrorCodes::BadValue, "Out of Range");
+                mongoutils::str::stream ss;
+                ss << "Invalid advance (" << advance << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                return Status(ErrorCodes::Overflow, ss);
             }
         }
 
@@ -121,7 +126,11 @@ namespace mongo {
 
                 return Status::OK();
             } else {
-                return Status(ErrorCodes::BadValue, "Out of Range");
+                mongoutils::str::stream ss;
+                ss << "Invalid advance (" << advance << ") past end of buffer[" << length()
+                   << "] at offset: " << _debug_offset;
+
+                return Status(ErrorCodes::Overflow, ss);
             }
         }
 
@@ -169,7 +178,7 @@ namespace mongo {
         Status writeAndAdvance(const T& value) {
             size_t advanced = 0;
 
-            Status x = data_type_store(value, const_cast<char *>(_begin), _end - _begin, &advanced,
+            Status x = data_type_store(value, const_cast<char*>(_begin), _end - _begin, &advanced,
                                        _debug_offset);
 
             if (x.isOK()) {

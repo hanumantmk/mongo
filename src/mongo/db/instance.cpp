@@ -297,7 +297,10 @@ namespace {
         // TODO: use OP_COMMAND here instead of constructing
         // a legacy OP_QUERY style command
         BufBuilder cmdMsgBuf;
-        cmdMsgBuf.appendNum(DataView(message.header().data()).read<LittleEndian<int32_t>>().value); // flags
+
+        // flags
+        cmdMsgBuf.appendNum(DataView(message.header().data()).read<LittleEndian<int32_t>>().value);
+
         cmdMsgBuf.appendStr(interposedNss.db(), false); // not including null byte
         cmdMsgBuf.appendStr(".$cmd");
         cmdMsgBuf.appendNum(0); // ntoskip

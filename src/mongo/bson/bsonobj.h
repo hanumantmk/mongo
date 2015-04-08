@@ -48,6 +48,7 @@
 #include "mongo/platform/atomic_word.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/bufreader.h"
+#include "mongo/util/mongoutils/str.h"
 #include "mongo/util/shared_buffer.h"
 
 namespace mongo {
@@ -101,7 +102,9 @@ namespace mongo {
             // Little endian ordering here, but that is ok regardless as BSON is spec'd to be
             // little endian external to the system. (i.e. the rest of the implementation of
             // bson, not this part, fails to support big endian)
-            static const char kEmptyObjectPrototype[] = { /*size*/5, 0, 0, 0, /*eoo*/0 };
+            static const char kEmptyObjectPrototype[] =
+                { /*size*/kMinBSONLength, 0, 0, 0, /*eoo*/0 };
+
             _objdata = kEmptyObjectPrototype;
         }
 
@@ -373,7 +376,7 @@ namespace mongo {
         }
 
         /** @return true if object is empty -- i.e.,  {} */
-        bool isEmpty() const { return objsize() <= 5; }
+        bool isEmpty() const { return objsize() <= kMinBSONLength; }
 
         void dump() const;
 
@@ -556,6 +559,8 @@ namespace mongo {
             // TODO consider ownedness?
             return sizeof(BSONObj) + objsize();
         }
+
+        static const int kMinBSONLength = 5;
 
     private:
         void _assertInvalid() const;
@@ -757,21 +762,21 @@ namespace mongo {
 
             if (len.isOK()) {
                 if (len.getValue() > length) {
-                    std::stringstream ss;
+                    mongoutils::str::stream ss;
                     ss << "length (" << len.getValue() << ") greater than buffer size ("
                        << length << ") at offset: " << debug_offset;
-                    return Status(ErrorCodes::InvalidBSON, ss.str());
+                    return Status(ErrorCodes::InvalidBSON, ss);
                 }
-                else if (len.getValue() < 5) {
-                    std::stringstream ss;
+                else if (len.getValue() < BSONObj::kMinBSONLength) {
+                    mongoutils::str::stream ss;
                     ss << "Invalid bson length (" << len.getValue() << ") at offset: "
                        << debug_offset;
-                    return Status(ErrorCodes::InvalidBSON, ss.str());
+                    return Status(ErrorCodes::InvalidBSON, ss);
                 }
             } else {
-                std::stringstream ss;
+                mongoutils::str::stream ss;
                 ss << "buffer size too small to read length at offset: " << debug_offset;
-                return Status(ErrorCodes::InvalidBSON, ss.str());
+                return Status(ErrorCodes::InvalidBSON, ss);
             }
 
             try {
@@ -782,7 +787,11 @@ namespace mongo {
                 }
             }
             catch (...) {
-                return exceptionToStatus();
+                auto status = exceptionToStatus();
+                mongoutils::str::stream ss;
+                ss << status.reason() << " at offset: " << debug_offset;
+
+                return Status(status.code(), ss);
             }
 
             if (advanced) {
@@ -795,10 +804,10 @@ namespace mongo {
         static Status store(const BSONObj& bson, char *ptr, size_t length,
                             size_t *advanced, std::ptrdiff_t debug_offset) {
             if (bson.objsize() > static_cast<int>(length)) {
-                std::stringstream ss;
+                mongoutils::str::stream ss;
                 ss << "buffer too small to write bson of size (" << bson.objsize()
                    << ") at offset: " << debug_offset;
-                return Status(ErrorCodes::Overflow, ss.str());
+                return Status(ErrorCodes::Overflow, ss);
             }
 
             if (ptr) {

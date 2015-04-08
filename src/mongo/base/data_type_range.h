@@ -31,8 +31,6 @@
 #include <iterator>
 #include <type_traits>
 
-#include <stdio.h>
-
 #include "mongo/base/data_range.h"
 #include "mongo/base/data_range_cursor.h"
 #include "mongo/base/error_codes.h"

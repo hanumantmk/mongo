@@ -30,7 +30,11 @@
 #include "mongo/config.h"
 
 #include <cstring>
+
+// We use ssteam rather than mongoutils::str::stream because str::stream relies
+// on bson/util/builder.h, which relies on... this file
 #include <sstream>
+
 #include <type_traits>
 
 #include "mongo/base/error_codes.h"
@@ -79,7 +83,7 @@ namespace mongo {
 #if MONGO_HAVE_STD_IS_TRIVIALLY_COPYABLE
             static_assert(std::is_trivially_copyable<T>::value,
                           "The generic DataType implementation requires values "
-                          "to be trivially copiable.  You may specialize the "
+                          "to be trivially copyable.  You may specialize the "
                           "template to use it with other types.");
 #endif
 
@@ -107,6 +111,12 @@ namespace mongo {
             return Status::OK();
         }
 
+        // It may be useful to specialize this for types that aren't natively
+        // default constructible. Otherwise there's no way for us to support
+        // that body of types (other than wrapping them with another tagged
+        // type). Also, this guarantees value/aggregate initialization, which
+        // guarantees no uninitialized memory leaks from load's, which gcc
+        // otherwise can't seem to see.
         static T default_construct()
         {
             return T{};
@@ -114,6 +124,17 @@ namespace mongo {
 
     };
 
+    // The following dispatch functions don't just save typing, they also work
+    // around what seems like template type deduction bugs (for template
+    // specializations) in gcc.  I.e. for sufficiently complicated workflows (a
+    // specialization for tuple), going through dispatch functions compiles on
+    // gcc 4.9 and using DataType<T> does not.
+
+    // We return a status and take an out pointer so that we can:
+    //
+    // 1. Run a load without returning a value (I.e. skip / validate)
+    // 2. Load directly into a remote structure, rather than forcing moves of
+    //    possibly large objects
     template <typename T>
     Status data_type_load(T* t, const char* ptr, size_t length, size_t* advanced,
                           std::ptrdiff_t debug_offset) {

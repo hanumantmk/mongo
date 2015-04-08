@@ -32,7 +32,6 @@
 
 #include "mongo/base/data_type.h"
 #include "mongo/base/error_codes.h"
-#include "mongo/base/status_with.h"
 #include "mongo/platform/endian.h"
 
 namespace mongo {
@@ -61,7 +60,7 @@ namespace mongo {
 
     template <typename T>
     struct DataType<BigEndian<T>> {
-        static void unsafe_load(BigEndian<T>* t, const char *ptr, size_t *advanced) {
+        static void unsafe_load(BigEndian<T>* t, const char* ptr, size_t* advanced) {
             if (t) {
                 data_type_unsafe_load(&t->value, ptr, advanced);
 
@@ -72,7 +71,7 @@ namespace mongo {
             }
         }
 
-        static Status load(BigEndian<T>* t, const char *ptr, size_t length, size_t *advanced,
+        static Status load(BigEndian<T>* t, const char* ptr, size_t length, size_t* advanced,
                            std::ptrdiff_t debug_offset) {
             if (t) {
                 Status x = data_type_load(&t->value, ptr, length, advanced, debug_offset);
@@ -89,11 +88,11 @@ namespace mongo {
             }
         }
 
-        static void unsafe_store(const BigEndian<T>& t, char *ptr, size_t *advanced) {
+        static void unsafe_store(const BigEndian<T>& t, char* ptr, size_t* advanced) {
             data_type_unsafe_store(endian::nativeToBig(t.value), ptr, advanced);
         }
 
-        static Status store(const BigEndian<T>& t, char *ptr, size_t length, size_t *advanced,
+        static Status store(const BigEndian<T>& t, char* ptr, size_t length, size_t* advanced,
                             std::ptrdiff_t debug_offset) {
             return data_type_store(endian::nativeToBig(t.value), ptr, length, advanced,
                                    debug_offset);
@@ -108,7 +107,7 @@ namespace mongo {
 
     template <typename T>
     struct DataType<LittleEndian<T>> {
-        static void unsafe_load(LittleEndian<T>* t, const char *ptr, size_t *advanced) {
+        static void unsafe_load(LittleEndian<T>* t, const char* ptr, size_t* advanced) {
             if (t) {
                 data_type_unsafe_load(&t->value, ptr, advanced);
 
@@ -119,7 +118,7 @@ namespace mongo {
             }
         }
 
-        static Status load(LittleEndian<T>* t, const char *ptr, size_t length, size_t *advanced,
+        static Status load(LittleEndian<T>* t, const char* ptr, size_t length, size_t* advanced,
                            std::ptrdiff_t debug_offset) {
             if (t) {
                 Status x = data_type_load(&t->value, ptr, length, advanced, debug_offset);
@@ -136,11 +135,11 @@ namespace mongo {
             }
         }
 
-        static void unsafe_store(const LittleEndian<T>& t, char *ptr, size_t *advanced) {
+        static void unsafe_store(const LittleEndian<T>& t, char* ptr, size_t* advanced) {
             data_type_unsafe_store(endian::nativeToLittle(t.value), ptr, advanced);
         }
 
-        static Status store(const LittleEndian<T>& t, char *ptr, size_t length, size_t *advanced,
+        static Status store(const LittleEndian<T>& t, char* ptr, size_t length, size_t* advanced,
                             std::ptrdiff_t debug_offset) {
             return data_type_store(endian::nativeToLittle(t.value), ptr, length, advanced,
                                    debug_offset);
