@@ -1,4 +1,4 @@
-/*    Copyright 2015 MongoDB Inc.
+/*    Copyright 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -29,7 +29,6 @@
 
 #include <cstddef>
 #include <cstring>
-#include <limits>
 
 #include "mongo/base/data_type.h"
 #include "mongo/base/data_view.h"
@@ -88,7 +87,7 @@ namespace mongo {
         ConstDataCursor& skip() {
             size_t advance = 0;
 
-            data_type_unsafe_load<T>(nullptr, view(), &advance);
+            DataType::unsafeLoad<T>(nullptr, view(), &advance);
             *this += advance;
 
             return *this;
@@ -98,7 +97,7 @@ namespace mongo {
         ConstDataCursor& readAndAdvance(T* t) {
             size_t advance = 0;
 
-            data_type_unsafe_load(t, view(), &advance);
+            DataType::unsafeLoad(t, view(), &advance);
             *this += advance;
 
             return *this;
@@ -106,7 +105,7 @@ namespace mongo {
 
         template <typename T>
         T readAndAdvance() {
-            T out(data_type_default_construct<T>());
+            T out(DataType::defaultConstruct<T>());
             readAndAdvance(&out);
             return out;
         }
@@ -166,7 +165,7 @@ namespace mongo {
         DataCursor& skip() {
             size_t advance = 0;
 
-            data_type_unsafe_load<T>(nullptr, view(), &advance);
+            DataType::unsafeLoad<T>(nullptr, view(), &advance);
             *this += advance;
 
             return *this;
@@ -176,7 +175,7 @@ namespace mongo {
         DataCursor& readAndAdvance(T* t) {
             size_t advance = 0;
 
-            data_type_unsafe_load(t, view(), &advance);
+            DataType::unsafeLoad(t, view(), &advance);
             *this += advance;
 
             return *this;
@@ -184,7 +183,7 @@ namespace mongo {
 
         template <typename T>
         T readAndAdvance() {
-            T out(data_type_default_construct<T>());
+            T out(DataType::defaultConstruct<T>());
             readAndAdvance(&out);
             return out;
         }
@@ -193,7 +192,7 @@ namespace mongo {
         DataCursor& writeAndAdvance(const T& value) {
             size_t advance = 0;
 
-            data_type_unsafe_store(value, view(), &advance);
+            DataType::unsafeStore(value, view(), &advance);
             *this += advance;
 
             return *this;

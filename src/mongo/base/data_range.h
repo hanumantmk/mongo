@@ -44,8 +44,8 @@ namespace mongo {
     public:
         typedef const char* bytes_type;
 
-        // begin and end should point to the first and last bytes in the range
-        // you wish to view.
+        // begin and end should point to the first and one past last bytes in
+        // the range you wish to view.
         //
         // debug_offset provides a way to indicate that the ConstDataRange is
         // located at an offset into some larger logical buffer. By setting it
@@ -86,13 +86,13 @@ namespace mongo {
                 Status(ErrorCodes::Overflow, ss);
             }
 
-            return data_type_load(t, _begin + offset, length() - offset, nullptr,
+            return DataType::load(t, _begin + offset, length() - offset, nullptr,
                                   offset + _debug_offset);
         }
 
         template<typename T>
         StatusWith<T> read(std::size_t offset = 0) const {
-            T t(data_type_default_construct<T>());
+            T t(DataType::defaultConstruct<T>());
             Status s = read(&t, offset);
 
             if (s.isOK()) {
@@ -147,7 +147,7 @@ namespace mongo {
         size_t additionalBytesNeeded(const T& value, std::size_t offset = 0) {
             size_t advance;
 
-            data_type_store(value, nullptr, std::numeric_limits<size_t>::max(), &advance,
+            DataType::store(value, nullptr, std::numeric_limits<size_t>::max(), &advance,
                             offset + _debug_offset);
 
             // if there are bytes left in the range
@@ -180,7 +180,7 @@ namespace mongo {
                 return Status(ErrorCodes::Overflow, ss);
             }
 
-            return data_type_store(value, const_cast<char *>(_begin + offset), length() - offset,
+            return DataType::store(value, const_cast<char *>(_begin + offset), length() - offset,
                                    nullptr, offset + _debug_offset);
         }
 

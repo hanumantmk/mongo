@@ -155,15 +155,15 @@ namespace mongo {
             }
 
             void setCursorId(int64_t value) {
-                storage().write(LittleEndian<int64_t>(value), offsetof(Layout, cursorId));
+                storage().write(makeLittleEndian(value), offsetof(Layout, cursorId));
             }
 
             void setStartingFrom(int32_t value) {
-                storage().write(LittleEndian<int32_t>(value), offsetof(Layout, startingFrom));
+                storage().write(makeLittleEndian(value), offsetof(Layout, startingFrom));
             }
 
             void setNReturned(int32_t value) {
-                storage().write(LittleEndian<int32_t>(value), offsetof(Layout, nReturned));
+                storage().write(makeLittleEndian(value), offsetof(Layout, nReturned));
             }
 
             int32_t getResultFlags() {
@@ -171,7 +171,7 @@ namespace mongo {
             }
 
             void setResultFlags(int32_t value) {
-                DataView(msgdata().data()).write(LittleEndian<int32_t>(value));
+                DataView(msgdata().data()).write(makeLittleEndian(value));
             }
 
             void setResultFlagsToOk() {

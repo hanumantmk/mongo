@@ -1,4 +1,4 @@
-/*    Copyright 2015 MongoDB Inc.
+/*    Copyright 2014 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -29,7 +29,6 @@
 
 #include <cstring>
 #include <type_traits>
-#include <limits>
 
 #include "mongo/config.h"
 
@@ -55,16 +54,16 @@ namespace mongo {
 
         template<typename T>
         const ConstDataView& read(T* t, size_t offset = 0) const {
-            data_type_unsafe_load(t, view(offset), nullptr);
+            DataType::unsafeLoad(t, view(offset), nullptr);
 
             return *this;
         }
 
         template<typename T>
         T read(std::size_t offset = 0) const {
-            T t(data_type_default_construct<T>());
+            T t(DataType::defaultConstruct<T>());
 
-            read<T>(&t, offset);
+            read(&t, offset);
 
             return t;
         }
@@ -90,7 +89,7 @@ namespace mongo {
 
         template<typename T>
         DataView& write(const T& value, std::size_t offset = 0) {
-            data_type_unsafe_store(value, view(offset), nullptr);
+            DataType::unsafeStore(value, view(offset), nullptr);
 
             return *this;
         }

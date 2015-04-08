@@ -6,7 +6,8 @@ env.Command(['error_codes.h', 'error_codes.cpp'], ['generate_error_codes.py', 'e
             '$PYTHON $SOURCES $TARGETS')
 
 env.Library('base',
-            ['error_codes.cpp',
+            ['data_type.cpp',
+             'error_codes.cpp',
              'global_initializer.cpp',
              'global_initializer_registerer.cpp',
              'init.cpp',

@@ -699,7 +699,7 @@ namespace mongo {
 
             char *data = _b.buf() + _offset;
             int size = _b.len() - _offset;
-            DataView(data).write(LittleEndian<decltype(size)>(size));
+            DataView(data).write(makeLittleEndian(size));
             if ( _tracker )
                 _tracker->got( size );
             return data;

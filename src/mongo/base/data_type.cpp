@@ -25,63 +25,26 @@
  *    then also delete it in the license file.
  */
 
-#include "mongo/base/data_type_range.h"
-#include "mongo/base/data_range_cursor.h"
-#include "mongo/base/data_range.h"
-#include "mongo/bson/bsonobj.h"
-#include "mongo/bson/bsonobjbuilder.h"
+#include "mongo/base/data_type.h"
 
-#include "mongo/unittest/unittest.h"
+#include "mongo/util/mongoutils/str.h"
 
 namespace mongo {
 
-    TEST(BSONObjDataType, ConstDataTypeRangeBSON) {
-        char buf[1000] = { 0 };
-
-        DataRangeCursor drc(buf, buf + sizeof(buf));
-
-        {
-            BSONObjBuilder b;
-            b.append("a", 1);
-
-            drc.writeAndAdvance(b.obj());
-        }
-        {
-            BSONObjBuilder b;
-            b.append("b", "fooo");
-
-            drc.writeAndAdvance(b.obj());
-        }
-        {
-            BSONObjBuilder b;
-            b.append("c", 3);
-
-            drc.writeAndAdvance(b.obj());
-        }
-
-        ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
-        ConstDataTypeRange<BSONObj> cdtr(&cdrc);
-        ASSERT(cdtr.status().isOK());
-
-        ASSERT_EQUALS(cdrc.length(), 1000u);
-        auto x = cdtr.begin();
-        ASSERT_EQUALS(cdrc.length(), 988u);
-
-        ASSERT_EQUALS(x->getField("a").numberInt(), 1);
-        x++;
-
-        ASSERT_EQUALS(x->getField("b").str(), "fooo");
-        ASSERT(cdtr.status().isOK());
-        ++x;
-
-        ASSERT_EQUALS(x->getField("c").numberInt(), 3);
-        ++x;
-
-        ASSERT(cdtr.end() == x);
-
-        ASSERT_EQUALS(cdrc.length(), 959u);
-        ASSERT(! cdtr.status().isOK());
-        ASSERT_EQUALS(cdtr.status().code(), ErrorCodes::InvalidBSON);
+    Status DataType::makeTrivialLoadStatus(size_t sizeOfT, size_t length,
+                                           size_t debug_offset) {
+        mongoutils::str::stream ss;
+        ss << "buffer size too small to read (" << sizeOfT << ") bytes out of buffer["
+           << length << "] at offset: " << debug_offset;
+        return Status(ErrorCodes::Overflow, ss);
     }
 
-} // namespace mongo
+    Status DataType::makeTrivialStoreStatus(size_t sizeOfT, size_t length,
+                                            size_t debug_offset) {
+        mongoutils::str::stream ss;
+        ss << "buffer size too small to write (" << sizeOfT << ") bytes into buffer["
+           << length << "] at offset: " << debug_offset;
+        return Status(ErrorCodes::Overflow, ss);
+    }
+
+}  // namespace mongo

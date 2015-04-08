@@ -47,7 +47,7 @@ namespace mongo {
             std::input_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
         public:
             iterator()
-                : _cdtr(nullptr) {
+                : _cdtr(nullptr), _t(DataType::defaultConstruct<T>()) {
             }
 
             explicit iterator(ConstDataTypeRange* cdtr)
@@ -66,7 +66,7 @@ namespace mongo {
             iterator& operator++() {
                 auto status = _cdtr->_cdrc->readAndAdvance(&_t);
 
-                if (! status.isOK()) {
+                if (!status.isOK()) {
                     _cdtr->_status = std::move(status);
                     _cdtr = nullptr;
                 }
@@ -79,11 +79,7 @@ namespace mongo {
             }
 
             friend bool operator==(const iterator& lhs, const iterator& rhs) {
-                if (lhs._cdtr && rhs._cdtr) {
-                    return ((lhs._cdtr == rhs._cdtr) || (*lhs._cdtr == *rhs._cdtr));
-                } else {
-                    return lhs._cdtr == rhs._cdtr;
-                }
+                return lhs._cdtr == rhs._cdtr;
             }
 
             friend bool operator!=(const iterator& lhs, const iterator& rhs) {
@@ -113,18 +109,6 @@ namespace mongo {
 
         const Status& status() const {
             return _status;
-        }
-
-        friend bool operator==(const ConstDataTypeRange& lhs, const ConstDataTypeRange& rhs) {
-            if (lhs._cdrc && rhs._cdrc) {
-                return ((lhs._cdrc == rhs._cdrc) || (*lhs._cdrc == *rhs._cdrc));
-            } else {
-                return lhs._cdrc == rhs._cdrc;
-            }
-        }
-
-        friend bool operator!=(const ConstDataTypeRange& lhs, const ConstDataTypeRange& rhs) {
-            return !(lhs == rhs);
         }
 
     private:

@@ -68,7 +68,7 @@ namespace mongo {
         Status skip() {
             size_t advanced = 0;
 
-            Status x = data_type_load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
+            Status x = DataType::load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
@@ -82,7 +82,7 @@ namespace mongo {
         Status readAndAdvance(T* t) {
             size_t advanced = 0;
 
-            Status x = data_type_load(t, _begin, _end - _begin, &advanced, _debug_offset);
+            Status x = DataType::load(t, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
@@ -94,7 +94,7 @@ namespace mongo {
 
         template <typename T>
         StatusWith<T> readAndAdvance() {
-            T out(data_type_default_construct<T>());
+            T out(DataType::defaultConstruct<T>());
             Status x = readAndAdvance(&out);
 
             if (x.isOK()) {
@@ -138,7 +138,7 @@ namespace mongo {
         Status skip() {
             size_t advanced = 0;
 
-            Status x = data_type_load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
+            Status x = DataType::load<T>(nullptr, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
@@ -152,7 +152,7 @@ namespace mongo {
         Status readAndAdvance(T* t) {
             size_t advanced = 0;
 
-            Status x = data_type_load(t, _begin, _end - _begin, &advanced, _debug_offset);
+            Status x = DataType::load(t, _begin, _end - _begin, &advanced, _debug_offset);
 
             if (x.isOK()) {
                 _begin += advanced;
@@ -164,7 +164,7 @@ namespace mongo {
 
         template <typename T>
         StatusWith<T> readAndAdvance() {
-            T out(data_type_default_construct<T>());
+            T out(DataType::defaultConstruct<T>());
             Status x = readAndAdvance(&out);
 
             if (x.isOK()) {
@@ -178,7 +178,7 @@ namespace mongo {
         Status writeAndAdvance(const T& value) {
             size_t advanced = 0;
 
-            Status x = data_type_store(value, const_cast<char*>(_begin), _end - _begin, &advanced,
+            Status x = DataType::store(value, const_cast<char*>(_begin), _end - _begin, &advanced,
                                        _debug_offset);
 
             if (x.isOK()) {

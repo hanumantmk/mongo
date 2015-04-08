@@ -48,6 +48,11 @@ namespace mongo {
     };
 
     template <typename T>
+    BigEndian<T> makeBigEndian(T t) {
+        return t;
+    }
+
+    template <typename T>
     struct LittleEndian {
         LittleEndian() {}
         LittleEndian(T t) : value(t) {}
@@ -59,22 +64,27 @@ namespace mongo {
     };
 
     template <typename T>
-    struct DataType<BigEndian<T>> {
-        static void unsafe_load(BigEndian<T>* t, const char* ptr, size_t* advanced) {
+    LittleEndian<T> makeLittleEndian(T t) {
+        return t;
+    }
+
+    template <typename T>
+    struct DataType::Handler<BigEndian<T>> {
+        static void unsafeLoad(BigEndian<T>* t, const char* ptr, size_t* advanced) {
             if (t) {
-                data_type_unsafe_load(&t->value, ptr, advanced);
+                DataType::unsafeLoad(&t->value, ptr, advanced);
 
                 t->value = endian::bigToNative(t->value);
             }
             else {
-                data_type_unsafe_load(decltype(&t->value){nullptr}, ptr, advanced);
+                DataType::unsafeLoad(decltype(&t->value){nullptr}, ptr, advanced);
             }
         }
 
         static Status load(BigEndian<T>* t, const char* ptr, size_t length, size_t* advanced,
                            std::ptrdiff_t debug_offset) {
             if (t) {
-                Status x = data_type_load(&t->value, ptr, length, advanced, debug_offset);
+                Status x = DataType::load(&t->value, ptr, length, advanced, debug_offset);
 
                 if (x.isOK()) {
                     t->value = endian::bigToNative(t->value);
@@ -83,45 +93,45 @@ namespace mongo {
                 return x;
             }
             else {
-                return data_type_load(decltype(&t->value){nullptr}, ptr, length, advanced,
+                return DataType::load(decltype(&t->value){nullptr}, ptr, length, advanced,
                                       debug_offset);
             }
         }
 
-        static void unsafe_store(const BigEndian<T>& t, char* ptr, size_t* advanced) {
-            data_type_unsafe_store(endian::nativeToBig(t.value), ptr, advanced);
+        static void unsafeStore(const BigEndian<T>& t, char* ptr, size_t* advanced) {
+            DataType::unsafeStore(endian::nativeToBig(t.value), ptr, advanced);
         }
 
         static Status store(const BigEndian<T>& t, char* ptr, size_t length, size_t* advanced,
                             std::ptrdiff_t debug_offset) {
-            return data_type_store(endian::nativeToBig(t.value), ptr, length, advanced,
+            return DataType::store(endian::nativeToBig(t.value), ptr, length, advanced,
                                    debug_offset);
         }
 
-        static BigEndian<T> default_construct()
+        static BigEndian<T> defaultConstruct()
         {
-            return data_type_default_construct<T>();
+            return DataType::defaultConstruct<T>();
         }
 
     };
 
     template <typename T>
-    struct DataType<LittleEndian<T>> {
-        static void unsafe_load(LittleEndian<T>* t, const char* ptr, size_t* advanced) {
+    struct DataType::Handler<LittleEndian<T>> {
+        static void unsafeLoad(LittleEndian<T>* t, const char* ptr, size_t* advanced) {
             if (t) {
-                data_type_unsafe_load(&t->value, ptr, advanced);
+                DataType::unsafeLoad(&t->value, ptr, advanced);
 
                 t->value = endian::littleToNative(t->value);
             }
             else {
-                data_type_unsafe_load(decltype(&t->value){nullptr}, ptr, advanced);
+                DataType::unsafeLoad(decltype(&t->value){nullptr}, ptr, advanced);
             }
         }
 
         static Status load(LittleEndian<T>* t, const char* ptr, size_t length, size_t* advanced,
                            std::ptrdiff_t debug_offset) {
             if (t) {
-                Status x = data_type_load(&t->value, ptr, length, advanced, debug_offset);
+                Status x = DataType::load(&t->value, ptr, length, advanced, debug_offset);
 
                 if (x.isOK()) {
                     t->value = endian::littleToNative(t->value);
@@ -130,24 +140,24 @@ namespace mongo {
                 return x;
             }
             else {
-                return data_type_load(decltype(&t->value){nullptr}, ptr, length, advanced,
+                return DataType::load(decltype(&t->value){nullptr}, ptr, length, advanced,
                                       debug_offset);
             }
         }
 
-        static void unsafe_store(const LittleEndian<T>& t, char* ptr, size_t* advanced) {
-            data_type_unsafe_store(endian::nativeToLittle(t.value), ptr, advanced);
+        static void unsafeStore(const LittleEndian<T>& t, char* ptr, size_t* advanced) {
+            DataType::unsafeStore(endian::nativeToLittle(t.value), ptr, advanced);
         }
 
         static Status store(const LittleEndian<T>& t, char* ptr, size_t length, size_t* advanced,
                             std::ptrdiff_t debug_offset) {
-            return data_type_store(endian::nativeToLittle(t.value), ptr, length, advanced,
+            return DataType::store(endian::nativeToLittle(t.value), ptr, length, advanced,
                                    debug_offset);
         }
 
-        static LittleEndian<T> default_construct()
+        static LittleEndian<T> defaultConstruct()
         {
-            return data_type_default_construct<T>();
+            return DataType::defaultConstruct<T>();
         }
 
     };
