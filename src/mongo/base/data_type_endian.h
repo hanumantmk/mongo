@@ -48,7 +48,7 @@ namespace mongo {
     };
 
     template <typename T>
-    BigEndian<T> makeBigEndian(T t) {
+    BigEndian<T> tagBigEndian(T t) {
         return t;
     }
 
@@ -64,7 +64,7 @@ namespace mongo {
     };
 
     template <typename T>
-    LittleEndian<T> makeLittleEndian(T t) {
+    LittleEndian<T> tagLittleEndian(T t) {
         return t;
     }
 

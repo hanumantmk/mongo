@@ -69,7 +69,7 @@ namespace {
             int size = 1234;
 
             char* x = new char[size];
-            DataView(x).write(makeLittleEndian(size));
+            DataView(x).write(tagLittleEndian(size));
 
             for ( int i=4; i<size; i++ ) {
                 x[i] = r.nextInt32( 255 );

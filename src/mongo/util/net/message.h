@@ -170,19 +170,19 @@ namespace mongo {
             }
 
             void setMessageLength(int32_t value) {
-                data().write(makeLittleEndian(value), offsetof(Layout, messageLength));
+                data().write(tagLittleEndian(value), offsetof(Layout, messageLength));
             }
 
             void setRequestID(int32_t value) {
-                data().write(makeLittleEndian(value), offsetof(Layout, requestID));
+                data().write(tagLittleEndian(value), offsetof(Layout, requestID));
             }
 
             void setResponseTo(int32_t value) {
-                data().write(makeLittleEndian(value), offsetof(Layout, responseTo));
+                data().write(tagLittleEndian(value), offsetof(Layout, responseTo));
             }
 
             void setOpCode(int32_t value) {
-                data().write(makeLittleEndian(value), offsetof(Layout, opCode));
+                data().write(tagLittleEndian(value), offsetof(Layout, opCode));
             }
 
         private:

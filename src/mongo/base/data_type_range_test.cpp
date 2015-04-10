@@ -35,6 +35,10 @@
 
 namespace mongo {
 
+    bool errorIsOverflow(const DBException& ex) {
+        return ex.getCode() == ErrorCodes::Overflow;
+    };
+
     TEST(DataTypeRange, ConstDataTypeRange) {
         uint32_t nums[] = {1,2,3};
         char buf[sizeof(uint32_t) * 3 + 2];
@@ -43,13 +47,13 @@ namespace mongo {
         std::memcpy (buf, nums, 12);
         std::memcpy (buf + 12, &last, 2);
 
-        ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
+        ConstDataRange cdr(buf, buf + sizeof(buf));
 
-        ConstDataTypeRange<uint32_t> cdtr(&cdrc);
+        ConstDataTypeRange<uint32_t> cdtr(cdr, 3);
 
-        ASSERT_EQUALS(cdrc.length(), 14u);
+        ASSERT_EQUALS(cdtr.validated_bytes(), 0u);
         auto x = cdtr.begin();
-        ASSERT_EQUALS(cdrc.length(), 10u);
+        ASSERT_EQUALS(cdtr.validated_bytes(), 4u);
 
         ASSERT_EQUALS(1u, *x);
         ++x;
@@ -62,15 +66,56 @@ namespace mongo {
 
         ASSERT(cdtr.end() == x);
 
-        ASSERT_EQUALS(cdrc.length(), 2u);
+        ASSERT_EQUALS(cdtr.validated_bytes(), 12u);
+        ASSERT_EQUALS(cdtr.safely_exhausted(), true);
 
-        ConstDataTypeRange<uint16_t> cdtr16(&cdrc);
+        ConstDataTypeRange<uint16_t> cdtr16(cdtr.unvalidated());
 
         for (auto&& y : cdtr16) {
             ASSERT_EQUALS(4u, y);
         }
 
-        ASSERT_EQUALS(cdrc.length(), 0u);
+        ASSERT_EQUALS(cdtr16.validated_bytes(), 2u);
+
+        auto cdtr32 = cdtr.cast_unvalidated<uint32_t>();
+
+        ASSERT_THROWS_PRED(cdtr32.begin(), UserException, errorIsOverflow);
+    }
+
+    TEST(DataTypeRange, DataTypeRange) {
+        std::array<uint32_t, 3> nums{{1,2,3}};
+        char buf[sizeof(uint32_t) * 3 + 2];
+
+        DataRange dr(buf, buf + sizeof(buf));
+
+        DataTypeRange<uint32_t> dtr(dr, 3);
+        std::copy(nums.begin(), nums.end(), std::back_inserter(dtr));
+        auto dtr16 = dtr.cast_unvalidated<uint16_t>();
+        dtr16.push_back(4u);
+        DataTypeRange<uint32_t> dtr32(dtr.unvalidated());
+
+        ASSERT_THROWS_PRED(dtr32.push_back(5u), UserException, errorIsOverflow);
+
+        auto x = dtr.begin();
+
+        ASSERT_EQUALS(1u, *x);
+        ++x;
+
+        ASSERT_EQUALS(2u, *x);
+        ++x;
+
+        ASSERT_EQUALS(3u, *x);
+        x++;
+
+        ASSERT(dtr.end() == x);
+
+        ASSERT_EQUALS(dtr.safely_exhausted(), true);
+
+        for (auto&& y : dtr16) {
+            ASSERT_EQUALS(4u, y);
+        }
+
+        ASSERT_THROWS_PRED(dtr32.begin(), UserException, errorIsOverflow);
     }
 
 } // namespace mongo

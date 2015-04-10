@@ -40,18 +40,28 @@
 namespace mongo {
 
     template <typename T>
-    class ConstDataTypeRange {
+    class DataTypeRange;
+
+    template <typename T>
+    class ConstDataTypeRange : public ConstDataRange {
+        friend class DataTypeRange<T>;
 
     public:
         class iterator : public std::iterator<
-            std::input_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
+            std::forward_iterator_tag, T, std::ptrdiff_t, const T*, const T&> {
         public:
             iterator()
-                : _cdtr(nullptr), _t(DataType::defaultConstruct<T>()) {
+                : _cdtr(nullptr),
+                  _cdrc(nullptr, nullptr),
+                  _validated_elements(0),
+                  _t(DataType::defaultConstruct<T>()) {
             }
 
             explicit iterator(ConstDataTypeRange* cdtr)
-                : _cdtr(cdtr) {
+                : _cdtr(cdtr),
+                  _cdrc(*_cdtr),
+                  _validated_elements(0),
+                  _t(DataType::defaultConstruct<T>()) {
                 ++(*this);
             }
 
@@ -64,11 +74,29 @@ namespace mongo {
             }
 
             iterator& operator++() {
-                auto status = _cdtr->_cdrc->readAndAdvance(&_t);
+                if ((_cdrc.length() == 0) ||
+                    (_cdtr->_elements && _validated_elements == _cdtr->_elements)) {
 
-                if (!status.isOK()) {
-                    _cdtr->_status = std::move(status);
+                    _cdtr->_safely_exhausted = true;
                     _cdtr = nullptr;
+                }
+                else {
+                    auto status = _cdrc.readAndAdvance(&_t);
+
+                    if (!status.isOK()) {
+                        _cdtr = nullptr;
+                        uassertStatusOK(status);
+                    } else {
+                        _cdtr->_validated_bytes = std::max(
+                            _cdtr->_validated_bytes,
+                            _cdtr->length() - _cdrc.length());
+
+                        _cdtr->_validated_elements = std::max(
+                            _cdtr->_validated_elements,
+                            _validated_elements);
+
+                        _validated_elements++;
+                    }
                 }
 
                 return *this;
@@ -88,11 +116,19 @@ namespace mongo {
 
         private:
             ConstDataTypeRange* _cdtr;
+            ConstDataRangeCursor _cdrc;
+            std::size_t _validated_elements;
             T _t;
         };
 
-        ConstDataTypeRange(ConstDataRangeCursor* cdrc)
-            : _cdrc(cdrc), _status(Status::OK()) {
+        friend class iterator;
+
+        ConstDataTypeRange(ConstDataRange cdr, std::size_t elements = 0)
+            : ConstDataRange(cdr),
+              _validated_bytes(0),
+              _validated_elements(0),
+              _elements(elements),
+              _safely_exhausted(false) {
         }
 
         iterator begin() {
@@ -103,17 +139,107 @@ namespace mongo {
             return iterator();
         }
 
-        Status& status() {
-            return _status;
+        std::size_t validated_bytes() const {
+            return _validated_bytes;
         }
 
-        const Status& status() const {
-            return _status;
+        std::size_t validated_elements() const {
+            return _validated_elements;
+        }
+
+        bool safely_exhausted() const {
+            return _safely_exhausted;
+        }
+
+        ConstDataRange unvalidated() const {
+            return ConstDataRange(_begin + _validated_bytes, _end);
+        }
+
+        template <typename U>
+        ConstDataTypeRange<U> cast_unvalidated() const {
+            return ConstDataRange(_begin + validated_bytes(), _end);
+        }
+
+        template <typename U>
+        ConstDataTypeRange<U> cast() const {
+            return ConstDataRange(_begin, _end);
         }
 
     private:
-        ConstDataRangeCursor* _cdrc;
-        Status _status;
+        std::size_t _validated_bytes;
+        std::size_t _validated_elements;
+        std::size_t _elements;
+        bool _safely_exhausted;
     };
 
+    template <typename T>
+    class DataTypeRange : public DataRange {
+
+    public:
+        using iterator = typename ConstDataTypeRange<T>::iterator;
+        using value_type = T;
+
+        DataTypeRange(DataRange dr, std::size_t elements = 0)
+            : DataRange(dr),
+              _cdtr(dr, elements) {
+        }
+
+        iterator begin() {
+            return _cdtr.begin();
+        }
+
+        iterator end() {
+            return _cdtr.end();
+        }
+
+        std::size_t validated_bytes() const {
+            return _cdtr.validated_bytes();
+        }
+
+        std::size_t validated_elements() const {
+            return _cdtr.validated_elements();
+        }
+
+        bool safely_exhausted() const {
+            return _cdtr.safely_exhausted();
+        }
+
+        DataRange unvalidated() const {
+            return DataRange(const_cast<char*>(_begin) + validated_bytes(),
+                             const_cast<char*>(_end));
+        }
+
+        template <typename U>
+        DataTypeRange<U> cast_unvalidated() const {
+            return DataRange(const_cast<char*>(_begin) + validated_bytes(),
+                             const_cast<char*>(_end));
+        }
+
+        template <typename U>
+        DataTypeRange<U> cast() const {
+            return DataRange(const_cast<char*>(_begin),
+                             const_cast<char*>(_end));
+        }
+
+        void push_back(const T& value) {
+            if (_cdtr._safely_exhausted) {
+                return;
+            }
+
+            DataRangeCursor drc(*this);
+
+            uassertStatusOK(drc.advance(validated_bytes()));
+            uassertStatusOK(drc.writeAndAdvance(value));
+
+            _cdtr._validated_bytes = (drc.data() - data());
+            _cdtr._validated_elements++;
+
+            if (_cdtr._elements && _cdtr._validated_elements == _cdtr._elements) {
+                _cdtr._safely_exhausted = true;
+            }
+        }
+
+    private:
+        ConstDataTypeRange<T> _cdtr;
+    };
 } // namespace mongo

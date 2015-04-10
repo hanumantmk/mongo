@@ -94,11 +94,11 @@ namespace EncodedValueStorageTest {
         }
 
         void setLE(uint32_t value) {
-            data().write(makeLittleEndian(value), offsetof(Layout, le));
+            data().write(tagLittleEndian(value), offsetof(Layout, le));
         }
 
         void setBE(uint32_t value) {
-            data().write(makeBigEndian(value), offsetof(Layout, be));
+            data().write(tagBigEndian(value), offsetof(Layout, be));
         }
 
     private:

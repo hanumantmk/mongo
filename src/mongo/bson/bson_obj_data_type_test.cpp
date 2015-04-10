@@ -59,19 +59,15 @@ namespace mongo {
             drc.writeAndAdvance(b.obj());
         }
 
-        ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
-        ConstDataTypeRange<BSONObj> cdtr(&cdrc);
-        ASSERT(cdtr.status().isOK());
+        ConstDataRange cdr(buf, buf + sizeof(buf));
+        ConstDataTypeRange<BSONObj> cdtr(cdr, 3);
 
-        ASSERT_EQUALS(cdrc.length(), 1000u);
         auto x = cdtr.begin();
-        ASSERT_EQUALS(cdrc.length(), 988u);
 
         ASSERT_EQUALS(x->getField("a").numberInt(), 1);
         x++;
 
         ASSERT_EQUALS(x->getField("b").str(), "fooo");
-        ASSERT(cdtr.status().isOK());
         ++x;
 
         ASSERT_EQUALS(x->getField("c").numberInt(), 3);
@@ -79,9 +75,8 @@ namespace mongo {
 
         ASSERT(cdtr.end() == x);
 
-        ASSERT_EQUALS(cdrc.length(), 959u);
-        ASSERT(! cdtr.status().isOK());
-        ASSERT_EQUALS(cdtr.status().code(), ErrorCodes::InvalidBSON);
+        ASSERT_EQUALS(cdtr.validated_bytes(), 41u);
+        ASSERT_EQUALS(cdtr.safely_exhausted(), true);
     }
 
 } // namespace mongo

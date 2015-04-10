@@ -263,7 +263,7 @@ namespace mongo {
             // by a BufBuilder are intended for external use: either written to disk
             // or to the wire. Since all of our encoding formats are little endian,
             // we bake that assumption in here. This decision should be revisited soon.
-            DataView(grow(sizeof(t))).write(makeLittleEndian(t));
+            DataView(grow(sizeof(t))).write(tagLittleEndian(t));
         }
 
 
