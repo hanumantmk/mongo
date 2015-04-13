@@ -25,7 +25,6 @@
  *    then also delete it in the license file.
  */
 
-#include "mongo/base/data_type_range.h"
 #include "mongo/base/data_range_cursor.h"
 #include "mongo/base/data_range.h"
 #include "mongo/bson/bsonobj.h"
@@ -59,24 +58,11 @@ namespace mongo {
             drc.writeAndAdvance(b.obj());
         }
 
-        ConstDataRange cdr(buf, buf + sizeof(buf));
-        ConstDataTypeRange<BSONObj> cdtr(cdr, 3);
+        ConstDataRangeCursor cdrc(buf, buf + sizeof(buf));
 
-        auto x = cdtr.begin();
-
-        ASSERT_EQUALS(x->getField("a").numberInt(), 1);
-        x++;
-
-        ASSERT_EQUALS(x->getField("b").str(), "fooo");
-        ++x;
-
-        ASSERT_EQUALS(x->getField("c").numberInt(), 3);
-        ++x;
-
-        ASSERT(cdtr.end() == x);
-
-        ASSERT_EQUALS(cdtr.validated_bytes(), 41u);
-        ASSERT_EQUALS(cdtr.safely_exhausted(), true);
+        ASSERT_EQUALS(1, cdrc.readAndAdvance<BSONObj>().getValue().getField("a").numberInt());
+        ASSERT_EQUALS("fooo", cdrc.readAndAdvance<BSONObj>().getValue().getField("b").str());
+        ASSERT_EQUALS(3, cdrc.readAndAdvance<BSONObj>().getValue().getField("c").numberInt());
     }
 
 } // namespace mongo
