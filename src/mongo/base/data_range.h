@@ -186,4 +186,89 @@ namespace mongo {
 
     };
 
+    template <>
+    struct DataType::Handler<DataRange> {
+        static Status load(DataRange* dr, const char* ptr, size_t length, size_t* advanced,
+                           std::ptrdiff_t debug_offset)
+        {
+            if (dr) {
+                *dr = DataRange(const_cast<char *>(ptr), const_cast<char*>(ptr) + length);
+            }
+
+            if (advanced) {
+                *advanced = length;
+            }
+
+            return Status::OK();
+        }
+
+        static Status store(const DataRange& dr, char* ptr, size_t length, size_t* advanced,
+                            std::ptrdiff_t debug_offset)
+        {
+            if (dr.length() > length) {
+                mongoutils::str::stream ss;
+                ss << "buffer size too small to write (" << dr.length() << ") bytes into buffer["
+                   << length << "] at offset: " << debug_offset;
+                return Status(ErrorCodes::Overflow, ss);
+            }
+
+            if (ptr) {
+                std::memcpy(ptr, dr.data(), dr.length());
+            }
+
+            if (advanced) {
+                *advanced = dr.length();
+            }
+
+            return Status::OK();
+        }
+
+        static DataRange defaultConstruct()
+        {
+            return DataRange(nullptr, nullptr);
+        }
+    };
+
+    template <>
+    struct DataType::Handler<ConstDataRange> {
+        static Status load(ConstDataRange* cdr, const char* ptr, size_t length, size_t* advanced,
+                           std::ptrdiff_t debug_offset)
+        {
+            if (cdr) {
+                *cdr = ConstDataRange(ptr, ptr + length);
+            }
+
+            if (advanced) {
+                *advanced = length;
+            }
+
+            return Status::OK();
+        }
+
+        static Status store(const ConstDataRange& cdr, char* ptr, size_t length, size_t* advanced,
+                            std::ptrdiff_t debug_offset)
+        {
+            if (cdr.length() > length) {
+                mongoutils::str::stream ss;
+                ss << "buffer size too small to write (" << cdr.length() << ") bytes into buffer["
+                   << length << "] at offset: " << debug_offset;
+                return Status(ErrorCodes::Overflow, ss);
+            }
+
+            if (ptr) {
+                std::memcpy(ptr, cdr.data(), cdr.length());
+            }
+
+            if (advanced) {
+                *advanced = cdr.length();
+            }
+
+            return Status::OK();
+        }
+
+        static ConstDataRange defaultConstruct()
+        {
+            return ConstDataRange(nullptr, nullptr);
+        }
+    };
 } // namespace mongo
