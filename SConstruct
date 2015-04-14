@@ -223,7 +223,7 @@ add_option( "wiredtiger", "Enable wiredtiger", "?", True, "wiredtiger",
             type="choice", choices=["on", "off"], const="on", default="on")
 
 # library choices
-js_engine_choices = ['v8-3.12', 'v8-3.25', 'none']
+js_engine_choices = ['v8-3.12', 'v8-3.25', 'v8-4.1', 'none']
 add_option( "js-engine", "JavaScript scripting engine implementation", 1, False,
            type='choice', default=js_engine_choices[0], choices=js_engine_choices)
 add_option( "server-js", "Build mongod without JavaScript support", 1, False,

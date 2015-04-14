@@ -29,16 +29,17 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/scripting/engine_v8-3.25.h"
+#include "mongo/scripting/engine_v8-4.1.h"
 
 #include <iostream>
+#include <libplatform/libplatform.h>
 
 #include "mongo/base/init.h"
-#include "mongo/db/service_context.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/db/service_context.h"
 #include "mongo/platform/unordered_set.h"
-#include "mongo/scripting/v8-3.25_db.h"
-#include "mongo/scripting/v8-3.25_utils.h"
+#include "mongo/scripting/v8-4.1_db.h"
+#include "mongo/scripting/v8-4.1_utils.h"
 #include "mongo/util/base64.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
@@ -390,7 +391,7 @@ namespace mongo {
      }
 
      std::string ScriptEngine::getInterpreterVersionString() {
-         return "V8 3.25.28";
+         return "V8 4.1.27";
      }
 
      void V8ScriptEngine::interrupt(unsigned opId) {
@@ -601,10 +602,6 @@ namespace mongo {
     }
 
     bool V8Scope::hasOutOfMemoryException() {
-        V8_SIMPLE_HEADER
-        if (!_context.IsEmpty()) {
-            return getContext()->HasOutOfMemoryException();
-        }
         return false;
     }
 
@@ -1275,7 +1272,7 @@ namespace mongo {
         V8_SIMPLE_HEADER
         // trigger low memory notification.  for more granular control over garbage
         // collection cycle, @see v8::V8::IdleNotification.
-        v8::V8::LowMemoryNotification();
+        //v8::V8::LowMemoryNotification();
     }
 
     void V8Scope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
@@ -1841,7 +1838,7 @@ namespace mongo {
                                        const v8::FunctionCallbackInfo<v8::Value>& args) {
         // trigger low memory notification.  for more granular control over garbage
         // collection cycle, @see v8::V8::IdleNotification.
-        v8::V8::LowMemoryNotification();
+        //v8::V8::LowMemoryNotification();
         return v8::Undefined(scope->getIsolate());
     }
 
@@ -1919,6 +1916,52 @@ namespace mongo {
 
     MONGO_INITIALIZER(JavascriptPrintDomain)(InitializerContext*) {
         jsPrintLogDomain = logger::globalLogManager()->getNamedDomain("javascriptOutput");
+        return Status::OK();
+    }
+
+    class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
+     public:
+      // Impose an upper limit to avoid out of memory errors that bring down
+      // the process.
+      static const size_t kMaxLength = 0x3fffffff;
+      static ArrayBufferAllocator the_singleton;
+      virtual ~ArrayBufferAllocator() = default;
+      virtual void* Allocate(size_t length) override;
+      virtual void* AllocateUninitialized(size_t length) override;
+      virtual void Free(void* data, size_t length) override;
+     private:
+      ArrayBufferAllocator() = default;
+    };
+
+    ArrayBufferAllocator ArrayBufferAllocator::the_singleton;
+
+
+    void* ArrayBufferAllocator::Allocate(size_t length) {
+      if (length > kMaxLength)
+        return nullptr;
+      char* data = new char[length];
+      memset(data, 0, length);
+      return data;
+    }
+
+
+    void* ArrayBufferAllocator::AllocateUninitialized(size_t length) {
+      if (length > kMaxLength)
+        return nullptr;
+      return new char[length];
+    }
+
+
+    void ArrayBufferAllocator::Free(void* data, size_t length) {
+      delete[] static_cast<char*>(data);
+    }
+
+
+    MONGO_INITIALIZER(SetV8Globals)(InitializerContext*) {
+        auto platform = v8::platform::CreateDefaultPlatform();
+        v8::V8::InitializePlatform(platform);
+        v8::V8::Initialize();
+        v8::V8::SetArrayBufferAllocator(&ArrayBufferAllocator::the_singleton);
         return Status::OK();
     }
 

@@ -29,6 +29,8 @@ def getAllSourceFiles( arr=None , prefix="." ):
         #      Remove after v8-3.25 migration.
         if x.find("v8-3.25") != -1:
             continue
+        if x.find("v8-4.1") != -1:
+            continue
         full = prefix + "/" + x
         if os.path.isdir( full ) and not os.path.islink( full ):
             getAllSourceFiles( arr , full )

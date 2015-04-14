@@ -35,6 +35,8 @@ if not use_system_version_of_library('zlib'):
 if not use_system_version_of_library('v8'):
     thirdPartyIncludePathList.append(
         ('v8', '#/src/third_party/v8' + v8suffix + '/include'))
+    thirdPartyIncludePathList.append(
+        ('v8', '#/src/third_party/v8' + v8suffix))
 
 if not use_system_version_of_library('stemmer'):
     thirdPartyIncludePathList.append(
