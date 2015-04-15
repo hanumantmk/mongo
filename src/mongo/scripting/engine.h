@@ -47,6 +47,33 @@ namespace mongo {
         const StringData& source;
     };
 
+    enum class ScopeMethods : std::uint8_t {
+        setElement,
+        setNumber,
+        setString,
+        setObject,
+        setBoolean,
+        getNumber,
+        getNumberInt,
+        getNumberLongLong,
+        getString,
+        getObject,
+        getBoolean,
+        _createFunction,
+        setFunction,
+        type,
+        rename,
+        injectNative,
+        invoke,
+        invokeWhere,
+        exec,
+        externalSetup,
+        localConnectForDbEval,
+        native,
+        _return,
+        exception,
+    };
+
     class Scope {
         MONGO_DISALLOW_COPYING(Scope);
     public:
@@ -175,6 +202,8 @@ namespace mongo {
             rename("db", "____db____");
             return NoDBAccess(this);
         }
+        virtual ScriptingFunction _createFunction(const char* code,
+                                                  ScriptingFunction functionNumber = 0) = 0;
 
     protected:
         friend class PooledScope;
@@ -186,8 +215,6 @@ namespace mongo {
         class StoredFuncModLogOpHandler;
 
         virtual FunctionCacheMap& getFunctionCache() { return _cachedFunctions; }
-        virtual ScriptingFunction _createFunction(const char* code,
-                                                  ScriptingFunction functionNumber = 0) = 0;
 
         std::string _localDBName;
         int64_t _loadedVersion;
