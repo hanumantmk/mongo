@@ -429,6 +429,11 @@ namespace {
             return _real->invoke(func, args, recv, timeoutMs, ignoreReturn,
                                  readOnlyArgs, readOnlyRecv);
         }
+        int invokeWhere(ScriptingFunction func, const BSONObj* args, const BSONObj* recv,
+                   int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
+            return _real->invokeWhere(func, args, recv, timeoutMs, ignoreReturn,
+                                 readOnlyArgs, readOnlyRecv);
+        }
         bool exec(StringData code, const string& name, bool printResult, bool reportError,
                   bool assertOnError, int timeoutMs = 0) {
             return _real->exec(code, name, printResult, reportError, assertOnError, timeoutMs);

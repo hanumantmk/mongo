@@ -135,6 +135,7 @@ namespace mongo {
             _scope->init( &_userScope );
         }
 
+#if 0
         _scope->setObject( "obj", const_cast< BSONObj & >( obj ) );
         _scope->setBoolean( "fullObject" , true ); // this is a hack b/c fullObject used to be relevant
 
@@ -150,6 +151,17 @@ namespace mongo {
         }
 
         return _scope->getBoolean( "__returnValue" ) != 0;
+#endif
+
+        int rval = _scope->invokeWhere( _func, 0, &obj, 1000 * 60, false );
+        if ( rval == -3 ) { // INVOKE_ERROR
+            stringstream ss;
+            ss << "error on invocation of $where function:\n"
+               << _scope->getError();
+            abort();
+        }
+
+        return rval != 0;
     }
 
     void WhereMatchExpression::debugString( StringBuilder& debug, int level ) const {

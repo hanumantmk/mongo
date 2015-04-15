@@ -47,6 +47,33 @@ namespace mongo {
         const StringData& source;
     };
 
+    enum class ScopeMethods : std::uint8_t {
+        setElement,
+        setNumber,
+        setString,
+        setObject,
+        setBoolean,
+        getNumber,
+        getNumberInt,
+        getNumberLongLong,
+        getString,
+        getObject,
+        getBoolean,
+        _createFunction,
+        setFunction,
+        type,
+        rename,
+        injectNative,
+        invoke,
+        invokeWhere,
+        exec,
+        externalSetup,
+        localConnectForDbEval,
+        native,
+        _return,
+        exception,
+    };
+
     class Scope {
         MONGO_DISALLOW_COPYING(Scope);
     public:
@@ -107,6 +134,10 @@ namespace mongo {
         virtual int invoke(ScriptingFunction func, const BSONObj* args, const BSONObj* recv,
                            int timeoutMs = 0, bool ignoreReturn = false, bool readOnlyArgs = false,
                            bool readOnlyRecv = false) = 0;
+
+        virtual int invokeWhere(ScriptingFunction func, const BSONObj* args, const BSONObj* recv,
+                                int timeoutMs = 0, bool ignoreReturn = false, bool readOnlyArgs = false,
+                                bool readOnlyRecv = false) = 0;
 
         void invokeSafe(ScriptingFunction func, const BSONObj* args, const BSONObj* recv,
                         int timeoutMs = 0, bool ignoreReturn = false, bool readOnlyArgs = false,
