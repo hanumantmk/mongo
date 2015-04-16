@@ -27,7 +27,7 @@
  *    then also delete it in the license file.
  */
 
-#include "mongo/scripting/v8-4.1_db.h"
+#include "mongo/scripting/v8-oop-4.1_db.h"
 
 namespace mongo {
 

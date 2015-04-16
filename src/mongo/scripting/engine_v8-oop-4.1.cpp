@@ -29,7 +29,7 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/scripting/engine_oop_v8-4.1.h"
+#include "mongo/scripting/engine_v8-oop-4.1.h"
 
 #include <iostream>
 
@@ -37,8 +37,8 @@
 #include "mongo/db/operation_context.h"
 #include "mongo/db/service_context.h"
 #include "mongo/platform/unordered_set.h"
-#include "mongo/scripting/oop_v8-4.1_db.h"
-#include "mongo/scripting/oop_v8-4.1_utils.h"
+#include "mongo/scripting/v8-oop-4.1_db.h"
+#include "mongo/scripting/v8-oop-4.1_utils.h"
 #include "mongo/util/base64.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
@@ -53,20 +53,13 @@ namespace mongo {
     using std::string;
     using std::stringstream;
 
-#ifndef _MSC_EXTENSIONS
-    const int V8Scope::objectDepthLimit;
-#endif
-
     // Generated symbols for JS files
     namespace JSFiles {
         extern const JSFile types;
         extern const JSFile assert;
     }
 
-     V8ScriptEngine::V8ScriptEngine() :
-         _globalInterruptLock(),
-         _opToScopeMap(),
-         _deadlineMonitor() {
+     V8ScriptEngine::V8ScriptEngine() {
      }
 
      V8ScriptEngine::~V8ScriptEngine() {
@@ -86,50 +79,24 @@ namespace mongo {
          return "V8 4.1.27";
      }
 
+     std::string V8Scope::getError() {
+         return ""; // TODO ...
+     }
+
      void V8ScriptEngine::interrupt(unsigned opId) {
-         boost::lock_guard<boost::mutex> intLock(_globalInterruptLock);
-         OpIdToScopeMap::iterator iScope = _opToScopeMap.find(opId);
-         if (iScope == _opToScopeMap.end()) {
-             // got interrupt request for a scope that no longer exists
-             LOG(1) << "received interrupt request for unknown op: " << opId
-                    << printKnownOps_inlock() << endl;
-             return;
-         }
-         LOG(1) << "interrupting op: " << opId << printKnownOps_inlock() << endl;
-         iScope->second->kill();
+         // TODO ...
      }
 
      void V8ScriptEngine::interruptAll() {
-         boost::lock_guard<boost::mutex> interruptLock(_globalInterruptLock);
-         for (OpIdToScopeMap::iterator iScope = _opToScopeMap.begin();
-              iScope != _opToScopeMap.end(); ++iScope) {
-             iScope->second->kill();
-         }
+         // TODO ...
      }
 
      void V8Scope::registerOperation(OperationContext* txn) {
-         boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
-         invariant(_opId == 0);
-         _opId = txn->getOpID();
-         _engine->_opToScopeMap[_opId] = this;
-         LOG(2) << "V8Scope " << static_cast<const void*>(this) << " registered for op " << _opId;
-         Status status = txn->checkForInterruptNoAssert();
-         if (!status.isOK()) {
-             kill();
-         }
+         // TODO ...
      }
 
      void V8Scope::unregisterOperation() {
-         boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
-         LOG(2) << "V8Scope " << static_cast<const void*>(this) << " unregistered for op "
-                << _opId << endl;
-        if (_opId != 0) {
-            // scope is currently associated with an operation id
-            V8ScriptEngine::OpIdToScopeMap::iterator it = _engine->_opToScopeMap.find(_opId);
-            if (it != _engine->_opToScopeMap.end())
-                _engine->_opToScopeMap.erase(it);
-            _opId = 0;
-        }
+         // TODO ...
     }
 
     void V8Scope::kill() {
@@ -138,37 +105,16 @@ namespace mongo {
 
     /** check if there is a pending killOp request */
     bool V8Scope::isKillPending() const {
-        return _pendingKill;
+        // TODO ...
+        return false;
     }
     
     OperationContext* V8Scope::getOpContext() const {
-        return _opCtx;
+        // TODO ...
+        return nullptr;
     }
-
-    /**
-     * Display a list of all known ops (for verbose output)
-     */
-    std::string V8ScriptEngine::printKnownOps_inlock() {
-        stringstream out;
-        if (shouldLog(logger::LogSeverity::Debug(2))) {
-            out << "  known ops: " << endl;
-            for(OpIdToScopeMap::iterator iSc = _opToScopeMap.begin();
-                iSc != _opToScopeMap.end(); ++iSc) {
-                out << "  " << iSc->first << endl;
-            }
-        }
-        return out.str();
-    }
-
 
     V8Scope::V8Scope(V8ScriptEngine * engine)
-        : _engine(engine),
-          _connectState(NOT),
-          _interruptLock(),
-          _inNativeExecution(true),
-          _pendingKill(false),
-          _opId(0),
-          _opCtx(NULL) 
     {
     }
 

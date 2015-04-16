@@ -1215,6 +1215,24 @@ env.Install(
             '$BUILD_DIR/mongo/util/options_parser/options_parser_init',
         ]))
 
+env.Install(
+    '#/',
+    env.Program(
+        "mongojs",
+        [
+            "scripting/oop.cpp",
+        ],
+        LIBDEPS=[
+            "mongoscore",
+            "coreserver",
+            "coredb",
+            "mongocommon",
+            "coreshard",
+            "ntservice",
+            "mongodandmongos",
+            "s/upgrade",
+        ]))
+
 # dbtests test binary options
 env.Library("framework_options", ["dbtests/framework_options.cpp"],
             LIBDEPS=['$BUILD_DIR/mongo/util/options_parser/options_parser_init'])

@@ -31,7 +31,6 @@
 
 #include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
-#include <v8.h>
 #include <set>
 #include <string>
 #include <vector>
@@ -43,7 +42,7 @@
 #include "mongo/platform/unordered_map.h"
 #include "mongo/scripting/engine.h"
 #include "mongo/scripting/v8_deadline_monitor.h"
-#include "mongo/scripting/v8-4.1_profiler.h"
+#include "mongo/scripting/v8-oop-4.1_profiler.h"
 
 namespace mongo {
 
@@ -111,11 +110,7 @@ namespace mongo {
 
         virtual void externalSetup();
 
-        virtual void installDBAccess();
-
-        virtual void installBSONTypes();
-
-        virtual std::string getError() { return _error; }
+        virtual std::string getError();
 
         virtual bool hasOutOfMemoryException();
 
@@ -155,25 +150,6 @@ namespace mongo {
 
         virtual ScriptingFunction _createFunction(const char* code,
                                                   ScriptingFunction functionNumber = 0);
-
-    private:
-        /**
-         * Recursion limit when converting from JS objects to BSON.
-         */
-        static const int objectDepthLimit = 150;
-
-        V8ScriptEngine* _engine;
-
-        std::string _error;
-
-        enum ConnectState { NOT, LOCAL, EXTERNAL };
-        ConnectState _connectState;
-
-        mongo::mutex _interruptLock; // protects interruption-related flags
-        bool _inNativeExecution;     // protected by _interruptLock
-        bool _pendingKill;           // protected by _interruptLock
-        unsigned int _opId;          // op id for this scope
-        OperationContext* _opCtx;    // Op context for DbEval
     };
 
     class V8ScriptEngine : public ScriptEngine {
@@ -198,22 +174,6 @@ namespace mongo {
          * Interrupt all v8 contexts (and isolates).  @see interrupt().
          */
         virtual void interruptAll();
-
-    private:
-        friend class V8Scope;
-
-        std::string printKnownOps_inlock();
-
-        /**
-         * Get the deadline monitor instance for the v8 ScriptEngine
-         */
-        DeadlineMonitor<V8Scope>* getDeadlineMonitor() { return &_deadlineMonitor; }
-
-        typedef std::map<unsigned, V8Scope*> OpIdToScopeMap;
-        mongo::mutex _globalInterruptLock;  // protects map of all operation ids -> scope
-        OpIdToScopeMap _opToScopeMap;       // map of mongo op ids to scopes (protected by
-                                            // _globalInterruptLock).
-        DeadlineMonitor<V8Scope> _deadlineMonitor;
     };
 
     extern ScriptEngine* globalScriptEngine;
