@@ -33,7 +33,9 @@
 
 #include <iostream>
 
+#include "mongo/base/data_range.h"
 #include "mongo/base/init.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/db/service_context.h"
 #include "mongo/platform/unordered_set.h"
@@ -42,6 +44,18 @@
 #include "mongo/util/base64.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
+
+# include <arpa/inet.h>
+# include <poll.h>
+# include <netdb.h>
+# include <netinet/in.h>
+# include <netinet/tcp.h>
+# include <sys/types.h>
+# include <sys/socket.h>
+# include <sys/uio.h>
+# include <sys/un.h>
+# include <thread>
+# include <mutex>
 
 using namespace mongoutils;
 
@@ -52,6 +66,40 @@ namespace mongo {
     using std::map;
     using std::string;
     using std::stringstream;
+
+    namespace {
+        std::mutex g_oop_mutex;
+    }
+
+void my_send(int fd, const char* buf, size_t len) {
+    while (len) {
+        ssize_t r = send(fd, buf, len, 0);
+
+        if (r < 0) {
+            abort();
+        }
+
+        if (r > 0) {
+            len -= r;
+            buf += r;
+        }
+    }
+}
+
+void my_recv(int fd, char* buf, size_t len) {
+    while (len) {
+        ssize_t r = recv(fd, buf, len, 0);
+
+        if (r < 0) {
+            abort();
+        }
+
+        if (r > 0) {
+            len -= r;
+            buf += r;
+        }
+    }
+}
 
     // Generated symbols for JS files
     namespace JSFiles {
@@ -114,12 +162,26 @@ namespace mongo {
         return nullptr;
     }
 
-    V8Scope::V8Scope(V8ScriptEngine * engine)
+    V8Scope::V8Scope(V8ScriptEngine * engine) :
+        _global_engine(engine)
     {
+        struct sockaddr_in saddr;
+        int r;
+
+        _cfd = socket(AF_INET, SOCK_STREAM, 0);
+
+        memset(&saddr, 0, sizeof(saddr));
+
+        saddr.sin_family = AF_INET;
+        saddr.sin_port = htons(40001);
+        saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+        r = connect(_cfd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr));
     }
 
     V8Scope::~V8Scope() {
         unregisterOperation();
+        close (_cfd);
     }
 
     bool V8Scope::hasOutOfMemoryException() {
@@ -138,66 +200,155 @@ namespace mongo {
     }
 
     void V8Scope::setNumber(const char * field, double val) {
+        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
     }
 
     void V8Scope::setString(const char * field, StringData val) {
+        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
     }
 
     void V8Scope::setBoolean(const char * field, bool val) {
+        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
     }
 
     void V8Scope::setElement(const char *field, const BSONElement& e) {
+        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << e)));
     }
 
     void V8Scope::setObject(const char *field, const BSONObj& obj, bool readOnly) {
+        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << obj)));
     }
 
     int V8Scope::type(const char *field) {
-        // uasserted(12509, str::stream() << "unable to get type of field " << field);
-        return 0; // TODO ...
+        _enqueue_packet(BSON("getType" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Int();
     }
 
     double V8Scope::getNumber(const char *field) {
-        return 0; // TODO ...
+        _enqueue_packet(BSON("getNumber" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Double();
     }
 
     int V8Scope::getNumberInt(const char *field) {
-        return 0; // TODO ...
+        _enqueue_packet(BSON("getNumberInt" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Int();
     }
 
     long long V8Scope::getNumberLongLong(const char *field) {
-        return 0; // TODO ...
+        _enqueue_packet(BSON("getNumberLongLong" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Long();
     }
 
     string V8Scope::getString(const char *field) {
-        return ""; // TODO ...
+        _enqueue_packet(BSON("getString" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].String();
     }
 
     bool V8Scope::getBoolean(const char *field) {
-        return false; // TODO ...
+        _enqueue_packet(BSON("getBoolean" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Bool();
     }
 
     BSONObj V8Scope::getObject(const char * field) {
-        // uassert(10231,  "not an object", v->IsObject());
-        return BSONObj(); // TODO ...
+        _enqueue_packet(BSON("getObject" << field));
+        _send();
+
+        auto x = _recv();
+        return x["return"].Obj();
     }
 
     ScriptingFunction V8Scope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
-        // uassert(10232, "not a function", ret->IsFunction());
-        return functionNumber;
+        _enqueue_packet(BSON("_createFunction" << BSON_ARRAY(raw << static_cast<long long>(functionNumber))));
+        _send();
+
+        auto x = _recv();
+
+        std::cout << "saw: " << x["return"].Long() << std::endl;
+        return x["return"].Long();
     }
 
     void V8Scope::setFunction(const char* field, const char* code) {
-        // TODO ...
+        _enqueue_packet(BSON("setFunction" << BSON_ARRAY(field << code)));
     }
 
     void V8Scope::rename(const char * from, const char * to) {
-        // TODO ...
+        _enqueue_packet(BSON("rename" << BSON_ARRAY(from << to)));
+    }
+
+    void V8Scope::_enqueue_packet(const BSONObj& obj) {
+        _send_buf.appendBuf(obj.objdata(), obj.objsize());
+    }
+
+    void V8Scope::_send() {
+        std::cout << "send() : " << _send_buf.len() << std::endl;
+        my_send(_cfd, _send_buf.buf(), _send_buf.len());
+        _send_buf.reset();
+    }
+
+    BSONObj V8Scope::_recv() {
+        std::cout << "recv()" << std::endl;
+        char len_buf[4];
+
+        my_recv(_cfd, len_buf, sizeof(len_buf));
+
+        uint32_t to_read = uassertStatusOK(ConstDataRange(len_buf, len_buf + 4).read<LittleEndian<uint32_t>>());
+
+        auto buffer = stdx::make_unique<char[]>(to_read);
+        std::memcpy(buffer.get(), len_buf, sizeof(len_buf));
+
+        my_recv(_cfd, buffer.get() + 4, to_read - 4);
+
+        BSONObj reply;
+
+        uassertStatusOK(ConstDataRange(buffer.get(), buffer.get() + to_read).read(&reply));
+
+        return reply.getOwned();
     }
 
     int V8Scope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
-        // TODO ...
+        BSONObjBuilder root;
+
+        BSONObjBuilder bob(root.subobjStart("invoke"));
+
+        bob.appendIntOrLL("func", func);
+        if (argsObject) {
+            bob.appendObject("argsObject", argsObject->objdata(), argsObject->objsize());
+        }
+        bob.appendObject("recv", recv->objdata(), recv->objsize());
+        bob.appendIntOrLL("timeoutMs", timeoutMs);
+        bob.appendBool("ignoreReturn", ignoreReturn);
+        bob.appendBool("readOnlyArgs", readOnlyArgs);
+        bob.appendBool("readOnlyRecv", readOnlyRecv);
+
+        bob.done();
+
+        BSONObj req(root.obj());
+
+        _enqueue_packet(req);
+        _send();
+
+        BSONObj reply = _recv();
+
+        std::cout << "GOT REPLY : " << reply << std::endl;
 
         return 0;
     }
@@ -205,11 +356,13 @@ namespace mongo {
     bool V8Scope::exec(StringData code, const string& name, bool printResult,
                        bool reportError, bool assertOnError, int timeoutMs) {
         // TODO ...
+        invariant(false);
 
         return true;
     }
 
     void V8Scope::injectNative(const char *field, NativeFunction func, void* data) {
+        invariant(false);
         // TODO ...
     }
 
@@ -218,17 +371,19 @@ namespace mongo {
     }
 
     void V8Scope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
+        invariant(false);
         // TODO ...
     }
 
     void V8Scope::externalSetup() {
+        invariant(false);
         // TODO ...
     }
 
     // ----- internal -----
 
     void V8Scope::reset() {
-        // TODO ...
+        _state.clear();
     }
 
     // --- random utils ----

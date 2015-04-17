@@ -1223,6 +1223,22 @@ env.Install(
             "scripting/oop.cpp",
         ],
         LIBDEPS=[
+            "coredb",
+            "coreserver",
+            "mongodandmongos",
+            "mongodwebserver",
+            "ntservice",
+            "serveronly",
+        ]))
+
+env.Install(
+    '#/',
+    env.Program(
+        "mongojs_test",
+        [
+            "scripting/oop_test.cpp",
+        ],
+        LIBDEPS=[
             "mongoscore",
             "coreserver",
             "coredb",

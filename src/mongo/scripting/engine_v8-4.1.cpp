@@ -44,6 +44,18 @@
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
 
+# include <arpa/inet.h>
+# include <poll.h>
+# include <netdb.h>
+# include <netinet/in.h>
+# include <netinet/tcp.h>
+# include <sys/types.h>
+# include <sys/socket.h>
+# include <sys/uio.h>
+# include <sys/un.h>
+# include <thread>
+
+
 using namespace mongoutils;
 
 namespace mongo {

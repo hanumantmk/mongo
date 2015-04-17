@@ -150,9 +150,21 @@ namespace mongo {
 
         virtual ScriptingFunction _createFunction(const char* code,
                                                   ScriptingFunction functionNumber = 0);
+    private:
+        void _enqueue_packet(const BSONObj& obj);
+        void _send();
+        BSONObj _recv();
+
+        BufBuilder _send_buf;
+
+        std::map<std::string, BSONObj> _state;
+        V8ScriptEngine* _global_engine;
+        int _cfd;
     };
 
     class V8ScriptEngine : public ScriptEngine {
+        friend V8Scope;
+
     public:
         V8ScriptEngine();
         virtual ~V8ScriptEngine();
@@ -174,6 +186,9 @@ namespace mongo {
          * Interrupt all v8 contexts (and isolates).  @see interrupt().
          */
         virtual void interruptAll();
+    private:
+
+        std::vector<std::string> _functions;
     };
 
     extern ScriptEngine* globalScriptEngine;
