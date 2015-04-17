@@ -2,6 +2,12 @@
 
 #include <string>
 
+#include <cstdint>
+#include "mongo/base/init.h"
+#include "mongo/base/initializer.h"
+#include "mongo/base/data_range.h"
+#include "mongo/base/data_range_cursor.h"
+#include "mongo/base/data_type_endian.h"
 #include "mongo/base/initializer.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/bson/bsonobjbuilder.h"
@@ -12,44 +18,137 @@
 #include "mongo/util/signal_handlers.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/quick_exit.h"
+#include "mongo/scripting/engine.h"
 
-namespace mongo {
-
-    using std::string;
-
-    string mongojsCommand;
-    bool dbexitCalled = false;
-
-    bool inShutdown() {
-        return dbexitCalled;
-    }
-
-    bool haveLocalShardingInfo( const string& ns ) {
-        verify( 0 );
-        return false;
-    }
-
-    static BSONObj buildErrReply( const DBException& ex ) {
-        BSONObjBuilder errB;
-        errB.append( "$err", ex.what() );
-        errB.append( "code", ex.getCode() );
-        if ( !ex._shard.empty() ) {
-            errB.append( "shard", ex._shard );
-        }
-        return errB.obj();
-    }
-
-    DBClientBase* createDirectClient(OperationContext* txn) {
-        return 0;
-    }
-
-} // namespace mongo
+# include <arpa/inet.h>
+# include <poll.h>
+# include <netdb.h>
+# include <netinet/in.h>
+# include <netinet/tcp.h>
+# include <sys/types.h>
+# include <sys/socket.h>
+# include <sys/uio.h>
+# include <sys/un.h>
+# include <thread>
 
 using namespace mongo;
+
+MONGO_INITIALIZER_GENERAL(ForkServer,
+                          ("EndStartupOptionHandling"),
+                          ("default"))(InitializerContext* context) {
+    return Status::OK();
+}
+
+bool my_send(int fd, const char* buf, size_t len) {
+    while (len) {
+        ssize_t r = send(fd, buf, len, 0);
+
+        if (r < 0) {
+            return false;
+        }
+
+        if (r > 0) {
+            len -= r;
+            buf += r;
+        }
+    }
+
+    return true;
+}
+
+bool my_recv(int fd, char* buf, size_t len) {
+    while (len) {
+        ssize_t r = recv(fd, buf, len, 0);
+
+        if (r < 0) {
+            return false;
+        }
+
+        if (r > 0) {
+            len -= r;
+            buf += r;
+        }
+    }
+
+    return true;
+}
+
+static void work(int fd) {
+    char buf[10000];
+    uint32_t len;
+
+    for (;;) {
+        ConstDataRange cdr(buf, buf + sizeof(buf));
+
+        if (! my_recv(fd, buf, 4)) break;
+
+        len = uassertStatusOK(cdr.read<LittleEndian<uint32_t>>());
+
+        if (! my_recv(fd, buf + 4, len - 4)) break;
+
+        BSONObj out = uassertStatusOK(cdr.read<BSONObj>());
+        std::cout << "IN: " << out << std::endl;
+
+        std::unique_ptr<Scope> scope(globalScriptEngine->newScope());
+
+        if (out.hasField("scope")) {
+            for (auto elem : out["scope"].Obj()) {
+                scope->setElement(elem.fieldName(), elem);
+            }
+        }
+
+        auto func = scope->createFunction(out["code"].String().c_str());
+
+        BSONObj doc = out["document"].Obj();
+
+        auto err = scope->invoke(func, 0, &doc, 1000 * 60, false);
+
+        BSONObjBuilder bob;
+
+        bob.appendNumber("err", err);
+        scope->append(bob, "rval", "__returnValue");
+
+        auto rval = bob.obj();
+
+        std::cout << "OUT: " << rval << std::endl;
+
+        if (! my_send(fd, rval.objdata(), rval.objsize())) break;
+    }
+
+    close(fd);
+}
 
 static ExitCode runMongoJSServer() {
     setThreadName( "mongojsMain" );
 
+    int optval;
+    int lfd;
+    struct sockaddr_in saddr;
+    int r;
+
+    std::cout << "got here\n";
+
+    lfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    optval = 1;
+    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+
+    memset(&saddr, 0, sizeof(saddr));
+
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons(40001);
+    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    r = bind(lfd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr));
+
+    r = listen(lfd, 10);
+
+    for (;;) {
+        int fd = accept(lfd, nullptr, nullptr);
+
+        std::thread worker(work, fd);
+        worker.detach();
+    }
 
     // listen() will return when exit code closes its socket.
     return EXIT_NET_ERROR;
@@ -76,12 +175,13 @@ int mongoJSMain(int argc, char* argv[], char** envp) {
 
     setupSignalHandlers(false);
 
-    mongojsCommand = argv[0];
-
     Status status = mongo::runGlobalInitializers(argc, argv, envp);
+    std::cout << status << std::endl;
     if (!status.isOK()) {
         quickExit(EXIT_FAILURE);
     }
+
+    ScriptEngine::setup();
 
     try {
         int exitCode = _main();
@@ -108,31 +208,4 @@ int mongoJSMain(int argc, char* argv[], char** envp) {
 int main(int argc, char* argv[], char** envp) {
     int exitCode = mongoJSMain(argc, argv, envp);
     quickExit(exitCode);
-}
-
-#undef exit
-
-void mongo::signalShutdown() {
-    // Notify all threads shutdown has started
-    dbexitCalled = true;
-}
-
-void mongo::exitCleanly(ExitCode code) {
-    // TODO: do we need to add anything?
-    mongo::dbexit( code );
-}
-
-void mongo::dbexit( ExitCode rc, const char *why ) {
-    dbexitCalled = true;
-
-#if defined(_WIN32)
-    // Windows Service Controller wants to be told when we are done shutting down
-    // and call quickExit itself.
-    //
-    if ( rc == EXIT_WINDOWS_SERVICE_STOP ) {
-        log() << "dbexit: exiting because Windows service was stopped" << endl;
-        return;
-    }
-#endif
-    quickExit(rc);
 }
