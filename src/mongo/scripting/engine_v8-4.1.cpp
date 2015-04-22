@@ -1309,7 +1309,7 @@ namespace mongo {
             _connectState = LOCAL;
             _localDBName = dbName;
         }
-        loadStored(txn);
+        //loadStored(txn);
     }
 
     void V8Scope::externalSetup() {

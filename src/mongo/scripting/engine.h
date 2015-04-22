@@ -175,6 +175,8 @@ namespace mongo {
             rename("db", "____db____");
             return NoDBAccess(this);
         }
+        virtual ScriptingFunction _createFunction(const char* code,
+                                                  ScriptingFunction functionNumber = 0) = 0;
 
     protected:
         friend class PooledScope;
@@ -186,8 +188,6 @@ namespace mongo {
         class StoredFuncModLogOpHandler;
 
         virtual FunctionCacheMap& getFunctionCache() { return _cachedFunctions; }
-        virtual ScriptingFunction _createFunction(const char* code,
-                                                  ScriptingFunction functionNumber = 0) = 0;
 
         std::string _localDBName;
         int64_t _loadedVersion;
