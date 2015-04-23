@@ -1144,7 +1144,7 @@ namespace mongo {
          */
         void State::emit( const BSONObj& a ) {
             _numEmits++;
-            _size += _add(_temp.get(), a);
+            _size += _add(_temp.get(), a.getOwned());
         }
 
         int State::_add(InMemory* im, const BSONObj& a) {
@@ -1219,7 +1219,7 @@ namespace mongo {
                 state->emit( b.obj() );
             }
             else {
-                state->emit( args );
+              state->emit(args);
             }
             return BSONObj();
         }

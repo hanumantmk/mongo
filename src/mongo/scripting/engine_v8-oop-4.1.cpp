@@ -272,7 +272,7 @@ void my_recv(int fd, char* buf, size_t len) {
         _send();
 
         auto x = _recv();
-        return x["return"].Obj();
+        return x["return"].Obj().getOwned();
     }
 
     ScriptingFunction V8Scope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
@@ -281,7 +281,6 @@ void my_recv(int fd, char* buf, size_t len) {
 
         auto x = _recv();
 
-        std::cout << "saw: " << x["return"].Long() << std::endl;
         return x["return"].Long();
     }
 
@@ -298,13 +297,11 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::_send() {
-        std::cout << "send() : " << _send_buf.len() << std::endl;
         my_send(_cfd, _send_buf.buf(), _send_buf.len());
         _send_buf.reset();
     }
 
     BSONObj V8Scope::_recv() {
-        std::cout << "recv()" << std::endl;
         char len_buf[4];
 
         my_recv(_cfd, len_buf, sizeof(len_buf));
@@ -333,7 +330,9 @@ void my_recv(int fd, char* buf, size_t len) {
         if (argsObject) {
             bob.appendObject("argsObject", argsObject->objdata(), argsObject->objsize());
         }
-        bob.appendObject("recv", recv->objdata(), recv->objsize());
+        if (recv) {
+            bob.appendObject("recv", recv->objdata(), recv->objsize());
+        }
         bob.appendIntOrLL("timeoutMs", timeoutMs);
         bob.appendBool("ignoreReturn", ignoreReturn);
         bob.appendBool("readOnlyArgs", readOnlyArgs);
@@ -346,24 +345,62 @@ void my_recv(int fd, char* buf, size_t len) {
         _enqueue_packet(req);
         _send();
 
-        BSONObj reply = _recv();
+        BSONObj reply;
 
-        std::cout << "GOT REPLY : " << reply << std::endl;
+        for (;;) {
+            reply = _recv();
 
-        return 0;
+            if (reply.hasField("native")) {
+                auto args = reply["native"].Array();
+
+                auto& x = _native_functions[args[0].String()];
+
+                auto y = std::get<0>(x)(args[1].Obj(), std::get<1>(x));
+
+                _enqueue_packet(BSON("return" << y));
+                _send();
+            } else {
+                break;
+            }
+        }
+
+        if (reply.hasField("exception")) {
+            auto e = reply["exception"].Obj();
+
+            uassertStatusOK(Status(static_cast<ErrorCodes::Error>(e["code"].Int()), e["reason"].String()));
+        }
+
+        return reply["return"].Int();
     }
 
     bool V8Scope::exec(StringData code, const string& name, bool printResult,
                        bool reportError, bool assertOnError, int timeoutMs) {
-        // TODO ...
-        invariant(false);
+        BSONObjBuilder root;
+        BSONObjBuilder bob(root.subobjStart("exec"));
 
-        return true;
+        bob.append("code", code);
+        bob.append("name", name);
+        bob.append("printResult", printResult);
+        bob.append("reportError", reportError);
+        bob.append("assertOnError", assertOnError);
+        bob.append("timeoutMs", timeoutMs);
+        
+        bob.done();
+
+        BSONObj obj = root.obj();
+
+        _enqueue_packet(obj);
+        _send();
+
+        obj = _recv();
+
+        return obj["return"].Bool();
     }
 
     void V8Scope::injectNative(const char *field, NativeFunction func, void* data) {
-        invariant(false);
-        // TODO ...
+        _native_functions[field] = std::make_tuple(func, data);
+
+        _enqueue_packet(BSON("injectNative" << field));
     }
 
     void V8Scope::gc() {
@@ -371,19 +408,18 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
-        invariant(false);
-        // TODO ...
+        _enqueue_packet(BSON("localConnectForDbEval" << dbName));
+        _localDBName = dbName;
+        loadStored(txn);
     }
 
     void V8Scope::externalSetup() {
-        invariant(false);
-        // TODO ...
+        _enqueue_packet(BSON("externalSetup" << true));
     }
 
     // ----- internal -----
 
     void V8Scope::reset() {
-        _state.clear();
     }
 
     // --- random utils ----

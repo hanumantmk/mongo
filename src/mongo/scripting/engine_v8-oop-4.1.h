@@ -156,9 +156,11 @@ namespace mongo {
         BSONObj _recv();
 
         BufBuilder _send_buf;
+        std::map<std::string, std::tuple<NativeFunction, void*>> _native_functions;
 
-        std::map<std::string, BSONObj> _state;
         V8ScriptEngine* _global_engine;
+        OperationContext* _opCtx;
+
         int _cfd;
     };
 
