@@ -33,6 +33,8 @@ def getAllSourceFiles( arr=None , prefix="." ):
             continue
         if x.find("v8-oop-4.1") != -1:
             continue
+        if x.find("v8-sm") != -1:
+            continue
         full = prefix + "/" + x
         if os.path.isdir( full ) and not os.path.islink( full ):
             getAllSourceFiles( arr , full )
