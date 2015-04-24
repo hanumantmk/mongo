@@ -37,6 +37,7 @@
 
 #include "mongo/base/disallow_copying.h"
 #include "mongo/base/string_data.h"
+#include "mongo/base/data_range.h"
 #include "mongo/client/dbclientinterface.h"
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/platform/unordered_map.h"
@@ -151,9 +152,9 @@ namespace mongo {
         virtual ScriptingFunction _createFunction(const char* code,
                                                   ScriptingFunction functionNumber = 0);
     private:
-        void _enqueue_packet(const BSONObj& obj);
+        void _enqueue_packet(ConstDataRange cdr);
         void _send();
-        BSONObj _recv();
+        DataRange _recv(char *buffer, size_t len);
 
         BufBuilder _send_buf;
         std::map<std::string, std::tuple<NativeFunction, void*>> _native_functions;

@@ -28,6 +28,10 @@
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
 #include "mongo/platform/basic.h"
+#include "mongo/base/data_range_cursor.h"
+#include "mongo/base/data_type_endian.h"
+#include "mongo/base/data_type_terminated.h"
+#include "mongo/base/data_type_string_data.h"
 
 #include "mongo/scripting/engine_v8-oop-4.1.h"
 
@@ -90,7 +94,7 @@ void my_recv(int fd, char* buf, size_t len) {
     while (len) {
         ssize_t r = recv(fd, buf, len, 0);
 
-        if (r < 0) {
+        if (r <= 0) {
             abort();
         }
 
@@ -200,100 +204,242 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setNumber(const char * field, double val) {
-        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setNumber)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(LittleEndian<double>(val)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::setString(const char * field, StringData val) {
-        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setString)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(val)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::setBoolean(const char * field, bool val) {
-        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << val)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setBoolean)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(val)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::setElement(const char *field, const BSONElement& e) {
-        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << e)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setElement)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(BSON("v" << e)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::setObject(const char *field, const BSONObj& obj, bool readOnly) {
-        _enqueue_packet(BSON("setValue" << BSON_ARRAY(field << obj)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setObject)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(obj));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     int V8Scope::type(const char *field) {
-        _enqueue_packet(BSON("getType" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::type)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Int();
+        DataRange dr(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(dr.read<LittleEndian<int32_t>>());
     }
 
     double V8Scope::getNumber(const char *field) {
-        _enqueue_packet(BSON("getNumber" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getNumber)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Double();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<LittleEndian<double>>());
     }
 
     int V8Scope::getNumberInt(const char *field) {
-        _enqueue_packet(BSON("getNumberInt" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getNumberInt)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Int();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<LittleEndian<int32_t>>());
     }
 
     long long V8Scope::getNumberLongLong(const char *field) {
-        _enqueue_packet(BSON("getNumberLongLong" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getNumberLongLong)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Long();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<LittleEndian<int64_t>>());
     }
 
     string V8Scope::getString(const char *field) {
-        _enqueue_packet(BSON("getString" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getString)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].String();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<Terminated<0, StringData>>()).value.toString();
     }
 
     bool V8Scope::getBoolean(const char *field) {
-        _enqueue_packet(BSON("getBoolean" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getBoolean)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Bool();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<uint8_t>());
     }
 
     BSONObj V8Scope::getObject(const char * field) {
-        _enqueue_packet(BSON("getObject" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::getObject)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-        return x["return"].Obj().getOwned();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<BSONObj>()).getOwned();
     }
 
     ScriptingFunction V8Scope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
-        _enqueue_packet(BSON("_createFunction" << BSON_ARRAY(raw << static_cast<long long>(functionNumber))));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::_createFunction)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(raw)));
+        uassertStatusOK(drc.writeAndAdvance(LittleEndian<int64_t>(functionNumber)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        auto x = _recv();
-
-        return x["return"].Long();
+        drc = DataRange(_recv(buf, sizeof(buf)));
+        return uassertStatusOK(drc.read<LittleEndian<int64_t>>());
     }
 
     void V8Scope::setFunction(const char* field, const char* code) {
-        _enqueue_packet(BSON("setFunction" << BSON_ARRAY(field << code)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::setFunction)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(code)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::rename(const char * from, const char * to) {
-        _enqueue_packet(BSON("rename" << BSON_ARRAY(from << to)));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::rename)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(from)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(to)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
-    void V8Scope::_enqueue_packet(const BSONObj& obj) {
-        _send_buf.appendBuf(obj.objdata(), obj.objsize());
+    void V8Scope::_enqueue_packet(ConstDataRange cdr) {
+        _send_buf.appendBuf(cdr.data(), cdr.length());
     }
 
     void V8Scope::_send() {
@@ -301,106 +447,133 @@ void my_recv(int fd, char* buf, size_t len) {
         _send_buf.reset();
     }
 
-    BSONObj V8Scope::_recv() {
-        char len_buf[4];
+    DataRange V8Scope::_recv(char *buffer, size_t len) {
+        for (;;) {
+            char header[5];
+            ScopeMethods smr;
 
-        my_recv(_cfd, len_buf, sizeof(len_buf));
+            my_recv(_cfd, header, sizeof(header));
 
-        uint32_t to_read = uassertStatusOK(ConstDataRange(len_buf, len_buf + 4).read<LittleEndian<uint32_t>>());
+            uint32_t to_read = uassertStatusOK(ConstDataRange(header, header + 4).read<LittleEndian<uint32_t>>()) - 5;
 
-        auto buffer = stdx::make_unique<char[]>(to_read);
-        std::memcpy(buffer.get(), len_buf, sizeof(len_buf));
+            invariant(to_read <= len);
 
-        my_recv(_cfd, buffer.get() + 4, to_read - 4);
+            my_recv(_cfd, buffer, to_read);
+            ConstDataRangeCursor cursor(buffer, buffer + to_read);
 
-        BSONObj reply;
+            uassertStatusOK(ConstDataRange(header + 4, header + 5).read(&smr));
 
-        uassertStatusOK(ConstDataRange(buffer.get(), buffer.get() + to_read).read(&reply));
+            switch (smr) {
+                case ScopeMethods::native: {
+                    StringData name = uassertStatusOK(cursor.readAndAdvance<Terminated<0, StringData>>());
+                    BSONObj args = uassertStatusOK(cursor.readAndAdvance<BSONObj>());
 
-        return reply.getOwned();
+                    auto& x = _native_functions[name.toString()];
+                    auto y = std::get<0>(x)(args, std::get<1>(x));
+
+                    char buf[1024];
+
+                    DataRangeCursor drc(buf, buf + sizeof(buf));
+
+                    uassertStatusOK(drc.advance(4));
+                    uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::_return)));
+                    uassertStatusOK(drc.writeAndAdvance(y));
+                    DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+                    _enqueue_packet(ConstDataRange(buf, drc.data()));
+                    _send();
+
+                    break;
+                }
+                case ScopeMethods::_return: {
+                    return DataRange(buffer, buffer + to_read);
+                }
+                case ScopeMethods::exception: {
+                    ErrorCodes::Error code = static_cast<ErrorCodes::Error>(uassertStatusOK(cursor.readAndAdvance<LittleEndian<uint32_t>>()).value);
+                    StringData reason = uassertStatusOK(cursor.readAndAdvance<Terminated<0, StringData>>());
+
+                    uassertStatusOK(Status(code, reason.toString()));
+                    break;
+                }
+                default:
+                    invariant(false);
+            }
+        }
     }
 
     int V8Scope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
-        BSONObjBuilder root;
+        char buf[4096];
 
-        BSONObjBuilder bob(root.subobjStart("invoke"));
+        DataRangeCursor drc(buf, buf + sizeof(buf));
 
-        bob.appendIntOrLL("func", func);
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::invoke)));
+        uassertStatusOK(drc.writeAndAdvance(LittleEndian<int64_t>(func)));
         if (argsObject) {
-            bob.appendObject("argsObject", argsObject->objdata(), argsObject->objsize());
+            uassertStatusOK(drc.writeAndAdvance(uint8_t(1)));
+            uassertStatusOK(drc.writeAndAdvance(*argsObject));
+        } else {
+            uassertStatusOK(drc.writeAndAdvance(uint8_t(0)));
         }
         if (recv) {
-            bob.appendObject("recv", recv->objdata(), recv->objsize());
+            uassertStatusOK(drc.writeAndAdvance(uint8_t(1)));
+            uassertStatusOK(drc.writeAndAdvance(*recv));
+        } else {
+            uassertStatusOK(drc.writeAndAdvance(uint8_t(0)));
         }
-        bob.appendIntOrLL("timeoutMs", timeoutMs);
-        bob.appendBool("ignoreReturn", ignoreReturn);
-        bob.appendBool("readOnlyArgs", readOnlyArgs);
-        bob.appendBool("readOnlyRecv", readOnlyRecv);
+        uassertStatusOK(drc.writeAndAdvance(LittleEndian<int32_t>(timeoutMs)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ignoreReturn)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(readOnlyArgs)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(readOnlyRecv)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
 
-        bob.done();
-
-        BSONObj req(root.obj());
-
-        _enqueue_packet(req);
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        BSONObj reply;
+        DataRange dr = _recv(buf, sizeof(buf));
 
-        for (;;) {
-            reply = _recv();
+        return uassertStatusOK(dr.read<LittleEndian<int32_t>>());
 
-            if (reply.hasField("native")) {
-                auto args = reply["native"].Array();
-
-                auto& x = _native_functions[args[0].String()];
-
-                auto y = std::get<0>(x)(args[1].Obj(), std::get<1>(x));
-
-                _enqueue_packet(BSON("return" << y));
-                _send();
-            } else {
-                break;
-            }
-        }
-
-        if (reply.hasField("exception")) {
-            auto e = reply["exception"].Obj();
-
-            uassertStatusOK(Status(static_cast<ErrorCodes::Error>(e["code"].Int()), e["reason"].String()));
-        }
-
-        return reply["return"].Int();
     }
 
     bool V8Scope::exec(StringData code, const string& name, bool printResult,
                        bool reportError, bool assertOnError, int timeoutMs) {
-        BSONObjBuilder root;
-        BSONObjBuilder bob(root.subobjStart("exec"));
+        char buf[4096];
 
-        bob.append("code", code);
-        bob.append("name", name);
-        bob.append("printResult", printResult);
-        bob.append("reportError", reportError);
-        bob.append("assertOnError", assertOnError);
-        bob.append("timeoutMs", timeoutMs);
-        
-        bob.done();
+        DataRangeCursor drc(buf, buf + sizeof(buf));
 
-        BSONObj obj = root.obj();
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::exec)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(code)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(name)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(printResult)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(reportError)));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(assertOnError)));
+        uassertStatusOK(drc.writeAndAdvance(LittleEndian<int32_t>(timeoutMs)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
 
-        _enqueue_packet(obj);
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
         _send();
 
-        obj = _recv();
+        DataRange dr = _recv(buf, sizeof(buf));
 
-        return obj["return"].Bool();
+        return uassertStatusOK(dr.read<uint8_t>());
     }
 
     void V8Scope::injectNative(const char *field, NativeFunction func, void* data) {
         _native_functions[field] = std::make_tuple(func, data);
 
-        _enqueue_packet(BSON("injectNative" << field));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::injectNative)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(field)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     void V8Scope::gc() {
@@ -408,13 +581,31 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
-        _enqueue_packet(BSON("localConnectForDbEval" << dbName));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::localConnectForDbEval)));
+        uassertStatusOK(drc.writeAndAdvance(Terminated<0, StringData>(dbName)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
+
         _localDBName = dbName;
         loadStored(txn);
     }
 
     void V8Scope::externalSetup() {
-        _enqueue_packet(BSON("externalSetup" << true));
+        char buf[1024];
+
+        DataRangeCursor drc(buf, buf + sizeof(buf));
+
+        uassertStatusOK(drc.advance(4));
+        uassertStatusOK(drc.writeAndAdvance(uint8_t(ScopeMethods::externalSetup)));
+        DataView(buf).write(LittleEndian<uint32_t>(drc.data() - buf));
+
+        _enqueue_packet(ConstDataRange(buf, drc.data()));
     }
 
     // ----- internal -----
