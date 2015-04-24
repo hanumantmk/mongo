@@ -8,6 +8,8 @@
 #include "mongo/base/data_range.h"
 #include "mongo/base/data_range_cursor.h"
 #include "mongo/base/data_type_endian.h"
+#include "mongo/base/data_type_terminated.h"
+#include "mongo/base/data_type_string_data.h"
 #include "mongo/base/initializer.h"
 #include "mongo/bson/bsonobj.h"
 #include "mongo/bson/bsonobjbuilder.h"
@@ -59,8 +61,8 @@ bool my_send(int fd, const char* buf, size_t len) {
     return true;
 }
 
-bool send_obj(int fd, const BSONObj& obj) {
-    return my_send(fd, obj.objdata(), obj.objsize());
+bool send_obj(int fd, ConstDataRange cdr) {
+    return my_send(fd, cdr.data(), cdr.length());
 }
 
 bool my_recv(int fd, char* buf, size_t len) {
@@ -80,32 +82,33 @@ bool my_recv(int fd, char* buf, size_t len) {
     return true;
 }
 
-bool recv_obj(int fd, BSONObj* obj) {
+static constexpr size_t buf_len = 1 << 14;
+
+bool recv_obj(int fd, char* buffer, size_t buf_len, DataRange* dr) {
     char len_buf[4];
 
     if (! my_recv(fd, len_buf, sizeof(len_buf))) {
         return false;
     }
 
-    uint32_t to_read = uassertStatusOK(ConstDataRange(len_buf, len_buf + 4).read<LittleEndian<uint32_t>>());
+    uint32_t to_read = uassertStatusOK(ConstDataRange(len_buf, len_buf + 4).read<LittleEndian<uint32_t>>()) - 4;
 
-    auto buffer = stdx::make_unique<char[]>(to_read);
-    std::memcpy(buffer.get(), len_buf, sizeof(len_buf));
+    if (DEBUG) std::cout << fd << " going to read " << to_read << std::endl;
 
-    if (! my_recv(fd, buffer.get() + 4, to_read - 4)) {
+    invariant(to_read <= buf_len);
+
+    if (! my_recv(fd, buffer, to_read)) {
         return false;
     }
 
-    BSONObj reply;
+    if (DEBUG) std::cout << fd << " finished reading" << std::endl;
 
-    uassertStatusOK(ConstDataRange(buffer.get(), buffer.get() + to_read).read(&reply));
-
-    *obj = reply.getOwned();
+    *dr = DataRange(buffer, buffer + to_read);
 
     return true;
 }
 
-static bool work_recurse(int fd, Scope* scope, const BSONObj& in);
+static bool work_recurse(int fd, Scope* scope, DataRange dr);
 
 class NativeWrapper {
 public:
@@ -120,36 +123,48 @@ public:
     {
         auto x = static_cast<NativeWrapper*>(ctx);
 
-        BSONObjBuilder root;
-        BSONArrayBuilder bab(root.subarrayStart("native"));
+        char buffer[4096];
 
-        bab.append(x->_name.c_str());
-        bab.append(args);
-        bab.done();
+        DataRangeCursor out(buffer, buffer + sizeof(buffer));
 
-        BSONObj out(root.obj());
+        uassertStatusOK(out.advance(4));
+
+        uassertStatusOK(out.writeAndAdvance(uint8_t(ScopeMethods::native)));
+        uassertStatusOK(out.writeAndAdvance(Terminated<0, StringData>(x->_name)));
+        uassertStatusOK(out.writeAndAdvance(args));
+        DataView(buffer).write(LittleEndian<uint32_t>(out.data() - buffer));
 
         if (DEBUG) std::cout << "in native wrapper" << std::endl;
+        if (DEBUG) std::cout << "in native wrapper : " << args << std::endl;
 
-        if (! send_obj(x->_fd, out)) {
+        if (! send_obj(x->_fd, ConstDataRange(buffer, out.data()))) {
             if (DEBUG) std::cout << "failed send" << std::endl;
             return BSONObj();
         }
 
-        for (;;) {
-            BSONObj in;
+        if (DEBUG) std::cout << "sent" << std::endl;
 
-            if (! recv_obj(x->_fd, &in)) {
+        for (;;) {
+            DataRange in_(nullptr, nullptr);
+
+            if (! recv_obj(x->_fd, buffer, sizeof(buffer), &in_)) {
                 if (DEBUG) std::cout << "failed recv" << std::endl;
                 return BSONObj();
             }
-            if (DEBUG) std::cout << "GOT: " << in << std::endl;
 
-            if (in.hasField("return")) {
-                return in["return"].Obj().getOwned();
+            if (DEBUG) std::cout << "received " << in_.length() << std::endl;
+
+            DataRangeCursor in(in_);
+
+            ScopeMethods smr = static_cast<ScopeMethods>(uassertStatusOK(in.readAndAdvance<uint8_t>()));
+
+            if (smr == ScopeMethods::_return) {
+                BSONObj out = uassertStatusOK(in.readAndAdvance<BSONObj>());
+
+                return out.getOwned();
             } else {
                 if (DEBUG) std::cout << "recursive invoke..." << std::endl;
-                if (! work_recurse(x->_fd, x->_scope, in)) {
+                if (! work_recurse(x->_fd, x->_scope, in_)) {
                     return BSONObj();
                 }
             }
@@ -161,160 +176,257 @@ public:
     Scope* _scope;
 };
 
-static bool work_recurse(int fd, Scope* scope, const BSONObj& in) {
-    if (DEBUG) std::cout << fd << " IN_size: " << in.objsize() << std::endl;
-    if (DEBUG) std::cout << fd << " IN: " << in << std::endl;
+static bool work_recurse(int fd, Scope* scope, DataRange in_) {
+    DataRangeCursor in = in_;
+    char buffer[4096];
+
+    DataRangeCursor out(buffer, buffer + sizeof(buffer));
+
+    uassertStatusOK(out.advance(5));
+
+    if (DEBUG) std::cout << fd << " IN_size: " << in.length() << std::endl;
 
     bool should_write = false;
-    BSONObj out;
 
-    if (in.hasField("setValue")) {
-        auto args = in["setValue"].Array();
-        scope->setElement(args[0].String().c_str(), args[1]);
-    } else if (in.hasField("getString")) {
-        out = BSON("return" << scope->getString(in["getString"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getBoolean")) {
-        out = BSON("return" << scope->getBoolean(in["getBoolean"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getNumber")) {
-        out = BSON("return" << scope->getNumber(in["getNumber"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getNumberInt")) {
-        out = BSON("return" << scope->getNumberInt(in["getNumberInt"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getNumberLongLong")) {
-        out = BSON("return" << scope->getNumberLongLong(in["getNumberLongLong"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getObject")) {
-        out = BSON("return" << scope->getObject(in["getObject"].String().c_str()));
-        should_write = true;
-    } else if (in.hasField("getType")) {
-        auto field = in["getType"].String();
+    ScopeMethods sm = static_cast<ScopeMethods>(uassertStatusOK(in.readAndAdvance<uint8_t>()));
 
-        out = BSON("return" << scope->type(field.c_str()));
-        should_write = true;
-    } else if (in.hasField("_createFunction")) {
-        auto field = in["_createFunction"].Array();
+    if (DEBUG) std::cout << fd << " sm: " << int(sm) << std::endl;
 
-        auto rval = scope->_createFunction(field[0].String().c_str(), field[1].Long());
-
-        out = BSON("return" << static_cast<long long>(rval));
-        should_write = true;
-    } else if (in.hasField("setFunction")) {
-        auto field = in["setFunction"].Array();
-
-        scope->setFunction(field[0].String().c_str(), field[1].String().c_str());
-    } else if (in.hasField("rename")) {
-        auto field = in["rename"].Array();
-
-        scope->setFunction(field[0].String().c_str(), field[1].String().c_str());
-    } else if (in.hasField("injectNative")) {
-        auto field = in["injectNative"].String();
-
-        scope->injectNative(
-            field.c_str(),
-            NativeWrapper::wrap,
-            new NativeWrapper(field.c_str(), fd, scope)
-        );
-    } else if (in.hasField("invoke")) {
-        auto cmd = in["invoke"].Obj();
-
-        BSONObj recv_obj;
-        BSONObj args_obj;
-        BSONObj* args_obj_ptr = nullptr;
-        BSONObj* recv_obj_ptr = nullptr;
-
-        auto func = cmd["func"].Int();
-
-        if (cmd.hasField("recv")) {
-            recv_obj = cmd["recv"].Obj();
-            recv_obj_ptr = &recv_obj;
+    switch (sm) {
+        case ScopeMethods::setElement:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            BSONObj obj = uassertStatusOK(in.readAndAdvance<BSONObj>());
+            scope->setElement(field.rawData(), obj["v"]);
+            break;
         }
-
-        if (cmd.hasField("argsObject")) {
-            args_obj = cmd["argsObject"].Obj();
-            args_obj_ptr = &args_obj;
+        case ScopeMethods::setNumber:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            double val = uassertStatusOK(in.readAndAdvance<LittleEndian<double>>());
+            scope->setNumber(field.rawData(), val);
+            break;
         }
-
-        int timeoutMs = cmd["timeoutMs"].Int();
-        bool ignoreReturn = cmd["ignoreReturn"].Bool();
-
-        int err;
-
-        try {
-            err = scope->invoke(func, args_obj_ptr, recv_obj_ptr, timeoutMs, ignoreReturn);
-
-            out = BSON("return" << err);
-        } catch (...) {
-            auto status = exceptionToStatus();
-
-            out = BSON("exception" << BSON("code" << status.code() << "reason" << status.reason()));
+        case ScopeMethods::setString:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            StringData val = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            scope->setString(field.rawData(), val);
+            break;
         }
+        case ScopeMethods::setObject:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            BSONObj obj = uassertStatusOK(in.readAndAdvance<BSONObj>());
+            scope->setObject(field.rawData(), obj);
+            break;
+        }
+        case ScopeMethods::setBoolean:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            bool val = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            scope->setBoolean(field.rawData(), val);
+            break;
+        }
+        case ScopeMethods::getNumber:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            double val = scope->getNumber(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<double>(val)));
 
-        should_write = true;
-    } else if (in.hasField("exec")) {
-        auto cmd = in["exec"].Obj();
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::getNumberInt:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            int val = scope->getNumberInt(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<int32_t>(val)));
 
-        auto rval = scope->exec(
-            cmd["code"].String(),
-            cmd["name"].String(),
-            cmd["printResult"].Bool(),
-            cmd["reportError"].Bool(),
-            cmd["assertOnError"].Bool(),
-            cmd["timeoutMs"].Int()
-        );
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::getNumberLongLong:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            long long val = scope->getNumberLongLong(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<int64_t>(val)));
 
-        out = BSON("return" << rval);
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::getString:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            std::string val = scope->getString(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(Terminated<0, StringData>(val)));
 
-        should_write = true;
-    } else if (in.hasField("exec")) {
-        auto cmd = in["exec"].Obj();
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::getBoolean:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            bool val = scope->getBoolean(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(uint8_t(val)));
 
-        auto rval = scope->exec(
-            cmd["code"].String(),
-            cmd["name"].String(),
-            cmd["printResult"].Bool(),
-            cmd["reportError"].Bool(),
-            cmd["assertOnError"].Bool(),
-            cmd["timeoutMs"].Int()
-        );
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::getObject:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            BSONObj val = scope->getObject(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(val));
 
-        out = BSON("return" << rval);
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::_createFunction:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            int64_t number = uassertStatusOK(in.readAndAdvance<LittleEndian<int64_t>>());
 
-        should_write = true;
-    } else if (in.hasField("externalSetup")) {
-        scope->externalSetup();
-    } else if (in.hasField("localConnectForDbEval")) {
-        scope->localConnectForDbEval(nullptr, in["localConnectForDbEval"].String().c_str());
-    } else {
-        if (DEBUG) std::cout << fd << " Unknown command" << std::endl;
+            auto val = scope->_createFunction(field.rawData(), number);
+
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<int64_t>(val)));
+
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::setFunction:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            StringData code = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+
+            scope->setFunction(field.rawData(), code.rawData());
+
+            break;
+        }
+        case ScopeMethods::type:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            auto val = scope->type(field.rawData());
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<int32_t>(val)));
+
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::rename:
+        {
+            StringData from = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            StringData to = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+
+            scope->rename(from.rawData(), to.rawData());
+
+            break;
+        }
+        case ScopeMethods::injectNative:
+        {
+            StringData field = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+
+            scope->injectNative(
+                field.rawData(),
+                NativeWrapper::wrap,
+                new NativeWrapper(field.rawData(), fd, scope)
+            );
+
+            break;
+        }
+        case ScopeMethods::invoke:
+        {
+            BSONObj argsObject;
+            BSONObj* argsObjectPtr = nullptr;
+            BSONObj recv;
+            BSONObj* recvPtr = nullptr;
+
+            ScriptingFunction func = uassertStatusOK(in.readAndAdvance<LittleEndian<int64_t>>());
+
+            if(uassertStatusOK(in.readAndAdvance<uint8_t>())) {
+                uassertStatusOK(in.readAndAdvance(&argsObject));
+                argsObjectPtr = &argsObject;
+            }
+
+            if(uassertStatusOK(in.readAndAdvance<uint8_t>())) {
+                uassertStatusOK(in.readAndAdvance(&recv));
+                recvPtr = &recv;
+            }
+
+            int timeoutMs = uassertStatusOK(in.readAndAdvance<LittleEndian<int32_t>>());
+            bool ignoreReturn = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            bool readOnlyArgs = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            bool readOnlyRecv = uassertStatusOK(in.readAndAdvance<uint8_t>());
+
+            auto val = scope->invoke(func, argsObjectPtr, recvPtr, timeoutMs, ignoreReturn, readOnlyArgs, readOnlyRecv);
+
+            uassertStatusOK(out.writeAndAdvance(LittleEndian<int32_t>(val)));
+
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::exec:
+        {
+            StringData code = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            StringData name = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+            bool printResult = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            bool reportError = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            bool assertOnError = uassertStatusOK(in.readAndAdvance<uint8_t>());
+            int timeoutMs = uassertStatusOK(in.readAndAdvance<LittleEndian<int32_t>>());
+
+            auto val = scope->exec(code, name.toString(), printResult, reportError, assertOnError, timeoutMs);
+
+            uassertStatusOK(out.writeAndAdvance(uint8_t(val)));
+
+            should_write = true;
+            break;
+        }
+        case ScopeMethods::externalSetup:
+        {
+            scope->externalSetup();
+
+            break;
+        }
+        case ScopeMethods::localConnectForDbEval:
+        {
+            StringData dbName = uassertStatusOK(in.readAndAdvance<Terminated<0, StringData>>());
+
+            scope->localConnectForDbEval(nullptr, dbName.rawData());
+
+            break;
+        }
+        default:
+            invariant(false);
     }
 
     if (should_write) {
-        if (DEBUG) std::cout << fd << " OUT: " << out << std::endl;
+        DataRangeCursor header(buffer, buffer + 5);
 
-        if (! send_obj(fd, out)) return false;
+        uassertStatusOK(header.writeAndAdvance(LittleEndian<uint32_t>(out.data() - buffer)));
+        uassertStatusOK(header.writeAndAdvance(uint8_t(ScopeMethods::_return)));
+
+        if (! send_obj(fd, ConstDataRange(buffer, out.data()))) return false;
     }
 
-    if (DEBUG) std::cout << fd << " PROCESSED: " << in << std::endl;
+    if (DEBUG) std::cout << fd << " PROCESSED..." << std::endl;
 
     return true;
 }
 
 static void work(int fd) {
+    char buffer[4096];
+
     std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
     for (;;) {
         if (DEBUG) std::cout << fd << " waiting for a len..." << std::endl;
 
-        BSONObj in;
+        DataRange out(nullptr, nullptr);
 
-        if (! recv_obj(fd, &in)) {
+        if (! recv_obj(fd, buffer, sizeof(buffer), &out)) {
             break;
         }
 
-        if (! work_recurse(fd, scope.get(), in)) {
+        if (! work_recurse(fd, scope.get(), out)) {
             break;
         }
     }
