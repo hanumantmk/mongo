@@ -169,16 +169,16 @@ void my_recv(int fd, char* buf, size_t len) {
     V8Scope::V8Scope(V8ScriptEngine * engine) :
         _global_engine(engine)
     {
-        struct sockaddr_in saddr;
+        struct sockaddr_un saddr;
         int r;
 
-        _cfd = socket(AF_INET, SOCK_STREAM, 0);
+        _cfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
         memset(&saddr, 0, sizeof(saddr));
 
-        saddr.sin_family = AF_INET;
-        saddr.sin_port = htons(40001);
-        saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        saddr.sun_family = AF_UNIX;
+        const char* path = "/home/jcarey/js.sock";
+        std::memcpy(saddr.sun_path, path, strlen(path) + 1);
 
         r = connect(_cfd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr));
     }
@@ -204,7 +204,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setNumber(const char * field, double val) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -218,7 +218,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setString(const char * field, StringData val) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -232,7 +232,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setBoolean(const char * field, bool val) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -246,7 +246,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setElement(const char *field, const BSONElement& e) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -260,7 +260,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setObject(const char *field, const BSONObj& obj, bool readOnly) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -274,7 +274,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     int V8Scope::type(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -291,7 +291,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     double V8Scope::getNumber(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -308,7 +308,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     int V8Scope::getNumberInt(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -325,7 +325,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     long long V8Scope::getNumberLongLong(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -342,7 +342,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     string V8Scope::getString(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -359,7 +359,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     bool V8Scope::getBoolean(const char *field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -376,7 +376,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     BSONObj V8Scope::getObject(const char * field) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -393,7 +393,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     ScriptingFunction V8Scope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -411,7 +411,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::setFunction(const char* field, const char* code) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -425,7 +425,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::rename(const char * from, const char * to) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -471,7 +471,7 @@ void my_recv(int fd, char* buf, size_t len) {
                     auto& x = _native_functions[name.toString()];
                     auto y = std::get<0>(x)(args, std::get<1>(x));
 
-                    char buf[1024];
+                    // char buf[4096];
 
                     DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -503,7 +503,7 @@ void my_recv(int fd, char* buf, size_t len) {
 
     int V8Scope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
-        char buf[4096];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -539,7 +539,7 @@ void my_recv(int fd, char* buf, size_t len) {
 
     bool V8Scope::exec(StringData code, const string& name, bool printResult,
                        bool reportError, bool assertOnError, int timeoutMs) {
-        char buf[4096];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -564,7 +564,7 @@ void my_recv(int fd, char* buf, size_t len) {
     void V8Scope::injectNative(const char *field, NativeFunction func, void* data) {
         _native_functions[field] = std::make_tuple(func, data);
 
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -581,7 +581,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 
@@ -597,7 +597,7 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 
     void V8Scope::externalSetup() {
-        char buf[1024];
+        // char buf[4096];
 
         DataRangeCursor drc(buf, buf + sizeof(buf));
 

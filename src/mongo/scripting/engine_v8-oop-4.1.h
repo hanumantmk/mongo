@@ -161,6 +161,7 @@ namespace mongo {
 
         V8ScriptEngine* _global_engine;
         OperationContext* _opCtx;
+        char buf[1 << 21];
 
         int _cfd;
     };
