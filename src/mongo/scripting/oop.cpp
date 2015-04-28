@@ -35,6 +35,7 @@
 # include <thread>
 
 #define DEBUG 0
+#define INVOKE 1
 
 using namespace mongo;
 
@@ -82,6 +83,56 @@ bool my_recv(int fd, char* buf, size_t len) {
     return true;
 }
 
+class Reader {
+public:
+    Reader (int fd) :
+        fd(fd),
+        total_bytes(0),
+        read_bytes(0)
+    {}
+
+    DataRange recv() {
+        if (total_bytes == read_bytes) {
+            total_bytes = 0;
+            read_bytes = 0;
+        }
+
+        while (total_bytes - read_bytes < 4) {
+            ssize_t r = ::recv(fd, buf + total_bytes, sizeof(buf) - total_bytes, 0);
+
+            if (r <= 0) {
+                throw "done";
+            }
+
+            total_bytes += r;
+        }
+
+        uint32_t packet_length = ConstDataView(buf + read_bytes).read<LittleEndian<uint32_t>>();
+
+        while (total_bytes - read_bytes < packet_length) {
+            ssize_t r = ::recv(fd, buf + total_bytes, sizeof(buf) - total_bytes, 0);
+
+            if (r <= 0) {
+                throw "done";
+            }
+
+            total_bytes += r;
+        }
+
+        size_t old_head = read_bytes;
+
+        read_bytes += packet_length;
+
+        return DataRange(buf + old_head + 4, buf + read_bytes);
+    }
+
+private:
+    int fd;
+    size_t total_bytes;
+    size_t read_bytes;
+    char buf[1 << 23];
+};
+
 static constexpr size_t buf_len = 1 << 14;
 
 bool recv_obj(int fd, char* buffer, size_t buf_len, DataRange* dr) {
@@ -108,7 +159,7 @@ bool recv_obj(int fd, char* buffer, size_t buf_len, DataRange* dr) {
     return true;
 }
 
-static bool work_recurse(int fd, Scope* scope, DataRange dr);
+static bool work_recurse(int fd, Scope* scope, DataRange dr, char* buffer, size_t buffer_len);
 
 class NativeWrapper {
 public:
@@ -164,7 +215,7 @@ public:
                 return out.getOwned();
             } else {
                 if (DEBUG) std::cout << "recursive invoke..." << std::endl;
-                if (! work_recurse(x->_fd, x->_scope, in_)) {
+                if (! work_recurse(x->_fd, x->_scope, in_, nullptr, 0)) {
                     return BSONObj();
                 }
             }
@@ -176,11 +227,10 @@ public:
     Scope* _scope;
 };
 
-static bool work_recurse(int fd, Scope* scope, DataRange in_) {
+static bool work_recurse(int fd, Scope* scope, DataRange in_, char* buffer, size_t buffer_len) {
     DataRangeCursor in = in_;
-    char buffer[4096];
 
-    DataRangeCursor out(buffer, buffer + sizeof(buffer));
+    DataRangeCursor out(buffer, buffer + buffer_len);
 
     uassertStatusOK(out.advance(5));
 
@@ -335,6 +385,7 @@ static bool work_recurse(int fd, Scope* scope, DataRange in_) {
         }
         case ScopeMethods::invoke:
         {
+#if INVOKE
             BSONObj argsObject;
             BSONObj* argsObjectPtr = nullptr;
             BSONObj recv;
@@ -358,6 +409,25 @@ static bool work_recurse(int fd, Scope* scope, DataRange in_) {
             bool readOnlyRecv = uassertStatusOK(in.readAndAdvance<uint8_t>());
 
             auto val = scope->invoke(func, argsObjectPtr, recvPtr, timeoutMs, ignoreReturn, readOnlyArgs, readOnlyRecv);
+#else
+            uassertStatusOK(in.skip<LittleEndian<int64_t>>());
+
+            if(uassertStatusOK(in.readAndAdvance<uint8_t>())) {
+                uassertStatusOK(in.skip<BSONObj>());
+            }
+
+            if(uassertStatusOK(in.readAndAdvance<uint8_t>())) {
+                uassertStatusOK(in.skip<BSONObj>());
+            }
+
+            uassertStatusOK(in.skip<LittleEndian<int32_t>>());
+            uassertStatusOK(in.skip<uint8_t>());
+            uassertStatusOK(in.skip<uint8_t>());
+            uassertStatusOK(in.skip<uint8_t>());
+
+            scope->setBoolean("__returnValue", 0);
+            int32_t val = 0;
+#endif
 
             uassertStatusOK(out.writeAndAdvance(LittleEndian<int32_t>(val)));
 
@@ -413,7 +483,10 @@ static bool work_recurse(int fd, Scope* scope, DataRange in_) {
 }
 
 static void work(int fd) {
-    char buffer[4096];
+    std::unique_ptr<Reader> reader(new Reader(fd));
+
+    std::unique_ptr<char[]> buffer(new char[1 << 21]);
+    std::unique_ptr<char[]> buffer2(new char[1 << 21]);
 
     std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
@@ -422,11 +495,20 @@ static void work(int fd) {
 
         DataRange out(nullptr, nullptr);
 
-        if (! recv_obj(fd, buffer, sizeof(buffer), &out)) {
+        bool done = false;
+
+        try {
+            out = reader->recv();
+        } catch (...) {
+            done = true;
             break;
         }
 
-        if (! work_recurse(fd, scope.get(), out)) {
+        if (done) {
+            break;
+        }
+
+        if (! work_recurse(fd, scope.get(), out, buffer2.get(), 1 << 21)) {
             break;
         }
     }
@@ -439,23 +521,19 @@ static void work(int fd) {
 static ExitCode runMongoJSServer() {
     setThreadName( "mongojsMain" );
 
-    int optval;
     int lfd;
-    struct sockaddr_in saddr;
+    struct sockaddr_un saddr;
     int r;
 
     if (DEBUG) std::cout << "got here\n";
 
-    lfd = socket(AF_INET, SOCK_STREAM, 0);
-
-    optval = 1;
-    setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+    lfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
     memset(&saddr, 0, sizeof(saddr));
 
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(40001);
-    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    saddr.sun_family = AF_UNIX;
+    const char* path = "/home/jcarey/js.sock";
+    std::memcpy(saddr.sun_path, path, strlen(path) + 1);
 
     r = bind(lfd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr));
 
