@@ -35,7 +35,7 @@ sources = []
 
 env.Library("v8", sources)
 env.Append(CFLAGS = [
-    '-include', '/home/jcarey/mozjs/include/mozjs-40a1/js/RequiredDefines.h',
-    '-I', '/home/jcarey/mozjs/include/mozjs-40a1' ])
+    '-include', '/home/jcarey/mozjs/include/mozjs-37/js/RequiredDefines.h',
+    '-I', '/home/jcarey/mozjs/include/mozjs-37' ])
 env.Append(LIBPATH = ['/home/jcarey/mozjs/lib'])
-env.Append(LIBS = ['mozjs-40a1'])
+env.Append(LIBS = ['mozjs-37'])

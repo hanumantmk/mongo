@@ -16,6 +16,8 @@
 #include "mongo/util/signal_handlers.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/quick_exit.h"
+#include "mongo/scripting/engine.h"
+#include "mongo/scripting/engine_v8-sm.h"
 
 # include <arpa/inet.h>
 # include <poll.h>
@@ -27,38 +29,6 @@
 # include <sys/uio.h>
 # include <sys/un.h>
 # include <thread>
-
-namespace mongo {
-
-    using std::string;
-
-    string mongojsCommand;
-    bool dbexitCalled = false;
-
-    bool inShutdown() {
-        return dbexitCalled;
-    }
-
-    bool haveLocalShardingInfo( const string& ns ) {
-        verify( 0 );
-        return false;
-    }
-
-    static BSONObj buildErrReply( const DBException& ex ) {
-        BSONObjBuilder errB;
-        errB.append( "$err", ex.what() );
-        errB.append( "code", ex.getCode() );
-        if ( !ex._shard.empty() ) {
-            errB.append( "shard", ex._shard );
-        }
-        return errB.obj();
-    }
-
-    DBClientBase* createDirectClient(OperationContext* txn) {
-        return 0;
-    }
-
-} // namespace mongo
 
 using namespace mongo;
 
@@ -92,78 +62,17 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 }
 
-static void work(int fd) {
-    close(fd);
-
-    std::cout << "this is working at all" << std::endl;
-}
-
 static ExitCode runMongoJSServer() {
     setThreadName( "mongojsMain" );
 
-    int cfd;
-    struct sockaddr_in saddr;
-    int r;
+    ScriptEngine::setup();
 
-    cfd = socket(AF_INET, SOCK_STREAM, 0);
+    std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
-    memset(&saddr, 0, sizeof(saddr));
+    scope->setNumber("foo", 10);
 
-    saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(40001);
-    saddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    std::cout << scope->getNumber("foo") << std::endl;
 
-    r = connect(cfd, reinterpret_cast<struct sockaddr*>(&saddr), sizeof(saddr));
-
-    {
-        BSONObjBuilder bob;
-
-        bob.append("code", "function(){ return this.a == 1;}");
-        bob.append("document", BSON("a" << 1));
-
-        BSONObj b = bob.obj();
-
-        my_send(cfd, b.objdata(), b.objsize());
-
-        char buf[1000000];
-        my_recv(cfd, buf, 4);
-
-        ConstDataRange cdr(buf, buf + sizeof(buf));
-
-        uint32_t len = uassertStatusOK(cdr.read<LittleEndian<uint32_t>>());
-        my_recv(cfd, buf + 4, len - 4);
-
-        b = uassertStatusOK(cdr.read<BSONObj>());
-
-        std::cout << b << std::endl;
-    }
-
-    {
-        BSONObjBuilder bob;
-
-        bob.append("code", "function(){ return this.a == 1;}");
-        bob.append("document", BSON("b" << 1));
-
-        BSONObj b = bob.obj();
-
-        my_send(cfd, b.objdata(), b.objsize());
-
-        char buf[1000000];
-        my_recv(cfd, buf, 4);
-
-        ConstDataRange cdr(buf, buf + sizeof(buf));
-
-        uint32_t len = uassertStatusOK(cdr.read<LittleEndian<uint32_t>>());
-        my_recv(cfd, buf + 4, len - 4);
-
-        b = uassertStatusOK(cdr.read<BSONObj>());
-
-        std::cout << b << std::endl;
-    }
-
-    close (cfd);
-
-    // listen() will return when exit code closes its socket.
     return EXIT_NET_ERROR;
 }
 
@@ -187,8 +96,6 @@ int mongoJSMain(int argc, char* argv[], char** envp) {
         return EXIT_FAILURE;
 
     setupSignalHandlers(false);
-
-    mongojsCommand = argv[0];
 
     try {
         int exitCode = _main();
@@ -218,28 +125,3 @@ int main(int argc, char* argv[], char** envp) {
 }
 
 #undef exit
-
-void mongo::signalShutdown() {
-    // Notify all threads shutdown has started
-    dbexitCalled = true;
-}
-
-void mongo::exitCleanly(ExitCode code) {
-    // TODO: do we need to add anything?
-    mongo::dbexit( code );
-}
-
-void mongo::dbexit( ExitCode rc, const char *why ) {
-    dbexitCalled = true;
-
-#if defined(_WIN32)
-    // Windows Service Controller wants to be told when we are done shutting down
-    // and call quickExit itself.
-    //
-    if ( rc == EXIT_WINDOWS_SERVICE_STOP ) {
-        log() << "dbexit: exiting because Windows service was stopped" << endl;
-        return;
-    }
-#endif
-    quickExit(rc);
-}

@@ -647,6 +647,9 @@ if usev8:
             '$BUILD_DIR/third_party/shim_v8',
         ],
     )
+    scriptingEnv.Append(CPPPATH = ['/home/jcarey/mozjs/include/mozjs-37'])
+    scriptingEnv.Append(LIBPATH = ['/home/jcarey/mozjs/lib'])
+    scriptingEnv.Append(LIBS = ['mozjs-37'])
 else:
     env.Library(
         target='scripting',
@@ -1231,6 +1234,10 @@ env.Install(
             "serveronly",
         ]))
 
+env.Append(CPPPATH = ["/home/jcarey/mozjs/include/mozjs-37"])
+env.Append(LIBPATH= ["/home/jcarey/mozjs/lib"])
+env.Append(LIBS = ["mozjs-37"])
+
 env.Install(
     '#/',
     env.Program(
@@ -1239,14 +1246,12 @@ env.Install(
             "scripting/oop_test.cpp",
         ],
         LIBDEPS=[
-            "mongoscore",
-            "coreserver",
             "coredb",
-            "mongocommon",
-            "coreshard",
-            "ntservice",
+            "coreserver",
             "mongodandmongos",
-            "s/upgrade",
+            "mongodwebserver",
+            "ntservice",
+            "serveronly",
         ]))
 
 # dbtests test binary options

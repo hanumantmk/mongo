@@ -152,8 +152,13 @@ namespace mongo {
 
         virtual ScriptingFunction _createFunction(const char* code,
                                                   ScriptingFunction functionNumber = 0);
+        void mongoToSMElement(const BSONElement &elem, bool readOnly, JS::MutableHandleValue);
     private:
-        static const int objectDepthLimit = 150;
+
+        void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleScript script);
+        void _setValue(const char * field, JS::HandleValue val);
+        void newFunction(StringData code, JS::MutableHandleValue out);
+        void mongoToLZSM(const BSONObj& m, bool readOnly, JS::MutableHandleValue out);
 
         mongo::BSONObj smToMongo(JS::HandleObject o, int depth = 0);
         void smToMongoElement(BSONObjBuilder & b, StringData sname,
@@ -181,7 +186,8 @@ namespace mongo {
 
         JSRuntime* _runtime;
         JSContext* _context;
-        JS::RootedObject _global;
+        JS::PersistentRootedObject _global;
+        JS::AutoScriptVector _funcs;
     };
 
     class SMScriptEngine : public ScriptEngine {

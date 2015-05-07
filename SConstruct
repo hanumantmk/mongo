@@ -1041,9 +1041,9 @@ if env.TargetOSIs('posix'):
                          "-Wno-unknown-pragmas",
                          "-Winvalid-pch"] )
     # env.Append( " -Wconversion" ) TODO: this doesn't really work yet
-    if env.TargetOSIs('linux', 'osx'):
-        if not has_option("disable-warnings-as-errors"):
-            env.Append( CCFLAGS=["-Werror"] )
+    #if env.TargetOSIs('linux', 'osx'):
+    #    if not has_option("disable-warnings-as-errors"):
+    #        env.Append( CCFLAGS=["-Werror"] )
 
     env.Append( CXXFLAGS=["-Wnon-virtual-dtor", "-Woverloaded-virtual"] )
     env.Append( LINKFLAGS=["-fPIC", "-pthread"] )
@@ -1301,7 +1301,7 @@ def doConfigure(myenv):
         # For GCC, we don't need anything since bad flags are already errors, but
         # adding -Werror won't hurt. For clang, bad flags are only warnings, so we need -Werror
         # to make them real errors.
-        cloned.Append(CCFLAGS=['-Werror'])
+        #cloned.Append(CCFLAGS=['-Werror'])
         conf = Configure(cloned, help=False, custom_tests = {
                 'CheckFlag' : lambda(ctx) : CheckFlagTest(ctx, tool, extension, flag)
         })
