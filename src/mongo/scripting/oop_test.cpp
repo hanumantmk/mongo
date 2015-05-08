@@ -70,13 +70,14 @@ static ExitCode runMongoJSServer() {
     std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
     auto fun = scope->createFunction(
-        "function() { "
-          "return this.foo.bar + this.foo.bar; "
+        "function(val) { "
+          "return val + this.foo.bar + this.foo.bar; "
         "}");
 
     auto x = BSON("foo" << BSON("bar" << 3.3));
+    auto args = BSON("0" << 1.1);
 
-    scope->invoke(fun, nullptr, &x);
+    scope->invoke(fun, &args, &x);
 
     auto rval = scope->getNumber("__returnValue");
 

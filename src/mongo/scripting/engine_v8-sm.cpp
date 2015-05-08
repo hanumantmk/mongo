@@ -783,7 +783,11 @@ namespace mongo {
             BSONObjIterator it(*argsObject);
             for (int i=0; i<nargs; i++) {
                 BSONElement next = it.next();
-                mongoToSMElement(next, readOnlyArgs, args[i]);
+
+                JS::RootedValue value(_context);
+                mongoToSMElement(next, readOnlyArgs, &value);
+
+                args.append(value);
             }
         }
 
