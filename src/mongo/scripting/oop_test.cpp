@@ -69,9 +69,13 @@ static ExitCode runMongoJSServer() {
 
     std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
-    scope->setNumber("foo", 10);
+    auto fun = scope->createFunction("function() { return 10; }");
 
-    std::cout << scope->getNumber("foo") << std::endl;
+    scope->invoke(fun, nullptr, nullptr);
+
+    auto rval = scope->getNumber("__returnValue");
+
+    std::cout << rval << std::endl;
 
     return EXIT_NET_ERROR;
 }

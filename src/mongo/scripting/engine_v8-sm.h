@@ -155,7 +155,7 @@ namespace mongo {
         void mongoToSMElement(const BSONElement &elem, bool readOnly, JS::MutableHandleValue);
     private:
 
-        void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleScript script);
+        void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun);
         void _setValue(const char * field, JS::HandleValue val);
         void newFunction(StringData code, JS::MutableHandleValue out);
         void mongoToLZSM(const BSONObj& m, bool readOnly, JS::MutableHandleValue out);
@@ -187,7 +187,7 @@ namespace mongo {
         JSRuntime* _runtime;
         JSContext* _context;
         JS::PersistentRootedObject _global;
-        JS::AutoScriptVector _funcs;
+        JS::AutoValueVector _funcs;
     };
 
     class SMScriptEngine : public ScriptEngine {

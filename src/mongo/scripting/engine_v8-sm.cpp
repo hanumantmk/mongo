@@ -47,6 +47,20 @@ using namespace mongoutils;
 
 namespace mongo {
 
+    void checkBool(bool x) {
+        if (! x) {
+            std::cerr << "we done g00fed" << std::endl;
+            abort();
+        }
+    }
+
+    void reportError(JSContext *cx, const char *message,
+                     JSErrorReport *report) {
+      fprintf(stderr, "%s:%u:%s\n",
+              report->filename ? report->filename : "[no filename]",
+              (unsigned int)report->lineno, message);
+    }
+
     class BSONHolder {
     MONGO_DISALLOW_COPYING(BSONHolder);
     public:
@@ -236,6 +250,8 @@ namespace mongo {
         JSAutoRequest ar(_context);
         _global.set(JS_NewGlobalObject(_context, &globalClass, nullptr, JS::DontFireOnNewGlobalHook));
 
+        JS_SetErrorReporter(_runtime, reportError);
+
         JSAutoCompartment ac(_context, _global);
 
         JS_InitStandardClasses(_context, _global);
@@ -267,7 +283,7 @@ namespace mongo {
     JSAutoCompartment ac(_context, _global)
 
     void SMScope::_setValue(const char * field, JS::HandleValue val) {
-        JS_SetProperty(_context, _global, field, val);
+        checkBool(JS_SetProperty(_context, _global, field, val));
     }
 
     void SMScope::setNumber(const char * field, double val) {
@@ -298,7 +314,7 @@ namespace mongo {
         SMMAGIC_HEADER;
         JS::RootedValue x(_context);
 
-        JS_GetProperty(_context, _global, field, &x);
+        checkBool(JS_GetProperty(_context, _global, field, &x));
 
         if (x.isNull())
             return jstNULL;
@@ -334,16 +350,16 @@ namespace mongo {
         SMMAGIC_HEADER;
         JS::RootedValue x(_context);
 
-        JS_GetProperty(_context, _global, field, &x);
+        checkBool(JS_GetProperty(_context, _global, field, &x));
 
-        return x.toDouble();
+        return x.toNumber();
     }
 
     int SMScope::getNumberInt(const char *field) {
         SMMAGIC_HEADER;
         JS::RootedValue x(_context);
 
-        JS_GetProperty(_context, _global, field, &x);
+        checkBool(JS_GetProperty(_context, _global, field, &x));
 
         return x.toInt32();
     }
@@ -537,19 +553,14 @@ namespace mongo {
                                    << sname);
     }
 
-    void SMScope::newFunction(StringData code, JS::MutableHandleValue out) {
+    void SMScope::newFunction(StringData raw, JS::MutableHandleValue out) {
         SMMAGIC_HEADER;
-        std::string fn = str::stream() << "____MongoToV8_newFunction_temp = " << code;
+
+        std::string code = str::stream() << "____MongoToSM_newFunction_temp = " << raw;
 
         JS::CompileOptions co(_context);
-        JS::RootedValue value(_context);
-        JS::RootedScript script(_context);
 
-        JS_CompileScript(_context, _global, fn.c_str(), fn.length(), co, &script);
-
-        JS_ExecuteScript(_context, _global, script, &value);
-
-        JS_GetProperty(_context, _global, fn.c_str(), out);
+        checkBool(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), out));
     }
 
 
@@ -707,28 +718,26 @@ namespace mongo {
 
     }
 
-    void SMScope::__createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleScript script) {
+    void SMScope::__createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun) {
         // uassert(10232, "not a function", ret->IsFunction());
         
-        std::string fn = str::stream() << "_funcs" << functionNumber << " = " << raw;
+        std::string fn = str::stream() << "_funcs" << functionNumber;
+        std::string code = str::stream() << "_funcs" << functionNumber << " = " << raw;
 
         JS::CompileOptions co(_context);
-        JS::RootedValue value(_context);
 
-        JS_CompileScript(_context, _global, fn.c_str(), fn.length(), co, script);
-
-        JS_ExecuteScript(_context, _global, script, &value);
+        checkBool(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), fun));
     }
 
     ScriptingFunction SMScope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
         SMMAGIC_HEADER;
         // uassert(10232, "not a function", ret->IsFunction());
 
-        JS::RootedScript script(_context);
+        JS::RootedValue fun(_context);
 
-        __createFunction(raw, functionNumber, &script);
+        __createFunction(raw, functionNumber, &fun);
 
-        _funcs.append(script);
+        _funcs.append(fun);
 
         return functionNumber;
     }
@@ -743,7 +752,75 @@ namespace mongo {
 
     int SMScope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
-        // TODO ...
+        SMMAGIC_HEADER;
+
+        auto funcValue = _funcs[func-1];
+        JS::RootedValue result(_context);
+
+        // TODO SERVER-8016: properly allocate handles on the stack
+        static const int MAX_ARGS = 24;
+        const int nargs = argsObject ? argsObject->nFields() : 0;
+        uassert(16862, "Too many arguments. Max is 24",
+                nargs <= MAX_ARGS);
+
+        JS::AutoValueVector args(_context);
+
+        if (nargs) {
+            BSONObjIterator it(*argsObject);
+            for (int i=0; i<nargs; i++) {
+                BSONElement next = it.next();
+                mongoToSMElement(next, readOnlyArgs, args[i]);
+            }
+        }
+
+        JS::RootedValue smrecv(_context);
+        if (recv != 0)
+            mongoToLZSM(*recv, readOnlyRecv, &smrecv);
+        else
+            smrecv.setObjectOrNull(_global);
+
+        //if (!nativeEpilogue()) {
+        //    _error = "JavaScript execution terminated";
+        //    error() << _error << endl;
+        //    uasserted(16711, _error);
+        //}
+
+        //if (timeoutMs)
+        //    // start the deadline timer for this script
+        //    _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
+
+        JS::RootedValue out(_context);
+        out.setDouble(666);
+        JS::RootedObject obj(_context, smrecv.toObjectOrNull());
+
+        checkBool(JS::Call(_context, obj, funcValue, args, &out));
+
+        //if (timeoutMs)
+        //    // stop the deadline timer for this script
+        //    _engine->getDeadlineMonitor()->stopDeadline(this);
+
+        //if (!nativePrologue()) {
+        //    _error = "JavaScript execution terminated";
+        //    error() << _error << endl;
+        //    uasserted(16712, _error);
+        //}
+
+        // throw on error
+        //checkV8ErrorState(result, try_catch);
+
+        if (!ignoreReturn) {
+            // must validate the handle because TerminateExecution may have
+            // been thrown after the above checks
+            //if (!resultObject.IsEmpty() && resultObject->Has(strLitToV8("_v8_function"))) {
+            //    log() << "storing native function as return value" << endl;
+            //    _lastRetIsNativeCode = true;
+            //}
+            //else {
+                _lastRetIsNativeCode = false;
+            //}
+//                std::cout << "setting value: " << out.get().toDouble() << std::endl;
+            _setValue("__returnValue", out);
+        }
 
         return 0;
     }
