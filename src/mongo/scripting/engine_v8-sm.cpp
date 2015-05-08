@@ -87,22 +87,28 @@ namespace mongo {
         struct bsonMethods {
             static bool AddProperty(JSContext *cx, JS::HandleObject obj,
                                         JS::HandleId id, JS::MutableHandleValue v) {
+                std::cerr << "we're in addprop\n";
                 return false;
             };
             static bool DeleteProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                                    bool *succeeded) {
+                std::cerr << "we're in delprop\n";
                 return false;
             }
             static bool GetProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                            JS::MutableHandleValue vp) {
+                std::cerr << "we're in getprop\n";
                 return false;
             }
             static bool SetProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                                    bool strict, JS::MutableHandleValue vp) {
+                std::cerr << "we're in setprop\n";
                 return false;
             }
             static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
                 auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+                std::cerr << "we're in enumerate\n";
 
                 if (holder->_resolved) {
                     return true;
@@ -128,13 +134,15 @@ namespace mongo {
 
                 auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
+                std::cerr << "hit Resolve: " << holder->_obj << std::endl;
+
                 if (holder->_resolved) {
                     return true;
                 }
 
                 bool found;
 
-                JS_HasPropertyById(cx, obj, id, &found);
+                checkBool(JS_HasPropertyById(cx, obj, id, &found));
 
                 if (found) {
                     return true;
@@ -144,13 +152,15 @@ namespace mongo {
 
                 char* cstr = JS_EncodeString(cx, str);
 
+                std::cerr << "request: " << cstr << std::endl;
+
                 auto elem = holder->_obj[cstr];
 
                 JS::RootedValue vp(cx);
 
                 holder->_scope->mongoToSMElement(elem, true, &vp);
 
-                JS_SetPropertyById(cx, obj, id, vp);
+                checkBool(JS_SetPropertyById(cx, obj, id, vp));
 
                 JS_free(cx, cstr);
                 *resolvedp = true;
@@ -162,10 +172,10 @@ namespace mongo {
         static constexpr JSClass bsonClass = {
             "bson",
             JSCLASS_HAS_PRIVATE,
-            bsonMethods::AddProperty,
-            bsonMethods::DeleteProperty,
+            nullptr, //bsonMethods::AddProperty,
+            nullptr, //bsonMethods::DeleteProperty,
             nullptr,
-            bsonMethods::SetProperty,
+            nullptr, //bsonMethods::SetProperty,
             bsonMethods::Enumerate,
             bsonMethods::Resolve
         };
@@ -585,8 +595,12 @@ namespace mongo {
             abort();
 //            return newId(elem.__oid());
         case mongo::NumberDouble:
+            std::cerr << "number double: " << elem.Number() << std::endl;
+            out.setDouble(elem.Number());
+            return;
         case mongo::NumberInt:
-            out.set(DOUBLE_TO_JSVAL(elem.number()));
+            std::cerr << "number int: " << elem.Int() << std::endl;
+            out.setInt32(elem.Int());
             return;
         case mongo::Array:
         {
@@ -790,7 +804,6 @@ namespace mongo {
         //    _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
 
         JS::RootedValue out(_context);
-        out.setDouble(666);
         JS::RootedObject obj(_context, smrecv.toObjectOrNull());
 
         checkBool(JS::Call(_context, obj, funcValue, args, &out));
