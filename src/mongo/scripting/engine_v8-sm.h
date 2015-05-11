@@ -153,22 +153,22 @@ namespace mongo {
         virtual ScriptingFunction _createFunction(const char* code,
                                                   ScriptingFunction functionNumber = 0);
         void mongoToSMElement(const BSONElement &elem, bool readOnly, JS::MutableHandleValue);
+        mongo::BSONObj smToMongo(JS::HandleObject o, int depth = 0);
+        void mongoToLZSM(const BSONObj& m, bool readOnly, JS::MutableHandleValue out);
+
+        void smToMongoObject(BSONObjBuilder& b,
+                             JS::HandleValue value,
+                             int depth,
+                             BSONObj* originalParent);
+        void smToMongoElement(BSONObjBuilder & b, StringData sname,
+                                       JS::HandleValue value, int depth,
+                                       BSONObj* originalParent);
     private:
 
         void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun);
         void _setValue(const char * field, JS::HandleValue val);
         void newFunction(StringData code, JS::MutableHandleValue out);
-        void mongoToLZSM(const BSONObj& m, bool readOnly, JS::MutableHandleValue out);
 
-        mongo::BSONObj smToMongo(JS::HandleObject o, int depth = 0);
-        void smToMongoElement(BSONObjBuilder & b, StringData sname,
-                                       JS::HandleValue value, int depth,
-                                       BSONObj* originalParent);
-        void smToMongoObject(BSONObjBuilder& b,
-                             StringData sname,
-                             JS::HandleValue value,
-                             int depth,
-                             BSONObj* originalParent);
         void smToMongoNumber(BSONObjBuilder& b,
                              StringData elementName,
                              JS::HandleValue value,

@@ -67,13 +67,29 @@ namespace mongo {
         BSONHolder(SMScope* scope, BSONObj obj) :
             _scope(scope),
             _obj(obj.getOwned()),
-            _resolved(false) {
+            _resolved(false)
+        {
             invariant(scope);
         }
 
         SMScope* _scope;
         const BSONObj _obj;
         bool _resolved;
+    };
+
+    class NativeHolder {
+    MONGO_DISALLOW_COPYING(NativeHolder);
+    public:
+        NativeHolder(SMScope* scope, NativeFunction func, void* ctx) :
+            _scope(scope),
+            _func(func),
+            _ctx(ctx) {
+            invariant(scope);
+        }
+
+        SMScope* _scope;
+        NativeFunction _func;
+        void* _ctx;
     };
 
     namespace {
@@ -84,7 +100,36 @@ namespace mongo {
             JSCLASS_GLOBAL_FLAGS,
         };
 
-        struct bsonMethods {
+        struct nativeMethods {
+            static bool Call(JSContext *cx, unsigned argc, JS::Value *vp) {
+                JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+
+                void* ctx = JS_GetPrivate(&args.callee());
+
+                auto holder = static_cast<NativeHolder*>(ctx);
+
+                BSONObjBuilder bob;
+
+                for (unsigned i = 0; i < args.length(); i++) {
+                    char buf[20];
+                    std::snprintf(buf, sizeof(buf), "%i", i);
+
+                    holder->_scope->smToMongoElement(bob, buf, args.get(i), 0, nullptr);
+                }
+
+                BSONObj out = holder->_func(bob.obj(), holder->_ctx);
+
+                JS::RootedValue rval(cx);
+
+                holder->_scope->mongoToLZSM(out, false, &rval);
+
+                args.rval().set(rval);
+
+                return true;
+            }
+        };
+
+        struct failMethods {
             static bool AddProperty(JSContext *cx, JS::HandleObject obj,
                                         JS::HandleId id, JS::MutableHandleValue v) {
                 std::cerr << "we're in addprop\n";
@@ -106,6 +151,20 @@ namespace mongo {
                 return false;
             }
             static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
+                return false;
+            }
+
+            static bool Resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
+                            bool* resolvedp) {
+                return false;
+            }
+            static bool Convert(JSContext *cx, JS::HandleObject obj, JSType type,
+                            JS::MutableHandleValue vp) {
+                return false;
+            }
+        };
+        struct bsonMethods {
+            static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
                 auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
                 std::cerr << "we're in enumerate\n";
@@ -118,14 +177,15 @@ namespace mongo {
                 while (i.more()) {
                     BSONElement e = i.next();
 
+                    auto field = e.fieldName();
+
                     JS::RootedValue vp(cx);
-
-                    holder->_scope->mongoToSMElement(e, true, &vp);
-
-                    JS_SetProperty(cx, obj, e.fieldName(), vp);
+                    checkBool(JS_GetProperty(cx, obj, field, &vp));
                 }
 
                 holder->_resolved = true;
+
+                std::cerr << "leaving enumerate" << std::endl;
 
                 return true;
             }
@@ -136,21 +196,20 @@ namespace mongo {
 
                 std::cerr << "hit Resolve: " << holder->_obj << std::endl;
 
-                if (holder->_resolved) {
-                    return true;
+                char* cstr;
+                char buf[20];
+
+                if (JSID_IS_STRING(id)) {
+                    auto str = JSID_TO_STRING(id);
+
+                    cstr = JS_EncodeString(cx, str);
+                } else {
+                    auto idx = JSID_TO_INT(id);
+
+                    snprintf(buf, sizeof(buf), "%i", idx);
+
+                    cstr = buf;
                 }
-
-                bool found;
-
-                checkBool(JS_HasPropertyById(cx, obj, id, &found));
-
-                if (found) {
-                    return true;
-                }
-
-                auto str = JSID_TO_STRING(id);
-
-                char* cstr = JS_EncodeString(cx, str);
 
                 std::cerr << "request: " << cstr << std::endl;
 
@@ -162,7 +221,10 @@ namespace mongo {
 
                 checkBool(JS_SetPropertyById(cx, obj, id, vp));
 
-                JS_free(cx, cstr);
+                if (JSID_IS_STRING(id)) {
+                    JS_free(cx, cstr);
+                }
+
                 *resolvedp = true;
 
                 return true;
@@ -178,6 +240,20 @@ namespace mongo {
             nullptr, //bsonMethods::SetProperty,
             bsonMethods::Enumerate,
             bsonMethods::Resolve
+        };
+
+        static constexpr JSClass nativeClass = {
+            "native",
+            JSCLASS_HAS_PRIVATE,
+            failMethods::AddProperty,
+            failMethods::DeleteProperty,
+            failMethods::GetProperty,
+            failMethods::SetProperty,
+            failMethods::Enumerate,
+            failMethods::Resolve,
+            failMethods::Convert,
+            nullptr,
+            nativeMethods::Call
         };
     }
 
@@ -409,8 +485,14 @@ namespace mongo {
 
     BSONObj SMScope::getObject(const char * field) {
         SMMAGIC_HEADER;
-        // uassert(10231,  "not an object", v->IsObject());
-        return BSONObj(); // TODO ...
+
+        JS::RootedValue x(_context);
+
+        JS_GetProperty(_context, _global, field, &x);
+
+        JS::RootedObject obj(_context, x.toObjectOrNull());
+
+        return smToMongo(obj);
     }
 
     void SMScope::smToMongoNumber(BSONObjBuilder& b,
@@ -421,17 +503,12 @@ namespace mongo {
     }
 
     void SMScope::smToMongoObject(BSONObjBuilder& b,
-                         StringData sname,
                          JS::HandleValue value,
                          int depth,
                          BSONObj* originalParent) {
-        //TODO something
-    }
+        JS::RootedObject o(_context, value.toObjectOrNull());
 
-    BSONObj SMScope::smToMongo(JS::HandleObject o, int depth) {
         BSONObj originalBSON;
-
-        BSONObjBuilder b;
 
         // We special case the _id field in top-level objects and move it to the front.
         // This matches other drivers behavior and makes finding the _id field quicker in BSON.
@@ -452,10 +529,13 @@ namespace mongo {
         for (size_t i = 0; i < names.length(); ++i) {
             JS::RootedValue x(_context);
 
-            JS_IdToValue(_context, names[i], &x);
+            bool is_id = false;
 
-            bool is_id;
-            JS_StringEqualsAscii(_context, x.toString(), "_id", &is_id);
+            if (JSID_IS_STRING(names[i])) {
+                JS_IdToValue(_context, names[i], &x);
+
+                JS_StringEqualsAscii(_context, x.toString(), "_id", &is_id);
+            }
 
             if (depth == 0 && is_id)
                 continue;
@@ -466,11 +546,20 @@ namespace mongo {
 
             JS_GetPropertyById(_context, o, id, &value);
 
-            char* sname = JS_EncodeString(_context, x.toString());
+            char* sname;
+            char buf[20];
+
+            if (JSID_IS_STRING(names[i])) {
+                sname = JS_EncodeString(_context, x.toString());
+            } else {
+                snprintf(buf, sizeof(buf), "%i", JSID_TO_INT(names[i]));
+            }
 
             smToMongoElement(b, sname, value, depth + 1, &originalBSON);
 
-            JS_free(_context, sname);
+            if (JSID_IS_STRING(names[i])) {
+                JS_free(_context, sname);
+            }
         }
 
         const int sizeWithEOO = b.len() + 1/*EOO*/ - 4/*BSONObj::Holder ref count*/;
@@ -478,8 +567,18 @@ namespace mongo {
                                      << "Object size " << sizeWithEOO << " exceeds limit of "
                                      << BSONObjMaxInternalSize << " bytes.",
                 sizeWithEOO <= BSONObjMaxInternalSize);
+    }
 
-        return b.obj(); // Would give an uglier error than above for oversized objects.
+    BSONObj SMScope::smToMongo(JS::HandleObject o, int depth) {
+        BSONObjBuilder b;
+
+        JS::RootedValue value(_context);
+
+        value.setObjectOrNull(o);
+
+        smToMongoObject(b, value, 0, nullptr);
+
+        return b.obj();
     }
 
     void SMScope::smToMongoElement(BSONObjBuilder & b, StringData sname,
@@ -543,7 +642,9 @@ namespace mongo {
             return;
         */
         if (value.isObject()) {
-            smToMongoObject(b, sname, value, depth, originalParent);
+            BSONObjBuilder subbob(b.subobjStart(sname));
+            smToMongoObject(subbob, value, depth, originalParent);
+            subbob.done();
             return;
         }
 
@@ -850,7 +951,19 @@ namespace mongo {
     }
 
     void SMScope::injectNative(const char *field, NativeFunction func, void* data) {
-        // TODO ...
+        SMMAGIC_HEADER;
+
+        JS::RootedObject proto(_context);
+        JS::RootedObject parent(_context);
+
+        JS::RootedObject obj(_context, JS_NewObject(_context, &nativeClass, proto, parent));
+
+        JS_SetPrivate(obj, new NativeHolder(this, func, data));
+
+        JS::RootedValue value(_context);
+        value.setObjectOrNull(obj);
+
+        _setValue(field, value);
     }
 
     void SMScope::gc() {

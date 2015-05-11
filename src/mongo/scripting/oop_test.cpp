@@ -62,6 +62,10 @@ void my_recv(int fd, char* buf, size_t len) {
     }
 }
 
+BSONObj bar(const BSONObj& args, void* data) {
+    return BSON("hello" << static_cast<char*>(data) << "args" << args);
+}
+
 static ExitCode runMongoJSServer() {
     setThreadName( "mongojsMain" );
 
@@ -69,9 +73,18 @@ static ExitCode runMongoJSServer() {
 
     std::unique_ptr<Scope> scope(static_cast<Scope*>(globalScriptEngine->newScope()));
 
+    scope->injectNative("bar", bar, (void*)("world"));
+
+//    auto fun = scope->createFunction(
+//        "function(val) { "
+//          "return val + this.foo.bar + this.foo.bar; "
+//        "}");
     auto fun = scope->createFunction(
         "function(val) { "
-          "return val + this.foo.bar + this.foo.bar; "
+          "x = {};"
+          "x.a = val + this.foo.bar + this.foo.bar;"
+          "x.b = bar(1,2,3,4);"
+          "return x;"
         "}");
 
     auto x = BSON("foo" << BSON("bar" << 3.3));
@@ -79,7 +92,7 @@ static ExitCode runMongoJSServer() {
 
     scope->invoke(fun, &args, &x);
 
-    auto rval = scope->getNumber("__returnValue");
+    auto rval = scope->getObject("__returnValue");
 
     std::cout << rval << std::endl;
 
