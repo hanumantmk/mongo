@@ -833,13 +833,32 @@ namespace mongo {
 
     }
 
+    bool hasFunctionIdentifier(StringData code) {
+        if (code.size() < 9 || code.find("function") != 0 )
+            return false;
+
+        return code[8] == ' ' || code[8] == '(';
+    }
+
     void SMScope::__createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun) {
         // uassert(10232, "not a function", ret->IsFunction());
+        raw = jsSkipWhiteSpace(raw);
+        string code = raw;
+        if (!hasFunctionIdentifier(code)) {
+            if (code.find('\n') == string::npos &&
+                    ! hasJSReturn(code) &&
+                    (code.find(';') == string::npos || code.find(';') == code.size() - 1)) {
+                code = "return " + code;
+            }
+            code = "function(){ " + code + "}";
+        }
         
         std::string fn = str::stream() << "_funcs" << functionNumber;
-        std::string code = str::stream() << "_funcs" << functionNumber << " = " << raw;
+        code = str::stream() << "_funcs" << functionNumber << " = " << code;
 
         JS::CompileOptions co(_context);
+
+        std::cerr << "to_eval: " << code << std::endl;
 
         checkBool(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), fun));
     }
@@ -858,7 +877,13 @@ namespace mongo {
     }
 
     void SMScope::setFunction(const char* field, const char* code) {
+        SMMAGIC_HEADER;
 
+        JS::RootedValue fun(_context);
+
+        __createFunction(code, getFunctionCache().size() + 1, &fun);
+
+        _setValue(field, fun);
     }
 
     void SMScope::rename(const char * from, const char * to) {
@@ -868,6 +893,8 @@ namespace mongo {
     int SMScope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
         SMMAGIC_HEADER;
+
+        std::cerr << "invoking: " << func << std::endl;
 
         auto funcValue = _funcs[func-1];
         JS::RootedValue result(_context);
