@@ -1,5 +1,7 @@
 #include "jscustomallocator.h"
 
+#include <iostream>
+
 namespace mongo {
 namespace sm {
     static thread_local size_t total_bytes = 0;
@@ -97,7 +99,9 @@ void js_free(void* p)
 {
     size_t current = mongo::sm::get_current(p);
 
-    mongo::sm::total_bytes -= current;
+    if (mongo::sm::total_bytes >= current) {
+        mongo::sm::total_bytes -= current;
+    }
 
     std::free(p);
 }
@@ -120,7 +124,9 @@ void* js_realloc(void* p, size_t bytes)
         return p;
     }
 
-    mongo::sm::total_bytes -= current;
+    if (mongo::sm::total_bytes >= current) {
+        mongo::sm::total_bytes -= current;
+    }
 
     p = static_cast<char*>(p) - 16;
 #else
@@ -128,7 +134,9 @@ void* js_realloc(void* p, size_t bytes)
         return p;
     }
 
-    mongo::sm::total_bytes -= current;
+    if (mongo::sm::total_bytes >= current) {
+        mongo::sm::total_bytes -= current;
+    }
 #endif
 
     return mongo::sm::wrap_alloc([p](size_t b){ return std::realloc(p, b); }, bytes);
