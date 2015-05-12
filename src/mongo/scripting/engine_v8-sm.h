@@ -29,6 +29,8 @@
 
 #pragma once
 
+#define JS_USE_CUSTOM_ALLOCATOR
+
 #include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
 #include <set>
@@ -45,6 +47,7 @@
 #include "mongo/scripting/v8-sm_profiler.h"
 
 #include "jsapi.h"
+#include "jscustomallocator.h"
 
 namespace mongo {
 
@@ -184,6 +187,13 @@ namespace mongo {
                               JS::HandleValue value);
         OID smToMongoObjectID(JS::HandleValue value);
 
+        struct ThreadStart {
+            ThreadStart() {
+                mongo::sm::reset(8L * 1024 * 1024);
+            }
+        };
+
+        ThreadStart _ts;
         JSRuntime* _runtime;
         JSContext* _context;
         JS::PersistentRootedObject _global;

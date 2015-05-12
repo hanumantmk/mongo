@@ -365,8 +365,9 @@ namespace {
         };
 
         // Note: if these numbers change, reconsider choice of datastructure for _pools
-        static const unsigned kMaxPoolSize = 10;
-        static const int kMaxScopeReuse = 10;
+        //static const unsigned kMaxPoolSize = 10;
+        static const unsigned kMaxPoolSize = 1;
+        static const int kMaxScopeReuse = 1;
 
         typedef std::deque<ScopeAndPool> Pools; // More-recently used Scopes are kept at the front.
         Pools _pools;    // protected by _mutex
@@ -469,6 +470,16 @@ namespace {
 
         auto_ptr<Scope> p;
         p.reset(new PooledScope(fullPoolName, s));
+        p->setLocalDB(db);
+        p->loadStored(txn, true);
+        return p;
+    }
+
+    auto_ptr<Scope> ScriptEngine::getScope(OperationContext* txn,
+                                                 const string& db,
+                                                 const string& scopeType) {
+        auto_ptr<Scope> p;
+        p.reset(createScope());
         p->setLocalDB(db);
         p->loadStored(txn, true);
         return p;

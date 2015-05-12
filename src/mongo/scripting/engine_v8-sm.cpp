@@ -50,7 +50,7 @@ namespace mongo {
     void checkBool(bool x) {
         if (! x) {
             std::cerr << "we done g00fed" << std::endl;
-            abort();
+            uassertStatusOK(Status(ErrorCodes::InternalError, "sm failure"));
         }
     }
 
@@ -127,27 +127,28 @@ namespace mongo {
 
                 return true;
             }
+            static void Finalize(JSFreeOp *fop, JSObject *obj) {
+                auto holder = static_cast<NativeHolder*>(JS_GetPrivate(obj));
+
+                delete holder;
+            }
         };
 
         struct failMethods {
             static bool AddProperty(JSContext *cx, JS::HandleObject obj,
                                         JS::HandleId id, JS::MutableHandleValue v) {
-                std::cerr << "we're in addprop\n";
                 return false;
             };
             static bool DeleteProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                                    bool *succeeded) {
-                std::cerr << "we're in delprop\n";
                 return false;
             }
             static bool GetProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                            JS::MutableHandleValue vp) {
-                std::cerr << "we're in getprop\n";
                 return false;
             }
             static bool SetProperty(JSContext *cx, JS::HandleObject obj, JS::HandleId id,
                                    bool strict, JS::MutableHandleValue vp) {
-                std::cerr << "we're in setprop\n";
                 return false;
             }
             static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
@@ -164,10 +165,14 @@ namespace mongo {
             }
         };
         struct bsonMethods {
-            static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
+            static void Finalize(JSFreeOp *fop, JSObject *obj) {
                 auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
-                std::cerr << "we're in enumerate\n";
+                delete holder;
+            }
+
+            static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
+                auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
                 if (holder->_resolved) {
                     return true;
@@ -185,16 +190,12 @@ namespace mongo {
 
                 holder->_resolved = true;
 
-                std::cerr << "leaving enumerate" << std::endl;
-
                 return true;
             }
             static bool Resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                             bool* resolvedp) {
 
                 auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
-
-                std::cerr << "hit Resolve: " << holder->_obj << std::endl;
 
                 char* cstr;
                 char buf[20];
@@ -210,8 +211,6 @@ namespace mongo {
 
                     cstr = buf;
                 }
-
-                std::cerr << "request: " << cstr << std::endl;
 
                 auto elem = holder->_obj[cstr];
 
@@ -239,7 +238,9 @@ namespace mongo {
             nullptr,
             nullptr, //bsonMethods::SetProperty,
             bsonMethods::Enumerate,
-            bsonMethods::Resolve
+            bsonMethods::Resolve,
+            nullptr,
+            bsonMethods::Finalize
         };
 
         static constexpr JSClass nativeClass = {
@@ -252,7 +253,7 @@ namespace mongo {
             failMethods::Enumerate,
             failMethods::Resolve,
             failMethods::Convert,
-            nullptr,
+            nativeMethods::Finalize,
             nativeMethods::Call
         };
     }
@@ -327,12 +328,21 @@ namespace mongo {
         return nullptr;
     }
 
+    void GCCallback(JSRuntime *rt, JSGCStatus status, void *data) {
+        std::cerr << "in gc callback" <<
+            " js_total_bytes(" << mongo::sm::get_total_bytes() << ")"
+            " js_max_bytes(" << mongo::sm::get_max_bytes() << ")"
+        << std::endl;
+    }
+
     SMScope::SMScope(SMScriptEngine * engine) :
-        _runtime(JS_NewRuntime(8L * 1024 * 1024)),
+        _ts(),
+        _runtime(JS_NewRuntime(1L * 1024 * 1024)),
         _context(JS_NewContext(_runtime, 8192)),
         _global(_context),
         _funcs(_context)
     {
+        JS_SetGCCallback(_runtime, GCCallback, nullptr);
         JSAutoRequest ar(_context);
         _global.set(JS_NewGlobalObject(_context, &globalClass, nullptr, JS::DontFireOnNewGlobalHook));
 
@@ -345,8 +355,8 @@ namespace mongo {
 
     SMScope::~SMScope() {
         unregisterOperation();
-        JS_DestroyContext(_context);
-        JS_DestroyRuntime(_runtime);
+//        JS_DestroyContext(_context);
+//        JS_DestroyRuntime(_runtime);
     }
 
     bool SMScope::hasOutOfMemoryException() {
@@ -553,6 +563,7 @@ namespace mongo {
                 sname = JS_EncodeString(_context, x.toString());
             } else {
                 snprintf(buf, sizeof(buf), "%i", JSID_TO_INT(names[i]));
+                sname = buf;
             }
 
             smToMongoElement(b, sname, value, depth + 1, &originalBSON);
@@ -696,11 +707,9 @@ namespace mongo {
             abort();
 //            return newId(elem.__oid());
         case mongo::NumberDouble:
-            std::cerr << "number double: " << elem.Number() << std::endl;
             out.setDouble(elem.Number());
             return;
         case mongo::NumberInt:
-            std::cerr << "number int: " << elem.Int() << std::endl;
             out.setInt32(elem.Int());
             return;
         case mongo::Array:
@@ -858,8 +867,6 @@ namespace mongo {
 
         JS::CompileOptions co(_context);
 
-        std::cerr << "to_eval: " << code << std::endl;
-
         checkBool(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), fun));
     }
 
@@ -893,8 +900,6 @@ namespace mongo {
     int SMScope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
                         int timeoutMs, bool ignoreReturn, bool readOnlyArgs, bool readOnlyRecv) {
         SMMAGIC_HEADER;
-
-        std::cerr << "invoking: " << func << std::endl;
 
         auto funcValue = _funcs[func-1];
         JS::RootedValue result(_context);
@@ -1008,7 +1013,6 @@ namespace mongo {
     // ----- internal -----
 
     void SMScope::reset() {
-        // TODO ...
     }
 
     // --- random utils ----

@@ -1,0 +1,10 @@
+install jscustomallocator.* into js/src/
+
+configure:
+CXXFLAGS="-DJS_USE_CUSTOM_ALLOCATOR" CFLAGS="-DJS_USE_CUSTOM_ALLOCATOR" PYTHON=python ./configure
+
+make
+
+make install
+
+probably have to copy js/src/js-config.h into $INSTALL_DIR/include/mozjs-XX/

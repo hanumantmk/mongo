@@ -117,7 +117,8 @@ namespace mongo {
         const string userToken = AuthorizationSession::get(ClientBasic::getCurrent())
                                                           ->getAuthenticatedUserNamesToken();
 
-        _scope = globalScriptEngine->getPooledScope(_txn, _dbName, "where" + userToken);
+        //_scope = globalScriptEngine->getPooledScope(_txn, _dbName, "where" + userToken);
+        _scope = globalScriptEngine->getScope(_txn, _dbName, "where" + userToken);
 
         _func = _scope->createFunction( _code.c_str() );
 

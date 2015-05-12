@@ -250,6 +250,10 @@ namespace mongo {
                                             const std::string& db,
                                             const std::string& scopeType);
 
+        std::auto_ptr<Scope> getScope(OperationContext* txn,
+                                      const std::string& db,
+                                      const std::string& scopeType);
+
         void setScopeInitCallback(void (*func)(Scope&)) { _scopeInitCallback = func; }
         static void setConnectCallback(void (*func)(DBClientWithCommands&)) {
             _connectCallback = func;

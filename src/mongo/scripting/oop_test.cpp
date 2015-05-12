@@ -81,9 +81,8 @@ static ExitCode runMongoJSServer() {
 //        "}");
     auto fun = scope->createFunction(
         "function(val) { "
-          "x = {};"
-          "x.a = val + this.foo.bar + this.foo.bar;"
-          "x.b = bar(1,2,3,4);"
+          "x = new Array(1000000);"
+          "for (i = 0; i < 1000000; i++) { x[i] = Math.random(); }"
           "return x;"
         "}");
 
@@ -94,7 +93,7 @@ static ExitCode runMongoJSServer() {
 
     auto rval = scope->getObject("__returnValue");
 
-    std::cout << rval << std::endl;
+//    std::cout << rval << std::endl;
 
     return EXIT_NET_ERROR;
 }
