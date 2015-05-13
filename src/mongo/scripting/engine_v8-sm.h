@@ -166,6 +166,8 @@ namespace mongo {
         void smToMongoElement(BSONObjBuilder & b, StringData sname,
                                        JS::HandleValue value, int depth,
                                        BSONObj* originalParent);
+        void checkBool(bool x);
+
     private:
 
         void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun);
@@ -193,11 +195,21 @@ namespace mongo {
             }
         };
 
+        void installDBAccess();
+
+    public:
         ThreadStart _ts;
+        SMScriptEngine* _engine;
         JSRuntime* _runtime;
         JSContext* _context;
         JS::PersistentRootedObject _global;
         JS::AutoValueVector _funcs;
+        std::atomic_bool _pendingKill;
+        unsigned int _opId;                   // op id for this scope
+        OperationContext* _opCtx;    // Op context for DbEval
+        std::atomic_bool _pendingGC;
+        enum ConnectState { NOT, LOCAL, EXTERNAL };
+        ConnectState _connectState;
     };
 
     class SMScriptEngine : public ScriptEngine {
@@ -223,6 +235,18 @@ namespace mongo {
          * Interrupt all v8 contexts (and isolates).  @see interrupt().
          */
         virtual void interruptAll();
+
+        DeadlineMonitor<SMScope>* getDeadlineMonitor() { return &_deadlineMonitor; }
+    private:
+
+        typedef std::map<unsigned, SMScope*> OpIdToScopeMap;
+
+        mongo::mutex _globalInterruptLock;  // protects map of all operation ids -> scope
+
+        OpIdToScopeMap _opToScopeMap;       // map of mongo op ids to scopes (protected by
+                                            // _globalInterruptLock).
+        DeadlineMonitor<SMScope> _deadlineMonitor;
+
     };
 
     extern ScriptEngine* globalScriptEngine;

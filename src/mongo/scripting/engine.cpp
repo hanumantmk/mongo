@@ -480,6 +480,7 @@ namespace {
                                                  const string& scopeType) {
         auto_ptr<Scope> p;
         p.reset(createScope());
+        p->registerOperation(txn);
         p->setLocalDB(db);
         p->loadStored(txn, true);
         return p;

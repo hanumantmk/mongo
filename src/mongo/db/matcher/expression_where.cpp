@@ -32,6 +32,7 @@
 
 #include "mongo/base/init.h"
 #include "mongo/db/auth/authorization_session.h"
+#include "mongo/db/curop.h"
 #include "mongo/db/namespace_string.h"
 #include "mongo/db/client.h"
 #include "mongo/db/jsobj.h"
@@ -139,7 +140,9 @@ namespace mongo {
         _scope->setObject( "obj", const_cast< BSONObj & >( obj ) );
         _scope->setBoolean( "fullObject" , true ); // this is a hack b/c fullObject used to be relevant
 
-        int err = _scope->invoke( _func, 0, &obj, 1000 * 60, false );
+        auto timeoutMs = _txn->getCurOp()->getRemainingMaxTimeMicros() / 1000;
+
+        int err = _scope->invoke( _func, 0, &obj, timeoutMs, false );
         if ( err == -3 ) { // INVOKE_ERROR
             stringstream ss;
             ss << "error on invocation of $where function:\n"

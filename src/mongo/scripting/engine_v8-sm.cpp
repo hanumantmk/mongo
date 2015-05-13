@@ -47,13 +47,6 @@ using namespace mongoutils;
 
 namespace mongo {
 
-    void checkBool(bool x) {
-        if (! x) {
-            std::cerr << "we done g00fed" << std::endl;
-            uassertStatusOK(Status(ErrorCodes::InternalError, "sm failure"));
-        }
-    }
-
     void reportError(JSContext *cx, const char *message,
                      JSErrorReport *report) {
       fprintf(stderr, "%s:%u:%s\n",
@@ -185,7 +178,7 @@ namespace mongo {
                     auto field = e.fieldName();
 
                     JS::RootedValue vp(cx);
-                    checkBool(JS_GetProperty(cx, obj, field, &vp));
+                    holder->_scope->checkBool(JS_GetProperty(cx, obj, field, &vp));
                 }
 
                 holder->_resolved = true;
@@ -218,7 +211,7 @@ namespace mongo {
 
                 holder->_scope->mongoToSMElement(elem, true, &vp);
 
-                checkBool(JS_SetPropertyById(cx, obj, id, vp));
+                holder->_scope->checkBool(JS_SetPropertyById(cx, obj, id, vp));
 
                 if (JSID_IS_STRING(id)) {
                     JS_free(cx, cstr);
@@ -298,51 +291,114 @@ namespace mongo {
      }
 
      void SMScriptEngine::interrupt(unsigned opId) {
-         // TODO ...
+        std::cerr << "in interrupt()" << std::endl;
+         boost::lock_guard<boost::mutex> intLock(_globalInterruptLock);
+         OpIdToScopeMap::iterator iScope = _opToScopeMap.find(opId);
+         if (iScope == _opToScopeMap.end()) {
+             // got interrupt request for a scope that no longer exists
+//             LOG(1) << "received interrupt request for unknown op: " << opId
+//                    << printKnownOps_inlock() << endl;
+             return;
+         }
+//         LOG(1) << "interrupting op: " << opId << printKnownOps_inlock() << endl;
+         iScope->second->kill();
      }
 
      void SMScriptEngine::interruptAll() {
-         // TODO ...
+        std::cerr << "in interruptAll()" << std::endl;
+         boost::lock_guard<boost::mutex> interruptLock(_globalInterruptLock);
+         for (OpIdToScopeMap::iterator iScope = _opToScopeMap.begin();
+              iScope != _opToScopeMap.end(); ++iScope) {
+             iScope->second->kill();
+         }
      }
 
      void SMScope::registerOperation(OperationContext* txn) {
-         // TODO ...
+        std::cerr << "in registerOperation()" << std::endl;
+         boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
+         invariant(_opId == 0);
+         _opId = txn->getOpID();
+         _engine->_opToScopeMap[_opId] = this;
+         LOG(2) << "MSScope " << static_cast<const void*>(this) << " registered for op " << _opId;
+         Status status = txn->checkForInterruptNoAssert();
+         if (!status.isOK()) {
+             kill();
+         }
      }
 
      void SMScope::unregisterOperation() {
-         // TODO ...
-    }
+        std::cerr << "in unregisterOperation()" << std::endl;
+         boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
+         LOG(2) << "SMScope " << static_cast<const void*>(this) << " unregistered for op " << _opId << endl;
+        if (_opId != 0) {
+            // scope is currently associated with an operation id
+            SMScriptEngine::OpIdToScopeMap::iterator it = _engine->_opToScopeMap.find(_opId);
+            if (it != _engine->_opToScopeMap.end())
+                _engine->_opToScopeMap.erase(it);
+            _opId = 0;
+        }
+     }
 
     void SMScope::kill() {
-        // TODO ...
+        std::cerr << "in kill()" << std::endl;
+        _pendingKill.store(true);
+        JS_RequestInterruptCallback(_runtime);
     }
 
     /** check if there is a pending killOp request */
     bool SMScope::isKillPending() const {
-        // TODO ...
-        return false;
-    }
-    
-    OperationContext* SMScope::getOpContext() const {
-        // TODO ...
-        return nullptr;
+        return _pendingKill.load();
     }
 
-    void GCCallback(JSRuntime *rt, JSGCStatus status, void *data) {
-        std::cerr << "in gc callback" <<
+    void SMScope::checkBool(bool x) {
+        if (! x) {
+            std::cerr << "we done g00fed" << std::endl;
+            uassertStatusOK(Status(ErrorCodes::InternalError, "sm failure"));
+        }
+    }
+
+    
+    OperationContext* SMScope::getOpContext() const {
+        return _opCtx;
+    }
+
+    bool InterruptCallback(JSContext* cx) {
+        SMScope* scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        if (scope->_pendingGC.load()) {
+            JS_GC(scope->_runtime);
+        }
+
+        bool kill = scope->isKillPending();
+
+        std::cerr << "in interrupt callback" <<
             " js_total_bytes(" << mongo::sm::get_total_bytes() << ")"
             " js_max_bytes(" << mongo::sm::get_max_bytes() << ")"
+            " interrupt(" << scope->isKillPending() << ")"
+            " kill?(" << kill << ")"
         << std::endl;
+
+        if (kill) {
+            scope->_engine->getDeadlineMonitor()->stopDeadline(scope);
+            scope->unregisterOperation();
+        }
+
+        return !kill;
     }
 
     SMScope::SMScope(SMScriptEngine * engine) :
         _ts(),
+        _engine(engine),
         _runtime(JS_NewRuntime(1L * 1024 * 1024)),
         _context(JS_NewContext(_runtime, 8192)),
         _global(_context),
-        _funcs(_context)
+        _funcs(_context),
+        _pendingKill(false),
+        _opId(0),
+        _opCtx(nullptr)
     {
-        JS_SetGCCallback(_runtime, GCCallback, nullptr);
+        JS_SetInterruptCallback(_runtime, InterruptCallback);
+        JS_SetContextPrivate(_context, this);
         JSAutoRequest ar(_context);
         _global.set(JS_NewGlobalObject(_context, &globalClass, nullptr, JS::DontFireOnNewGlobalHook));
 
@@ -894,7 +950,15 @@ namespace mongo {
     }
 
     void SMScope::rename(const char * from, const char * to) {
-        // TODO ...
+        JS::RootedValue value(_context);
+        JS::RootedValue undefValue(_context);
+
+        checkBool(JS_GetProperty(_context, _global, from, &value));
+
+        undefValue.setUndefined();
+
+        _setValue(to, value);
+        _setValue(from, undefValue);
     }
 
     int SMScope::invoke(ScriptingFunction func, const BSONObj* argsObject, const BSONObj* recv,
@@ -904,11 +968,7 @@ namespace mongo {
         auto funcValue = _funcs[func-1];
         JS::RootedValue result(_context);
 
-        // TODO SERVER-8016: properly allocate handles on the stack
-        static const int MAX_ARGS = 24;
         const int nargs = argsObject ? argsObject->nFields() : 0;
-        uassert(16862, "Too many arguments. Max is 24",
-                nargs <= MAX_ARGS);
 
         JS::AutoValueVector args(_context);
 
@@ -936,18 +996,18 @@ namespace mongo {
         //    uasserted(16711, _error);
         //}
 
-        //if (timeoutMs)
-        //    // start the deadline timer for this script
-        //    _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
+        std::cerr << "timeoutMs: " << timeoutMs << std::endl;
+
+        if (timeoutMs)
+            _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
 
         JS::RootedValue out(_context);
         JS::RootedObject obj(_context, smrecv.toObjectOrNull());
 
         checkBool(JS::Call(_context, obj, funcValue, args, &out));
 
-        //if (timeoutMs)
-        //    // stop the deadline timer for this script
-        //    _engine->getDeadlineMonitor()->stopDeadline(this);
+        if (timeoutMs)
+            _engine->getDeadlineMonitor()->stopDeadline(this);
 
         //if (!nativePrologue()) {
         //    _error = "JavaScript execution terminated";
@@ -968,7 +1028,6 @@ namespace mongo {
             //else {
                 _lastRetIsNativeCode = false;
             //}
-//                std::cout << "setting value: " << out.get().toDouble() << std::endl;
             _setValue("__returnValue", out);
         }
 
@@ -977,7 +1036,50 @@ namespace mongo {
 
     bool SMScope::exec(StringData code, const string& name, bool printResult,
                        bool reportError, bool assertOnError, int timeoutMs) {
-        // TODO ...
+        SMMAGIC_HEADER;
+
+        JS::CompileOptions co(_context);
+        JS::RootedScript script(_context);
+
+        checkBool(JS::Compile(_context, _global, co, code.rawData(), code.size(), &script));
+
+        //if (!nativeEpilogue()) {
+        //    _error = "JavaScript execution terminated";
+        //    if (reportError)
+        //        error() << _error << endl;
+        //    if (assertOnError)
+        //        uasserted(13475, _error);
+        //    return false;
+        //}
+
+        if (timeoutMs)
+            _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
+
+        JS::RootedValue out(_context);
+
+        checkBool(JS_ExecuteScript(_context, _global, script, &out));
+
+        if (timeoutMs)
+            _engine->getDeadlineMonitor()->stopDeadline(this);
+
+        //if (!nativePrologue()) {
+        //    _error = "JavaScript execution terminated";
+        //    if (reportError)
+        //        error() << _error << endl;
+        //    if (assertOnError)
+        //        uasserted(16721, _error);
+        //    return false;
+        //}
+
+        //if (checkV8ErrorState(result, try_catch, reportError, assertOnError))
+        //    return false;
+
+        _setValue("__lastres__", out);
+
+        //if (printResult && !result->IsUndefined()) {
+        //    // appears to only be used by shell
+        //    cout << V8String(result) << endl;
+        //}
 
         return true;
     }
@@ -999,11 +1101,43 @@ namespace mongo {
     }
 
     void SMScope::gc() {
-        // TODO ...
+        _pendingGC.store(true);
+        JS_RequestInterruptCallback(_runtime);
     }
 
     void SMScope::localConnectForDbEval(OperationContext* txn, const char * dbName) {
-        // TODO ...
+        //SMMAGIC_HEADER;
+
+        //invariant(_opCtx == NULL);
+        //_opCtx = txn;
+
+        //if (_connectState == EXTERNAL)
+        //    uasserted(12510, "externalSetup already called, can't call localConnect");
+        //if (_connectState ==  LOCAL) {
+        //    if (_localDBName == dbName)
+        //        return;
+        //    uasserted(12511,
+        //              str::stream() << "localConnect previously called with name "
+        //                            << _localDBName);
+        //}
+
+        //// NOTE: order is important here.  the following methods must be called after
+        ////       the above conditional statements.
+
+        //// install db access functions in the global object
+        //installDBAccess();
+
+        //// install the Mongo function object and instantiate the 'db' global
+        //_MongoFT = FTPtr::New(getMongoFunctionTemplate(this, true));
+        //injectV8Function("Mongo", MongoFT(), _global);
+        //execCoreFiles();
+        //exec("_mongo = new Mongo();", "local connect 2", false, true, true, 0);
+        //exec((string)"db = _mongo.getDB(\"" + dbName + "\");", "local connect 3",
+        //     false, true, true, 0);
+        //_connectState = LOCAL;
+        //_localDBName = dbName;
+        //
+        //loadStored(txn);
     }
 
     void SMScope::externalSetup() {
@@ -1015,6 +1149,25 @@ namespace mongo {
     void SMScope::reset() {
     }
 
+    void SMScope::installDBAccess() {
+    //    typedef v8::Persistent<v8::FunctionTemplate> FTPtr;
+    //    _DBFT             = FTPtr::New(createV8Function(dbInit));
+    //    _DBQueryFT        = FTPtr::New(createV8Function(dbQueryInit));
+    //    _DBCollectionFT   = FTPtr::New(createV8Function(collectionInit));
+
+    //    // These must be done before calling injectV8Function
+    //    DBFT()->InstanceTemplate()->SetNamedPropertyHandler(collectionGetter, collectionSetter);
+    //    DBQueryFT()->InstanceTemplate()->SetIndexedPropertyHandler(dbQueryIndexAccess);
+    //    DBCollectionFT()->InstanceTemplate()->SetNamedPropertyHandler(collectionGetter,
+    //                                                                  collectionSetter);
+
+    //    injectV8Function("DB", DBFT(), _global);
+    //    injectV8Function("DBQuery", DBQueryFT(), _global);
+    //    injectV8Function("DBCollection", DBCollectionFT(), _global);
+
+    //    // The internal cursor type isn't exposed to the users at all
+    //    _InternalCursorFT = FTPtr::New(getInternalCursorFunctionTemplate(this));
+    }
     // --- random utils ----
 
     static logger::MessageLogDomain* jsPrintLogDomain;
