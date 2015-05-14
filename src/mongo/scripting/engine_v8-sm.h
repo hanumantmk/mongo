@@ -160,6 +160,7 @@ namespace mongo {
         void mongoToLZSM(const BSONObj& m, bool readOnly, JS::MutableHandleValue out);
 
         void smToMongoObject(BSONObjBuilder& b,
+                             StringData elementName,
                              JS::HandleValue value,
                              int depth,
                              BSONObj* originalParent);
@@ -168,11 +169,15 @@ namespace mongo {
                                        BSONObj* originalParent);
         void checkBool(bool x);
 
+        std::string toSTLString(JSString* str);
+        void fromStringData(StringData sd, JS::MutableHandleValue out);
+
     private:
 
         void __createFunction(const char* raw, ScriptingFunction functionNumber, JS::MutableHandleValue fun);
         void _setValue(const char * field, JS::HandleValue val);
         void newFunction(StringData code, JS::MutableHandleValue out);
+        void injectSMFunction(StringData sd, JSNative);
 
         void smToMongoNumber(BSONObjBuilder& b,
                              StringData elementName,
@@ -188,14 +193,21 @@ namespace mongo {
                               StringData elementName,
                               JS::HandleValue value);
         OID smToMongoObjectID(JS::HandleValue value);
+        void installOIDProto();
+        void installNLProto();
+        void makeOID(JS::MutableHandleValue out);
+        void makeNL(JS::MutableHandleValue out);
 
         struct ThreadStart {
             ThreadStart() {
-                mongo::sm::reset(8L * 1024 * 1024);
+                mongo::sm::reset(128L * 1024 * 1024);
             }
         };
 
         void installDBAccess();
+
+        void makeCursor(DBClientCursor* cursor, JS::MutableHandleValue out);
+        void installBSONTypes();
 
     public:
         ThreadStart _ts;
@@ -210,6 +222,9 @@ namespace mongo {
         std::atomic_bool _pendingGC;
         enum ConnectState { NOT, LOCAL, EXTERNAL };
         ConnectState _connectState;
+        JS::PersistentRootedObject _oidProto;
+        JS::PersistentRootedObject _numberLongProto;
+
     };
 
     class SMScriptEngine : public ScriptEngine {

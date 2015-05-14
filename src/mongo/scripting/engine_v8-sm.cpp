@@ -54,6 +54,57 @@ namespace mongo {
               (unsigned int)report->lineno, message);
     }
 
+    static logger::MessageLogDomain* jsPrintLogDomain;
+    static bool Print(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+        LogstreamBuilder builder(jsPrintLogDomain, getThreadName(), logger::LogSeverity::Log());
+//        std::ostream& ss = builder.stream();
+        std::ostream& ss = std::cerr;
+
+        bool first = true;
+        for (size_t i = 0; i < args.length(); i++) {
+            if (first)
+                first = false;
+            else
+                ss << " ";
+
+            if (args.get(i).isNullOrUndefined()) {
+                // failed to get object to convert
+                ss << "[unknown type]";
+                continue;
+            }
+//            if (args[i]->IsExternal()) {
+//                // object is External
+//                ss << "[mongo internal]";
+//                continue;
+//            }
+
+            auto str = scope->toSTLString(JS::ToString(cx, args.get(i)));
+            ss << str;
+        }
+        ss << "\n";
+
+        return true;
+    }
+
+    static bool Version(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        scope->fromStringData(JS_VersionToString(JS_GetVersion(cx)), args.rval());
+
+        return true;
+    }
+
+    static bool SMGC(JSContext *cx, unsigned argc, JS::Value *vp) {
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        scope->gc();
+
+        return true;
+    }
+
     class BSONHolder {
     MONGO_DISALLOW_COPYING(BSONHolder);
     public:
@@ -110,7 +161,17 @@ namespace mongo {
                     holder->_scope->smToMongoElement(bob, buf, args.get(i), 0, nullptr);
                 }
 
-                BSONObj out = holder->_func(bob.obj(), holder->_ctx);
+                BSONObj out;
+
+                try {
+                    out = holder->_func(bob.obj(), holder->_ctx);
+                } catch (...) {
+                    Status s = exceptionToStatus();
+
+                    std::cerr << "Failure in native function: " << s << std::endl;
+
+                    return false;
+                }
 
                 JS::RootedValue rval(cx);
 
@@ -395,7 +456,11 @@ namespace mongo {
         _funcs(_context),
         _pendingKill(false),
         _opId(0),
-        _opCtx(nullptr)
+        _opCtx(nullptr),
+        _pendingGC(false),
+        _connectState(NOT),
+        _oidProto(_context),
+        _numberLongProto(_context)
     {
         JS_SetInterruptCallback(_runtime, InterruptCallback);
         JS_SetContextPrivate(_context, this);
@@ -406,7 +471,14 @@ namespace mongo {
 
         JSAutoCompartment ac(_context, _global);
 
-        JS_InitStandardClasses(_context, _global);
+        checkBool(JS_InitStandardClasses(_context, _global));
+
+        injectSMFunction("print", Print);
+        injectSMFunction("version", Version);  // TODO: remove
+        injectSMFunction("gc", SMGC);
+
+        installBSONTypes();
+//        execSetup(JSFiles::types);
     }
 
     SMScope::~SMScope() {
@@ -419,6 +491,12 @@ namespace mongo {
         return false;
     }
 
+    void SMScope::injectSMFunction(StringData sd, JSNative fun) {
+        auto ok = JS_DefineFunction(_context, _global, sd.rawData(), fun, 0, 0);
+
+        checkBool(ok);
+    }
+
     void SMScope::init(const BSONObj * data) {
         if (! data)
             return;
@@ -428,6 +506,28 @@ namespace mongo {
             BSONElement e = i.next();
             setElement(e.fieldName(), e);
         }
+    }
+
+    std::string SMScope::toSTLString(JSString* str) {
+        auto deleter= [&](char* ptr){ JS_free(_context, ptr); };
+
+        std::unique_ptr<char, decltype(deleter)> cstr(JS_EncodeString(_context, str), deleter);
+
+        if (!cstr) {
+            uassertStatusOK(Status(ErrorCodes::InternalError, "sm couldn't encode string"));
+        }
+
+        return std::string(cstr.get());
+    }
+
+    void SMScope::fromStringData(StringData sd, JS::MutableHandleValue out) {
+        auto jsStr = JS_NewStringCopyN(_context, sd.rawData(), sd.size());
+
+        if (! jsStr) {
+            uassertStatusOK(Status(ErrorCodes::InternalError, "sm couldn't copy string"));
+        }
+
+        out.setString(jsStr);
     }
 
 #define SMMAGIC_HEADER \
@@ -457,9 +557,19 @@ namespace mongo {
     }
 
     void SMScope::setElement(const char *field, const BSONElement& e) {
+        SMMAGIC_HEADER;
+
+        JS::RootedValue value(_context);
+        mongoToSMElement(e, false, &value);
+        _setValue(field, value);
     }
 
     void SMScope::setObject(const char *field, const BSONObj& obj, bool readOnly) {
+        SMMAGIC_HEADER;
+
+        JS::RootedValue value(_context);
+        mongoToLZSM(obj, readOnly, &value);
+        _setValue(field, value);
     }
 
     int SMScope::type(const char *field) {
@@ -494,8 +604,7 @@ namespace mongo {
         if (x.isObject())
             return Object;
 
-        // uasserted(12509, str::stream() << "unable to get type of field " << field);
-        abort();
+         uasserted(12509, str::stream() << "unable to get type of field " << field);
     }
 
     double SMScope::getNumber(const char *field) {
@@ -568,13 +677,86 @@ namespace mongo {
         b.append(elementName, value.get().toNumber());
     }
 
+    long long numberLongVal(JSContext *cx, JS::HandleObject thisv) {
+        JS::RootedValue floatApprox(cx);
+        JS::RootedValue top(cx);
+        JS::RootedValue bottom(cx);
+
+        if (!JS_GetProperty(cx, thisv, "top", &top)) {
+            if (! JS_GetProperty(cx, thisv, "floatApprox", &floatApprox)) {
+                // TODO what to do here...
+                return 0;
+            }
+
+            std::cerr << "returning floatApprox: " << floatApprox.toDouble() << std::endl;
+
+            return (long long)(floatApprox.toDouble());
+        }
+
+        if (!JS_GetProperty(cx, thisv, "bottom", &bottom)) {
+            // TODO what to do here...
+            return 0;
+        }
+
+        std::cerr << "returning complex: " << 
+            (long long)
+            ((unsigned long long)((long long)top.toPrivateUint32() << 32) +
+            (unsigned)(bottom.toPrivateUint32())) << std::endl;
+
+        return
+            (long long)
+            ((unsigned long long)((long long)top.toPrivateUint32() << 32) +
+            (unsigned)(bottom.toPrivateUint32()));
+    }
+
+    OID SMScope::smToMongoObjectID(JS::HandleValue value) {
+        JS::RootedObject obj(_context, value.toObjectOrNull());
+
+        auto oid = static_cast<OID*>(JS_GetPrivate(obj));
+
+        return *oid;
+    }
+
     void SMScope::smToMongoObject(BSONObjBuilder& b,
+                         StringData elementName,
                          JS::HandleValue value,
                          int depth,
                          BSONObj* originalParent) {
-        JS::RootedObject o(_context, value.toObjectOrNull());
+        JS::RootedObject obj(_context, value.toObjectOrNull());
 
+        bool check;
+
+        if (false) {
+//        if (value->IsRegExp()) {
+//            v8ToMongoRegex(b, elementName, obj.As<v8::RegExp>());
+        } else if (JS_HasInstance(_context, _oidProto, value, &check) && check) {
+            b.append(elementName, smToMongoObjectID(value));
+        } else if (JS_HasInstance(_context, _numberLongProto, value, &check) && check) {
+            b.append(elementName, numberLongVal(_context, obj));
+//        } else if (NumberIntFT()->HasInstance(value)) {
+//            b.append(elementName, numberIntVal(this, obj));
+//        } else if (DBPointerFT()->HasInstance(value)) {
+//            v8ToMongoDBRef(b, elementName, obj);
+//        } else if (BinDataFT()->HasInstance(value)) {
+//            v8ToMongoBinData(b, elementName, obj);
+//        } else if (TimestampFT()->HasInstance(value)) {
+//            Timestamp ot (obj->Get(strLitToV8("t"))->Uint32Value(),
+//                          obj->Get(strLitToV8("i"))->Uint32Value());
+//            b.append(elementName, ot);
+//        } else if (MinKeyFT()->HasInstance(value)) {
+//            b.appendMinKey(elementName);
+//        } else if (MaxKeyFT()->HasInstance(value)) {
+//            b.appendMaxKey(elementName);
+        } else {
+            // nested object or array
+            BSONObj sub = smToMongo(obj, depth);
+            b.append(elementName, sub);
+        }
+    }
+
+    BSONObj SMScope::smToMongo(JS::HandleObject o, int depth) {
         BSONObj originalBSON;
+        BSONObjBuilder b;
 
         // We special case the _id field in top-level objects and move it to the front.
         // This matches other drivers behavior and makes finding the _id field quicker in BSON.
@@ -634,16 +816,6 @@ namespace mongo {
                                      << "Object size " << sizeWithEOO << " exceeds limit of "
                                      << BSONObjMaxInternalSize << " bytes.",
                 sizeWithEOO <= BSONObjMaxInternalSize);
-    }
-
-    BSONObj SMScope::smToMongo(JS::HandleObject o, int depth) {
-        BSONObjBuilder b;
-
-        JS::RootedValue value(_context);
-
-        value.setObjectOrNull(o);
-
-        smToMongoObject(b, value, 0, nullptr);
 
         return b.obj();
     }
@@ -697,6 +869,8 @@ namespace mongo {
                 JS_GetElement(_context, array, i, &value);
                 smToMongoElement(arrBuilder, name, value, depth+1, originalParent);
             }
+
+            arrBuilder.done();
             return;
         }
         /*
@@ -709,9 +883,7 @@ namespace mongo {
             return;
         */
         if (value.isObject()) {
-            BSONObjBuilder subbob(b.subobjStart(sname));
-            smToMongoObject(subbob, value, depth, originalParent);
-            subbob.done();
+            smToMongoObject(b, sname, value, depth + 1, originalParent);
             return;
         }
 
@@ -753,15 +925,12 @@ namespace mongo {
         case mongo::Symbol:
         case mongo::String:
         {
-            auto str = elem.String();
-            auto jsstr = JS_NewStringCopyN(_context, str.c_str(), str.length());
-
-            out.set(STRING_TO_JSVAL(jsstr));
+            fromStringData(elem.valueStringData(), out);
             return;
         }
         case mongo::jstOID:
-            abort();
-//            return newId(elem.__oid());
+            makeOID(out);
+            return;
         case mongo::NumberDouble:
             out.setDouble(elem.Number());
             return;
@@ -950,6 +1119,8 @@ namespace mongo {
     }
 
     void SMScope::rename(const char * from, const char * to) {
+        SMMAGIC_HEADER;
+
         JS::RootedValue value(_context);
         JS::RootedValue undefValue(_context);
 
@@ -995,8 +1166,6 @@ namespace mongo {
         //    error() << _error << endl;
         //    uasserted(16711, _error);
         //}
-
-        std::cerr << "timeoutMs: " << timeoutMs << std::endl;
 
         if (timeoutMs)
             _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
@@ -1149,6 +1318,11 @@ namespace mongo {
     void SMScope::reset() {
     }
 
+    void SMScope::installBSONTypes() {
+        installOIDProto();
+        installNLProto();
+    }
+
     void SMScope::installDBAccess() {
     //    typedef v8::Persistent<v8::FunctionTemplate> FTPtr;
     //    _DBFT             = FTPtr::New(createV8Function(dbInit));
@@ -1169,8 +1343,6 @@ namespace mongo {
     //    _InternalCursorFT = FTPtr::New(getInternalCursorFunctionTemplate(this));
     }
     // --- random utils ----
-
-    static logger::MessageLogDomain* jsPrintLogDomain;
 
     MONGO_INITIALIZER(JavascriptPrintDomain)(InitializerContext*) {
         jsPrintLogDomain = logger::globalLogManager()->getNamedDomain("javascriptOutput");
