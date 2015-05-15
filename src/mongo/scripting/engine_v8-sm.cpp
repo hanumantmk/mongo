@@ -32,6 +32,7 @@
 #include "mongo/scripting/engine_v8-sm.h"
 
 #include <iostream>
+#include <thread>
 
 #include "mongo/base/init.h"
 #include "mongo/db/operation_context.h"
@@ -42,6 +43,7 @@
 #include "mongo/util/base64.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
+#include "mongo/util/stacktrace.h"
 
 using namespace mongoutils;
 
@@ -441,13 +443,33 @@ namespace mongo {
         return !kill;
     }
 
+    void tlDestroyRuntime(JSRuntime* rt) {
+        if (rt) JS_DestroyRuntime(rt);
+    }
+
+    thread_local std::unique_ptr<JSRuntime, void(*)(JSRuntime*)> tlRuntime(nullptr, tlDestroyRuntime);
+
+    SMScope::CleanUpMagic::CleanUpMagic() {
+        if (! tlRuntime.get()) {
+            mongo::sm::reset(128L * 1024 * 1024);
+            tlRuntime.reset(JS_NewRuntime(1L * 1024 * 1024));
+        }
+
+        _runtime = tlRuntime.get();
+        _context = JS_NewContext(_runtime, 8192);
+    }
+
+    SMScope::CleanUpMagic::~CleanUpMagic() {
+        JS_DestroyContext(_context);
+    }
+
     SMScope::SMScope(SMScriptEngine * engine) :
-        _ts(),
         _engine(engine),
-        _runtime(JS_NewRuntime(1L * 1024 * 1024)),
-        _context(JS_NewContext(_runtime, 8192)),
+        _magic(),
+        _runtime(_magic._runtime),
+        _context(_magic._context),
         _global(_context),
-        _funcs(_context),
+        _funcs(),
         _pendingKill(false),
         _opId(0),
         _opCtx(nullptr),
@@ -477,8 +499,6 @@ namespace mongo {
 
     SMScope::~SMScope() {
         unregisterOperation();
-//        JS_DestroyContext(_context);
-//        JS_DestroyRuntime(_runtime);
     }
 
     bool SMScope::hasOutOfMemoryException() {
@@ -1063,7 +1083,7 @@ namespace mongo {
 
         __createFunction(raw, functionNumber, &fun);
 
-        _funcs.append(fun);
+        _funcs.emplace_back(_context, fun.get());
 
         return functionNumber;
     }
@@ -1132,6 +1152,8 @@ namespace mongo {
 
         JS::RootedValue out(_context);
         JS::RootedObject obj(_context, smrecv.toObjectOrNull());
+
+        JS_MaybeGC(_context);
 
         checkBool(JS::Call(_context, obj, funcValue, args, &out));
 

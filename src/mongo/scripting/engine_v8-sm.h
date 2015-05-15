@@ -198,10 +198,13 @@ namespace mongo {
         void installOIDProto();
         void installNLProto();
 
-        struct ThreadStart {
-            ThreadStart() {
-                mongo::sm::reset(128L * 1024 * 1024);
-            }
+        class CleanUpMagic {
+        public:
+            CleanUpMagic();
+            ~CleanUpMagic();
+
+            JSRuntime* _runtime;
+            JSContext* _context;
         };
 
         void installDBAccess();
@@ -210,12 +213,12 @@ namespace mongo {
         void installBSONTypes();
 
     public:
-        ThreadStart _ts;
         SMScriptEngine* _engine;
+        CleanUpMagic _magic;
         JSRuntime* _runtime;
         JSContext* _context;
         JS::PersistentRootedObject _global;
-        JS::AutoValueVector _funcs;
+        std::vector<JS::PersistentRootedValue> _funcs;
         std::atomic_bool _pendingKill;
         unsigned int _opId;                   // op id for this scope
         OperationContext* _opCtx;    // Op context for DbEval

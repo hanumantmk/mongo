@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <type_traits>
 #include <algorithm>
+#include <iostream>
 
 #define JS_USE_CUSTOM_ALLOCATOR
 
