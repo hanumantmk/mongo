@@ -60,6 +60,10 @@ namespace mongo {
         static bool call(JSContext *cx, unsigned argc, JS::Value *vp);
         static void finalize(JSFreeOp *fop, JSObject *obj);
 
+        struct Methods {
+            static bool toString(JSContext *cx, unsigned argc, JS::Value *vp);
+        };
+
         static JSFunctionSpec* methods;
 
         static const char* className;

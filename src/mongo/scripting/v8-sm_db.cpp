@@ -39,8 +39,14 @@
 
 namespace mongo {
 
+    namespace {
+        JSFunctionSpec _oidMethods[] {
+            JS_FS("toString", OIDClass::Methods::toString, 0, MONGO_JS_FLAGS),
+            JS_FS_END,
+        };
+    }
 
-    JSFunctionSpec* OIDClass::methods = nullptr;
+    JSFunctionSpec* OIDClass::methods = _oidMethods;
 
     const char* OIDClass::className = "ObjectId";
 
@@ -51,6 +57,29 @@ namespace mongo {
             delete oid;
         }
     }
+
+    bool OIDClass::Methods::toString(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        JS::RootedValue value(cx);
+
+        if (! JS_GetProperty(cx, thisv, "str", &value)) return false;
+
+        auto str = scope->toSTLString(value.toString());
+
+        std::stringstream ss;
+
+        ss << "ObjectId(\"" << str << "\")";
+
+        std::string ret = ss.str();
+
+        scope->fromStringData(ret, args.rval());
+
+        return true;
+    }
+
 
     bool OIDClass::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
@@ -92,7 +121,7 @@ namespace mongo {
     }
 
     namespace {
-        JSFunctionSpec _methods[] {
+        JSFunctionSpec _numberLongMethods[] {
             JS_FS("valueOf", NumberLongClass::Methods::valueOf, 0, MONGO_JS_FLAGS),
             JS_FS("toNumber", NumberLongClass::Methods::toNumber, 0, MONGO_JS_FLAGS),
             JS_FS("toString", NumberLongClass::Methods::toString, 0, MONGO_JS_FLAGS),
@@ -100,19 +129,17 @@ namespace mongo {
         };
     }
 
-    JSFunctionSpec* NumberLongClass::methods = _methods;
+    JSFunctionSpec* NumberLongClass::methods = _numberLongMethods;
 
     const char* NumberLongClass::className = "NumberLong";
 
     long long NumberLongClass::Methods::numberLongVal(JSContext *cx, JS::HandleObject thisv) {
-        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
-
         JS::RootedValue floatApprox(cx);
         JS::RootedValue top(cx);
         JS::RootedValue bottom(cx);
         bool hasTop;
 
-        scope->checkBool(JS_HasProperty(cx, thisv, "top", &hasTop));
+        if (! JS_HasProperty(cx, thisv, "top", &hasTop)) return false;
 
         if (! hasTop) {
 
