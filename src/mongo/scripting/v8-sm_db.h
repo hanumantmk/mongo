@@ -29,8 +29,40 @@
 
 #pragma once
 
-#include "mongo/scripting/engine_v8-sm.h"
+#define JS_USE_CUSTOM_ALLOCATOR
+
+#include "jsapi.h"
+#include "jscustomallocator.h"
+
+#include "mongo/scripting/sm_class.hpp"
 
 namespace mongo {
+    struct NumberLongClass {
+        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp);
+        static bool call(JSContext *cx, unsigned argc, JS::Value *vp);
 
+        struct Methods {
+            static long long numberLongVal(JSContext *cx, JS::HandleObject thisv);
+
+            static bool valueOf(JSContext *cx, unsigned argc, JS::Value *vp);
+            static bool toNumber(JSContext *cx, unsigned argc, JS::Value *vp);
+            static bool toString(JSContext *cx, unsigned argc, JS::Value *vp);
+        };
+
+        static JSFunctionSpec* methods;
+
+        static const char* className;
+        static const int classFlags = 0;
+    };
+
+    struct OIDClass {
+        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp);
+        static bool call(JSContext *cx, unsigned argc, JS::Value *vp);
+        static void finalize(JSFreeOp *fop, JSObject *obj);
+
+        static JSFunctionSpec* methods;
+
+        static const char* className;
+        static const int classFlags = JSCLASS_HAS_PRIVATE;
+    };
 }

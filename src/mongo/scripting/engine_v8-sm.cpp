@@ -459,8 +459,8 @@ namespace mongo {
         _opCtx(nullptr),
         _pendingGC(false),
         _connectState(NOT),
-        _oidProto(_context),
-        _numberLongProto(_context)
+        _oid(_context),
+        _numberLong(_context)
     {
         JS_SetInterruptCallback(_runtime, InterruptCallback);
         JS_SetContextPrivate(_context, this);
@@ -677,38 +677,6 @@ namespace mongo {
         b.append(elementName, value.get().toNumber());
     }
 
-    long long numberLongVal(JSContext *cx, JS::HandleObject thisv) {
-        JS::RootedValue floatApprox(cx);
-        JS::RootedValue top(cx);
-        JS::RootedValue bottom(cx);
-
-        if (!JS_GetProperty(cx, thisv, "top", &top)) {
-            if (! JS_GetProperty(cx, thisv, "floatApprox", &floatApprox)) {
-                // TODO what to do here...
-                return 0;
-            }
-
-            std::cerr << "returning floatApprox: " << floatApprox.toDouble() << std::endl;
-
-            return (long long)(floatApprox.toDouble());
-        }
-
-        if (!JS_GetProperty(cx, thisv, "bottom", &bottom)) {
-            // TODO what to do here...
-            return 0;
-        }
-
-        std::cerr << "returning complex: " << 
-            (long long)
-            ((unsigned long long)((long long)top.toPrivateUint32() << 32) +
-            (unsigned)(bottom.toPrivateUint32())) << std::endl;
-
-        return
-            (long long)
-            ((unsigned long long)((long long)top.toPrivateUint32() << 32) +
-            (unsigned)(bottom.toPrivateUint32()));
-    }
-
     OID SMScope::smToMongoObjectID(JS::HandleValue value) {
         JS::RootedObject obj(_context, value.toObjectOrNull());
 
@@ -724,15 +692,13 @@ namespace mongo {
                          BSONObj* originalParent) {
         JS::RootedObject obj(_context, value.toObjectOrNull());
 
-        bool check;
-
         if (false) {
 //        if (value->IsRegExp()) {
 //            v8ToMongoRegex(b, elementName, obj.As<v8::RegExp>());
-        } else if (JS_HasInstance(_context, _oidProto, value, &check) && check) {
+        } else if (_oid.instanceOf(value)) {
             b.append(elementName, smToMongoObjectID(value));
-        } else if (JS_HasInstance(_context, _numberLongProto, value, &check) && check) {
-            b.append(elementName, numberLongVal(_context, obj));
+        } else if (_numberLong.instanceOf(value)) {
+            b.append(elementName, NumberLongClass::Methods::numberLongVal(_context, obj));
 //        } else if (NumberIntFT()->HasInstance(value)) {
 //            b.append(elementName, numberIntVal(this, obj));
 //        } else if (DBPointerFT()->HasInstance(value)) {
@@ -929,7 +895,7 @@ namespace mongo {
             return;
         }
         case mongo::jstOID:
-            makeOID(out);
+            _oid.newInstance(out);
             return;
         case mongo::NumberDouble:
             out.setDouble(elem.Number());
@@ -1319,8 +1285,8 @@ namespace mongo {
     }
 
     void SMScope::installBSONTypes() {
-        installOIDProto();
-        installNLProto();
+        _oid.install(_global);
+        _numberLong.install(_global);
     }
 
     void SMScope::installDBAccess() {

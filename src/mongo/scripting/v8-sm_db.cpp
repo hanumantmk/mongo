@@ -32,152 +32,27 @@
 #include "mongo/stdx/memory.h"
 #include "mongo/util/text.h"
 
+#include "mongo/client/dbclientcursor.h"
+#include "mongo/scripting/engine_v8-sm.h"
+
+#define MONGO_JS_FLAGS (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
+
 namespace mongo {
 
-    struct CursorImpl {
-        static void finalize(JSFreeOp *fop, JSObject *obj) {
-            auto cursor = static_cast<DBClientCursor*>(JS_GetPrivate(obj));
 
-            delete cursor;
+    JSFunctionSpec* OIDClass::methods = nullptr;
+
+    const char* OIDClass::className = "ObjectId";
+
+    void OIDClass::finalize(JSFreeOp *fop, JSObject *obj) {
+        auto oid = static_cast<OID*>(JS_GetPrivate(obj));
+
+        if (oid) {
+            delete oid;
         }
-
-        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp) {
-            return true;
-        }
-    };
-
-    struct CursorMethods {
-        static bool next(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::RootedValue rval(cx);
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            auto cursor = static_cast<mongo::DBClientCursor*>(JS_GetPrivate(&args.callee()));
-            auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
-
-            if (! cursor) {
-                // TODO something different?
-                return false;
-            }
-
-            BSONObj o = cursor->next();
-            bool ro = false;
-            //if (args.This()->Has(v8::String::New("_ro")))
-            //    ro = args.This()->Get(v8::String::New("_ro"))->BooleanValue();
-            scope->mongoToLZSM(o, ro, &rval);
-
-            args.rval().set(rval);
-
-            return true;
-        }
-
-        static bool hasNext(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            auto cursor = static_cast<mongo::DBClientCursor*>(JS_GetPrivate(&args.callee()));
-
-            if (! cursor) {
-                // TODO something different?
-                return false;
-            }
-
-            args.rval().setBoolean(cursor->more());
-
-            return true;
-        }
-
-        static bool objsLeftInBatch(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            auto cursor = static_cast<mongo::DBClientCursor*>(JS_GetPrivate(&args.callee()));
-
-            if (! cursor) {
-                // TODO something different?
-                return false;
-            }
-
-            args.rval().setInt32(cursor->objsLeftInBatch());
-
-            return true;
-        }
-
-        static bool readOnly(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            JS::RootedObject cursor(cx, args.thisv().toObjectOrNull());
-
-            JS::RootedValue value(cx);
-            value.setBoolean(true);
-
-            JS_SetProperty(cx, cursor, "_ro", value);
-
-            args.rval().setObjectOrNull(cursor);
-
-            return true;
-        }
-    };
-
-    static constexpr JSClass cursorClass = {
-        "mongoCursor",
-        JSCLASS_HAS_PRIVATE,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        CursorImpl::finalize,
-    };
-
-    static constexpr JSFunctionSpec cursorMethodSpec[] {
-        JS_FS("next", CursorMethods::next, 0, 0),
-        JS_FS("hasNext", CursorMethods::hasNext, 0, 0),
-        JS_FS("objsLeftInBatch", CursorMethods::objsLeftInBatch, 0, 0),
-        JS_FS("readOnly", CursorMethods::readOnly, 0, 0),
-        JS_FS_END,
-    };
-
-    void SMScope::makeCursor(DBClientCursor* cursor, JS::MutableHandleValue out) {
-        JS::RootedObject proto(_context);
-        JS::RootedObject parent(_context);
-
-        JS::RootedObject cursorObj(_context, JS_NewObject(
-            _context,
-            &cursorClass,
-            proto,
-            parent
-        ));
-
-        checkBool(JS_DefineFunctions(_context, cursorObj, cursorMethodSpec));
-
-        JS_SetPrivate(cursorObj, cursor);
     }
 
-    struct OIDImpl {
-        static void finalize(JSFreeOp *fop, JSObject *obj) {
-            auto oid = static_cast<OID*>(JS_GetPrivate(obj));
-
-            if (oid) {
-                delete oid;
-            }
-        }
-
-        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp);
-    };
-
-    static constexpr JSClass oidClass = {
-        "mongoOID",
-        JSCLASS_HAS_PRIVATE,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        OIDImpl::finalize,
-        OIDImpl::construct,
-        nullptr,
-        OIDImpl::construct,
-    };
-
-    bool OIDImpl::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
+    bool OIDClass::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
         auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
@@ -198,7 +73,7 @@ namespace mongo {
 
         JS::RootedObject parent(cx);
         JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, &oidClass, proto, parent));
+        JS::RootedObject thisv(cx, JS_NewObject(cx, &scope->_oid.jsclass, proto, parent));
 
         JS::RootedValue jsStr(cx);
         scope->fromStringData(oid->toString(), &jsStr);
@@ -212,130 +87,90 @@ namespace mongo {
         return true;
     }
 
-    void SMScope::installOIDProto() {
-        JS::RootedObject proto(_context);
-        JS::RootedObject parent(_context);
-
-        _oidProto.set(JS_InitClass(
-            _context,
-            _global,
-            proto,
-            &oidClass,
-            OIDImpl::construct,
-            0,
-            nullptr,
-            nullptr,
-            nullptr,
-            nullptr
-        ));
-
-        JS::RootedValue value(_context);
-
-        value.setObjectOrNull(_oidProto);
-
-        _setValue("ObjectId", value);
+    bool OIDClass::call(JSContext *cx, unsigned argc, JS::Value *vp) {
+        return construct(cx, argc, vp);
     }
 
-    void SMScope::makeOID(JS::MutableHandleValue out) {
-        JS::AutoValueVector args(_context);
-
-        out.setObjectOrNull(JS_New(_context, _oidProto, args));
+    namespace {
+        JSFunctionSpec _methods[] {
+            JS_FS("valueOf", NumberLongClass::Methods::valueOf, 0, MONGO_JS_FLAGS),
+            JS_FS("toNumber", NumberLongClass::Methods::toNumber, 0, MONGO_JS_FLAGS),
+            JS_FS("toString", NumberLongClass::Methods::toString, 0, MONGO_JS_FLAGS),
+            JS_FS_END,
+        };
     }
 
-    struct NumberLongMethods {
-        static long long numberLongVal(JSContext *cx, JS::HandleObject thisv) {
-            JS::RootedValue floatApprox(cx);
-            JS::RootedValue top(cx);
-            JS::RootedValue bottom(cx);
-            bool hasTop;
+    JSFunctionSpec* NumberLongClass::methods = _methods;
 
-            JS_HasProperty(cx, thisv, "top", &hasTop);
+    const char* NumberLongClass::className = "NumberLong";
 
-            if (! hasTop) {
-                JS_GetProperty(cx, thisv, "floatApprox", &floatApprox);
+    long long NumberLongClass::Methods::numberLongVal(JSContext *cx, JS::HandleObject thisv) {
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
-                return (long long)(floatApprox.toNumber());
-            }
+        JS::RootedValue floatApprox(cx);
+        JS::RootedValue top(cx);
+        JS::RootedValue bottom(cx);
+        bool hasTop;
 
-            JS_GetProperty(cx, thisv, "top", &top);
-            JS_GetProperty(cx, thisv, "bottom", &bottom);
+        scope->checkBool(JS_HasProperty(cx, thisv, "top", &hasTop));
 
-            return
-                (long long)
-                ((unsigned long long)((long long)top.toInt32() << 32) +
-                (unsigned)(bottom.toInt32()));
+        if (! hasTop) {
+
+            JS_GetProperty(cx, thisv, "floatApprox", &floatApprox);
+
+            return (long long)(floatApprox.toNumber());
         }
 
-        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp);
+        JS_GetProperty(cx, thisv, "top", &top);
+        JS_GetProperty(cx, thisv, "bottom", &bottom);
 
-        static bool valueOf(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
+        return
+            (long long)
+            ((unsigned long long)((long long)top.toInt32() << 32) +
+            (unsigned)(bottom.toInt32()));
+    }
 
-            args.rval().setDouble(numberLongVal(cx, thisv));
+    bool NumberLongClass::Methods::valueOf(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
 
-            return true;
-        }
+        args.rval().setDouble(numberLongVal(cx, thisv));
 
-        static bool toNumber(JSContext *cx, unsigned argc, JS::Value *vp) {
-            return valueOf(cx, argc, vp);
-        }
+        return true;
+    }
 
-        static bool toString(JSContext *cx, unsigned argc, JS::Value *vp) {
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-            JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
-            auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+    bool NumberLongClass::Methods::toNumber(JSContext *cx, unsigned argc, JS::Value *vp) {
+        return valueOf(cx, argc, vp);
+    }
 
-            std::stringstream ss;
-            long long val = numberLongVal(cx, thisv);
-            const long long limit = 2LL << 30;
+    bool NumberLongClass::Methods::toString(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
-            if (val <= -limit || limit <= val)
-                ss << "NumberLong(\"" << val << "\")";
-            else
-                ss << "NumberLong(" << val << ")";
+        std::stringstream ss;
+        long long val = numberLongVal(cx, thisv);
+        const long long limit = 2LL << 30;
 
-            std::string ret = ss.str();
+        if (val <= -limit || limit <= val)
+            ss << "NumberLong(\"" << val << "\")";
+        else
+            ss << "NumberLong(" << val << ")";
 
-            scope->fromStringData(ret, args.rval());
+        std::string ret = ss.str();
 
-            return true;
-        }
-    };
+        scope->fromStringData(ret, args.rval());
 
-#define MONGO_JS_FLAGS \
-  (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
+        return true;
+    }
 
-    static constexpr JSFunctionSpec numberLongMethods[] {
-        JS_FS("valueOf", NumberLongMethods::valueOf, 0, MONGO_JS_FLAGS),
-        JS_FS("toNumber", NumberLongMethods::toNumber, 0, MONGO_JS_FLAGS),
-        JS_FS("toString", NumberLongMethods::toString, 0, MONGO_JS_FLAGS),
-        JS_FS_END,
-    };
-
-    static constexpr JSClass NumberLongClass = {
-        "mongoNumberLong",
-        0,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        nullptr,
-        NumberLongMethods::construct,
-        nullptr,
-        NumberLongMethods::construct,
-    };
-
-    bool NumberLongMethods::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
+    bool NumberLongClass::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
         auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
         JS::RootedObject parent(cx);
         JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, &NumberLongClass, proto, parent));
+        JS::RootedObject thisv(cx, JS_NewObject(cx, &scope->_numberLong.jsclass, proto, parent));
 
         JS::RootedValue floatApprox(cx);
         JS::RootedValue top(cx);
@@ -395,33 +230,7 @@ namespace mongo {
         return true;
     }
 
-    void SMScope::installNLProto() {
-        JS::RootedObject proto(_context);
-        JS::RootedObject parent(_context);
-
-        _numberLongProto.set(JS_InitClass(
-            _context,
-            _global,
-            proto,
-            &NumberLongClass,
-            NumberLongMethods::construct,
-            0,
-            nullptr,
-            numberLongMethods,
-            nullptr,
-            nullptr
-        ));
-
-        JS::RootedValue value(_context);
-
-        value.setObjectOrNull(_numberLongProto);
-
-        _setValue("NumberLong", value);
-    }
-
-    void SMScope::makeNL(JS::MutableHandleValue out) {
-        JS::AutoValueVector args(_context);
-
-        out.setObjectOrNull(JS_New(_context, _numberLongProto, args));
+    bool NumberLongClass::call(JSContext *cx, unsigned argc, JS::Value *vp) {
+        return construct(cx, argc, vp);
     }
 }

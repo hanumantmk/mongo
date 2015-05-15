@@ -45,6 +45,8 @@
 #include "mongo/scripting/engine.h"
 #include "mongo/scripting/v8_deadline_monitor.h"
 #include "mongo/scripting/v8-sm_profiler.h"
+#include "mongo/scripting/v8-sm_db.h"
+#include "mongo/scripting/sm_class.hpp"
 
 #include "jsapi.h"
 #include "jscustomallocator.h"
@@ -195,8 +197,6 @@ namespace mongo {
         OID smToMongoObjectID(JS::HandleValue value);
         void installOIDProto();
         void installNLProto();
-        void makeOID(JS::MutableHandleValue out);
-        void makeNL(JS::MutableHandleValue out);
 
         struct ThreadStart {
             ThreadStart() {
@@ -222,8 +222,8 @@ namespace mongo {
         std::atomic_bool _pendingGC;
         enum ConnectState { NOT, LOCAL, EXTERNAL };
         ConnectState _connectState;
-        JS::PersistentRootedObject _oidProto;
-        JS::PersistentRootedObject _numberLongProto;
+        SMClass<OIDClass> _oid;
+        SMClass<NumberLongClass> _numberLong;
 
     };
 
