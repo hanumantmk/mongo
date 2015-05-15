@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <initializer_list>
+
 #define JS_USE_CUSTOM_ALLOCATOR
 
 #include "jsapi.h"
@@ -49,9 +51,14 @@ namespace mongo {
             static bool toString(JSContext *cx, unsigned argc, JS::Value *vp);
         };
 
-        static JSFunctionSpec* methods;
+        static constexpr JSFunctionSpec methods[] = {
+            MONGO_SM_FS(valueOf),
+            MONGO_SM_FS(toNumber),
+            MONGO_SM_FS(toString),
+            JS_FS_END,
+        };
 
-        static const char* className;
+        static constexpr char className[] = "NumberLong";
         static const int classFlags = 0;
     };
 
@@ -64,9 +71,12 @@ namespace mongo {
             static bool toString(JSContext *cx, unsigned argc, JS::Value *vp);
         };
 
-        static JSFunctionSpec* methods;
+        static constexpr JSFunctionSpec methods[] = {
+            MONGO_SM_FS(toString),
+            JS_FS_END,
+        };
 
-        static const char* className;
+        static constexpr char className[] = "ObjectId";
         static const int classFlags = JSCLASS_HAS_PRIVATE;
     };
 }

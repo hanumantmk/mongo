@@ -29,6 +29,7 @@
 
 #include <cstddef>
 #include <type_traits>
+#include <algorithm>
 
 #define JS_USE_CUSTOM_ALLOCATOR
 
@@ -64,7 +65,14 @@ struct name##_or_nullptr<T, typename std::enable_if<smUtils::has_##name<T>::valu
 #define INSTALL_POINTER(name) \
     static constexpr auto addrOf##name = smUtils::name##_or_nullptr<T>::value;
 
-#define METHODS(...) \
+#define MONGO_JS_FLAGS (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
+
+#define MONGO_SM_FS(name) \
+    JS_FS(#name, Methods::name, 0, MONGO_JS_FLAGS)
+
+#define MONGO_SM_CLASS_MAGIC(name) \
+    constexpr JSFunctionSpec name::methods[]; \
+    constexpr char name::className[];
 
 namespace mongo {
 
@@ -97,24 +105,8 @@ namespace mongo {
         INSTALL_POINTER(hasInstance)
         INSTALL_POINTER(construct)
         INSTALL_POINTER(trace)
-    public:
 
-        const JSClass jsclass = {
-            T::className,
-            T::classFlags,
-            addrOfaddProperty,
-            addrOfdelProperty,
-            addrOfgetProperty,
-            addrOfsetProperty,
-            addrOfenumerate,
-            addrOfresolve,
-            addrOfconvert,
-            addrOffinalize,
-            addrOfcall,
-            addrOfhasInstance,
-            addrOfconstruct,
-            addrOftrace,
-        };
+    public:
 
         SMClass(JSContext* context) :
             _context(context),
@@ -122,6 +114,23 @@ namespace mongo {
         {}
 
         void install(JS::HandleObject global) {
+            _jsclass = {
+                T::className,
+                T::classFlags,
+                addrOfaddProperty,
+                addrOfdelProperty,
+                addrOfgetProperty,
+                addrOfsetProperty,
+                addrOfenumerate,
+                addrOfresolve,
+                addrOfconvert,
+                addrOffinalize,
+                addrOfcall,
+                addrOfhasInstance,
+                addrOfconstruct,
+                addrOftrace,
+            };
+
             JS::RootedObject proto(_context);
             JS::RootedObject parent(_context);
 
@@ -129,7 +138,7 @@ namespace mongo {
                 _context,
                 global,
                 proto,
-                &jsclass,
+                &_jsclass,
                 addrOfconstruct,
                 0,
                 nullptr,
@@ -160,7 +169,7 @@ namespace mongo {
         }
 
         bool instanceOf(JS::HandleObject obj) {
-            return JS_InstanceOf(_context, obj, &jsclass, nullptr);
+            return JS_InstanceOf(_context, obj, &_jsclass, nullptr);
         }
 
         bool instanceOf(JS::HandleValue value) {
@@ -169,9 +178,14 @@ namespace mongo {
             return instanceOf(obj);
         }
 
+        const JSClass* jsclass() const {
+            return &_jsclass;
+        }
+
     private:
 
         JSContext* _context;
         JS::PersistentRootedObject _proto;
+        JSClass _jsclass;
     };
 }

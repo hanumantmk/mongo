@@ -35,20 +35,9 @@
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/scripting/engine_v8-sm.h"
 
-#define MONGO_JS_FLAGS (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
-
 namespace mongo {
 
-    namespace {
-        JSFunctionSpec _oidMethods[] {
-            JS_FS("toString", OIDClass::Methods::toString, 0, MONGO_JS_FLAGS),
-            JS_FS_END,
-        };
-    }
-
-    JSFunctionSpec* OIDClass::methods = _oidMethods;
-
-    const char* OIDClass::className = "ObjectId";
+    MONGO_SM_CLASS_MAGIC(OIDClass)
 
     void OIDClass::finalize(JSFreeOp *fop, JSObject *obj) {
         auto oid = static_cast<OID*>(JS_GetPrivate(obj));
@@ -102,7 +91,7 @@ namespace mongo {
 
         JS::RootedObject parent(cx);
         JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, &scope->_oid.jsclass, proto, parent));
+        JS::RootedObject thisv(cx, JS_NewObject(cx, scope->_oid.jsclass(), proto, parent));
 
         JS::RootedValue jsStr(cx);
         scope->fromStringData(oid->toString(), &jsStr);
@@ -120,18 +109,7 @@ namespace mongo {
         return construct(cx, argc, vp);
     }
 
-    namespace {
-        JSFunctionSpec _numberLongMethods[] {
-            JS_FS("valueOf", NumberLongClass::Methods::valueOf, 0, MONGO_JS_FLAGS),
-            JS_FS("toNumber", NumberLongClass::Methods::toNumber, 0, MONGO_JS_FLAGS),
-            JS_FS("toString", NumberLongClass::Methods::toString, 0, MONGO_JS_FLAGS),
-            JS_FS_END,
-        };
-    }
-
-    JSFunctionSpec* NumberLongClass::methods = _numberLongMethods;
-
-    const char* NumberLongClass::className = "NumberLong";
+    MONGO_SM_CLASS_MAGIC(NumberLongClass)
 
     long long NumberLongClass::Methods::numberLongVal(JSContext *cx, JS::HandleObject thisv) {
         JS::RootedValue floatApprox(cx);
@@ -197,7 +175,7 @@ namespace mongo {
 
         JS::RootedObject parent(cx);
         JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, &scope->_numberLong.jsclass, proto, parent));
+        JS::RootedObject thisv(cx, JS_NewObject(cx, scope->_numberLong.jsclass(), proto, parent));
 
         JS::RootedValue floatApprox(cx);
         JS::RootedValue top(cx);

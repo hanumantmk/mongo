@@ -352,7 +352,6 @@ namespace mongo {
      }
 
      void SMScriptEngine::interrupt(unsigned opId) {
-        std::cerr << "in interrupt()" << std::endl;
          boost::lock_guard<boost::mutex> intLock(_globalInterruptLock);
          OpIdToScopeMap::iterator iScope = _opToScopeMap.find(opId);
          if (iScope == _opToScopeMap.end()) {
@@ -366,7 +365,6 @@ namespace mongo {
      }
 
      void SMScriptEngine::interruptAll() {
-        std::cerr << "in interruptAll()" << std::endl;
          boost::lock_guard<boost::mutex> interruptLock(_globalInterruptLock);
          for (OpIdToScopeMap::iterator iScope = _opToScopeMap.begin();
               iScope != _opToScopeMap.end(); ++iScope) {
@@ -375,7 +373,6 @@ namespace mongo {
      }
 
      void SMScope::registerOperation(OperationContext* txn) {
-        std::cerr << "in registerOperation()" << std::endl;
          boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
          invariant(_opId == 0);
          _opId = txn->getOpID();
@@ -388,7 +385,6 @@ namespace mongo {
      }
 
      void SMScope::unregisterOperation() {
-        std::cerr << "in unregisterOperation()" << std::endl;
          boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
          LOG(2) << "SMScope " << static_cast<const void*>(this) << " unregistered for op " << _opId << endl;
         if (_opId != 0) {
@@ -401,7 +397,6 @@ namespace mongo {
      }
 
     void SMScope::kill() {
-        std::cerr << "in kill()" << std::endl;
         _pendingKill.store(true);
         JS_RequestInterruptCallback(_runtime);
     }
@@ -413,7 +408,6 @@ namespace mongo {
 
     void SMScope::checkBool(bool x) {
         if (! x) {
-            std::cerr << "we done g00fed" << std::endl;
             uassertStatusOK(Status(ErrorCodes::InternalError, "sm failure"));
         }
     }
