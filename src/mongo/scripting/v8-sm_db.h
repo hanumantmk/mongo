@@ -37,6 +37,7 @@
 #include "jscustomallocator.h"
 
 #include "mongo/scripting/sm_class.hpp"
+#include "mongo/bson/bsonobj.h"
 
 namespace mongo {
     struct NumberLongClass {
@@ -77,6 +78,25 @@ namespace mongo {
         };
 
         static constexpr char className[] = "ObjectId";
+        static const int classFlags = JSCLASS_HAS_PRIVATE;
+    };
+
+    struct BSONClass {
+        static void finalize(JSFreeOp *fop, JSObject *obj);
+        static bool enumerate(JSContext* cx, JS::HandleObject obj);
+        static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp);
+
+        struct Methods {
+            static void make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson);
+            static bool toString(JSContext *cx, unsigned argc, JS::Value *vp);
+        };
+
+        static constexpr JSFunctionSpec methods[] = {
+            MONGO_SM_FS(toString),
+            JS_FS_END,
+        };
+
+        static constexpr char className[] = "BSON";
         static const int classFlags = JSCLASS_HAS_PRIVATE;
     };
 }

@@ -236,4 +236,117 @@ namespace mongo {
     bool NumberLongClass::call(JSContext *cx, unsigned argc, JS::Value *vp) {
         return construct(cx, argc, vp);
     }
+
+    class BSONHolder {
+    MONGO_DISALLOW_COPYING(BSONHolder);
+    public:
+        BSONHolder(SMScope* scope, BSONObj obj) :
+            _scope(scope),
+            _obj(obj.getOwned()),
+            _resolved(false)
+        {
+            invariant(scope);
+        }
+
+        SMScope* _scope;
+        const BSONObj _obj;
+        bool _resolved;
+    };
+
+    MONGO_SM_CLASS_MAGIC(BSONClass)
+
+    void BSONClass::Methods::make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson) {
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        scope->_bson.newObject(obj);
+        JS_SetPrivate(obj, new BSONHolder(scope, bson));
+//        JS_DefineFunctions(cx, obj, BSONClass::methods);
+    }
+
+    void BSONClass::finalize(JSFreeOp *fop, JSObject *obj) {
+        auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+        delete holder;
+    }
+
+    bool BSONClass::enumerate(JSContext* cx, JS::HandleObject obj) {
+        auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+        if (holder->_resolved) {
+            return true;
+        }
+
+        BSONObjIterator i(holder->_obj);
+        while (i.more()) {
+            BSONElement e = i.next();
+
+            auto field = e.fieldName();
+
+            JS::RootedValue vp(cx);
+            holder->_scope->checkBool(JS_GetProperty(cx, obj, field, &vp));
+        }
+
+        holder->_resolved = true;
+
+        return true;
+    }
+
+    bool BSONClass::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
+                    bool* resolvedp) {
+
+        auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+        char* cstr;
+        char buf[20];
+
+        if (JSID_IS_STRING(id)) {
+            auto str = JSID_TO_STRING(id);
+
+            cstr = JS_EncodeString(cx, str);
+        } else {
+            auto idx = JSID_TO_INT(id);
+
+            snprintf(buf, sizeof(buf), "%i", idx);
+
+            cstr = buf;
+        }
+
+        auto elem = holder->_obj[cstr];
+
+        JS::RootedValue vp(cx);
+
+        holder->_scope->mongoToSMElement(elem, true, &vp);
+
+        holder->_scope->checkBool(JS_SetPropertyById(cx, obj, id, vp));
+
+        if (JSID_IS_STRING(id)) {
+            JS_free(cx, cstr);
+        }
+
+        *resolvedp = true;
+
+        return true;
+    }
+
+    bool BSONClass::Methods::toString(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
+        auto holder = static_cast<BSONHolder*>(JS_GetPrivate(thisv));
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        std::stringstream ss;
+
+        std::string val = holder->_obj.toString();
+
+        ss << "BSON(\"" << val << "\")";
+
+        std::string ret = ss.str();
+
+        std::cerr << "ret: " << ret << std::endl;
+
+        scope->fromStringData(ret, args.rval());
+
+        return true;
+    }
+
 }

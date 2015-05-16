@@ -227,6 +227,7 @@ namespace mongo {
         ConnectState _connectState;
         SMClass<OIDClass> _oid;
         SMClass<NumberLongClass> _numberLong;
+        SMClass<BSONClass> _bson;
 
     };
 

@@ -107,22 +107,6 @@ namespace mongo {
         return true;
     }
 
-    class BSONHolder {
-    MONGO_DISALLOW_COPYING(BSONHolder);
-    public:
-        BSONHolder(SMScope* scope, BSONObj obj) :
-            _scope(scope),
-            _obj(obj.getOwned()),
-            _resolved(false)
-        {
-            invariant(scope);
-        }
-
-        SMScope* _scope;
-        const BSONObj _obj;
-        bool _resolved;
-    };
-
     class NativeHolder {
     MONGO_DISALLOW_COPYING(NativeHolder);
     public:
@@ -219,84 +203,6 @@ namespace mongo {
                             JS::MutableHandleValue vp) {
                 return false;
             }
-        };
-        struct bsonMethods {
-            static void Finalize(JSFreeOp *fop, JSObject *obj) {
-                auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
-
-                delete holder;
-            }
-
-            static bool Enumerate(JSContext* cx, JS::HandleObject obj) {
-                auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
-
-                if (holder->_resolved) {
-                    return true;
-                }
-
-                BSONObjIterator i(holder->_obj);
-                while (i.more()) {
-                    BSONElement e = i.next();
-
-                    auto field = e.fieldName();
-
-                    JS::RootedValue vp(cx);
-                    holder->_scope->checkBool(JS_GetProperty(cx, obj, field, &vp));
-                }
-
-                holder->_resolved = true;
-
-                return true;
-            }
-            static bool Resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
-                            bool* resolvedp) {
-
-                auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
-
-                char* cstr;
-                char buf[20];
-
-                if (JSID_IS_STRING(id)) {
-                    auto str = JSID_TO_STRING(id);
-
-                    cstr = JS_EncodeString(cx, str);
-                } else {
-                    auto idx = JSID_TO_INT(id);
-
-                    snprintf(buf, sizeof(buf), "%i", idx);
-
-                    cstr = buf;
-                }
-
-                auto elem = holder->_obj[cstr];
-
-                JS::RootedValue vp(cx);
-
-                holder->_scope->mongoToSMElement(elem, true, &vp);
-
-                holder->_scope->checkBool(JS_SetPropertyById(cx, obj, id, vp));
-
-                if (JSID_IS_STRING(id)) {
-                    JS_free(cx, cstr);
-                }
-
-                *resolvedp = true;
-
-                return true;
-            }
-        };
-
-        static constexpr JSClass bsonClass = {
-            "bson",
-            JSCLASS_HAS_PRIVATE,
-            nullptr, //bsonMethods::AddProperty,
-            nullptr, //bsonMethods::DeleteProperty,
-            nullptr,
-            nullptr, //bsonMethods::SetProperty,
-            bsonMethods::Enumerate,
-            bsonMethods::Resolve,
-            nullptr,
-            bsonMethods::Finalize
         };
 
         static constexpr JSClass nativeClass = {
@@ -476,7 +382,8 @@ namespace mongo {
         _pendingGC(false),
         _connectState(NOT),
         _oid(_context),
-        _numberLong(_context)
+        _numberLong(_context),
+        _bson(_context)
     {
         JS_SetInterruptCallback(_runtime, InterruptCallback);
         JS_SetContextPrivate(_context, this);
@@ -1036,15 +943,10 @@ namespace mongo {
 #endif
         }
 
-        JS::RootedObject proto(_context);
-        JS::RootedObject parent(_context);
+        JS::RootedObject obj(_context);
+        BSONClass::Methods::make(_context, &obj, m);
 
-        JS::RootedObject obj(_context, JS_NewObject(_context, &bsonClass, proto, parent));
-
-        JS_SetPrivate(obj, new BSONHolder(this, m));
-
-        out.setObject(*obj.get());
-
+        out.setObjectOrNull(obj.get());
     }
 
     bool hasFunctionIdentifier(StringData code) {
