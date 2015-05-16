@@ -89,9 +89,8 @@ namespace mongo {
             oid->init(s);
         }
 
-        JS::RootedObject parent(cx);
-        JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, scope->_oid.jsclass(), proto, parent));
+        JS::RootedObject thisv(cx);
+        scope->_oid.newObject(&thisv);
 
         JS::RootedValue jsStr(cx);
         scope->fromStringData(oid->toString(), &jsStr);
@@ -173,9 +172,8 @@ namespace mongo {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
         auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
-        JS::RootedObject parent(cx);
-        JS::RootedObject proto(cx);
-        JS::RootedObject thisv(cx, JS_NewObject(cx, scope->_numberLong.jsclass(), proto, parent));
+        JS::RootedObject thisv(cx);
+        scope->_numberLong.newObject(&thisv);
 
         JS::RootedValue floatApprox(cx);
         JS::RootedValue top(cx);
