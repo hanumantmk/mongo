@@ -150,9 +150,8 @@ namespace mongo {
 
         void newObject(JS::MutableHandleObject out) {
             JS::RootedObject parent(_context);
-            JS::RootedObject proto(_context);
 
-            out.set(JS_NewObject(_context, jsclass(), proto, parent));
+            out.set(JS_NewObject(_context, jsclass(), _proto, parent));
         }
 
         void newInstance(JS::MutableHandleObject out) {

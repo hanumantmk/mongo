@@ -242,7 +242,7 @@ namespace mongo {
     public:
         BSONHolder(SMScope* scope, BSONObj obj) :
             _scope(scope),
-            _obj(obj.getOwned()),
+            _obj(obj),
             _resolved(false)
         {
             invariant(scope);
@@ -260,7 +260,6 @@ namespace mongo {
 
         scope->_bson.newObject(obj);
         JS_SetPrivate(obj, new BSONHolder(scope, bson));
-//        JS_DefineFunctions(cx, obj, BSONClass::methods);
     }
 
     void BSONClass::finalize(JSFreeOp *fop, JSObject *obj) {
