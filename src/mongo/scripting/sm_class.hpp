@@ -111,11 +111,8 @@ namespace mongo {
 
         SMClass(JSContext* context) :
             _context(context),
-            _proto(_context)
-        {}
-
-        void install(JS::HandleObject global) {
-            _jsclass = {
+            _proto(_context),
+            _jsclass({
                 T::className,
                 T::classFlags,
                 addrOfaddProperty,
@@ -129,9 +126,11 @@ namespace mongo {
                 addrOfcall,
                 addrOfhasInstance,
                 addrOfconstruct,
-                addrOftrace,
-            };
+                addrOftrace})
+        {
+        }
 
+        void install(JS::HandleObject global) {
             JS::RootedObject proto(_context);
             JS::RootedObject parent(_context);
 
