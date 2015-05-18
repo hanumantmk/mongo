@@ -85,6 +85,7 @@ namespace mongo {
         static void finalize(JSFreeOp *fop, JSObject *obj);
         static bool enumerate(JSContext* cx, JS::HandleObject obj);
         static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp);
+        static bool construct(JSContext *cx, unsigned argc, JS::Value *vp);
 
         struct Methods {
             static void make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson);

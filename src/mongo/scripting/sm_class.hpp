@@ -66,7 +66,8 @@ struct name##_or_nullptr<T, typename std::enable_if<smUtils::has_##name<T>::valu
 #define INSTALL_POINTER(name) \
     static constexpr auto addrOf##name = smUtils::name##_or_nullptr<T>::value;
 
-#define MONGO_JS_FLAGS (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
+//#define MONGO_JS_FLAGS (JSPROP_ENUMERATE | JSPROP_READONLY | JSPROP_PERMANENT)
+#define MONGO_JS_FLAGS 0
 
 #define MONGO_SM_FS(name) \
     JS_FS(#name, Methods::name, 0, MONGO_JS_FLAGS)

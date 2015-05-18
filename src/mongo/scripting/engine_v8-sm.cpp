@@ -85,7 +85,7 @@ namespace mongo {
             auto str = scope->toSTLString(JS::ToString(cx, args.get(i)));
             ss << str;
         }
-        ss << "\n";
+        ss << std::endl;
 
         return true;
     }
@@ -430,6 +430,10 @@ namespace mongo {
     }
 
     std::string SMScope::toSTLString(JSString* str) {
+        if (str == NULL) {
+            return std::string("[unknown]");
+        }
+
         auto deleter= [&](char* ptr){ JS_free(_context, ptr); };
 
         std::unique_ptr<char, decltype(deleter)> cstr(JS_EncodeString(_context, str), deleter);

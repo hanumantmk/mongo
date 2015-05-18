@@ -258,18 +258,25 @@ namespace mongo {
     void BSONClass::Methods::make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson) {
         auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
-        scope->_bson.newObject(obj);
+        scope->_bson.newInstance(obj);
         JS_SetPrivate(obj, new BSONHolder(scope, bson));
     }
 
     void BSONClass::finalize(JSFreeOp *fop, JSObject *obj) {
         auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+        if (! holder) {
+            return;
+        }
 
         delete holder;
     }
 
     bool BSONClass::enumerate(JSContext* cx, JS::HandleObject obj) {
         auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+        if (! holder) {
+            return false;
+        }
 
         if (holder->_resolved) {
             return true;
@@ -293,7 +300,12 @@ namespace mongo {
     bool BSONClass::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
                     bool* resolvedp) {
 
+        bool rval = true;
         auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
+
+        if (! holder) {
+            return false;
+        }
 
         char* cstr;
         char buf[20];
@@ -310,20 +322,36 @@ namespace mongo {
             cstr = buf;
         }
 
-        auto elem = holder->_obj[cstr];
+        if (holder->_obj.hasField(cstr)) {
+            auto elem = holder->_obj[cstr];
 
-        JS::RootedValue vp(cx);
+            JS::RootedValue vp(cx);
 
-        holder->_scope->mongoToSMElement(elem, true, &vp);
+            holder->_scope->mongoToSMElement(elem, true, &vp);
 
-        holder->_scope->checkBool(JS_SetPropertyById(cx, obj, id, vp));
+            rval = JS_SetPropertyById(cx, obj, id, vp);
+
+            *resolvedp = true;
+        } else {
+            *resolvedp = false;
+        }
 
         if (JSID_IS_STRING(id)) {
             JS_free(cx, cstr);
         }
 
-        *resolvedp = true;
+        return rval;
+    }
 
+    bool BSONClass::construct(JSContext *cx, unsigned argc, JS::Value *vp) {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
+
+        JS::RootedObject thisv(cx);
+        scope->_bson.newObject(&thisv);
+
+        args.rval().setObjectOrNull(thisv);
+        
         return true;
     }
 
@@ -331,6 +359,10 @@ namespace mongo {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
         JS::RootedObject thisv(cx, args.thisv().toObjectOrNull());
         auto holder = static_cast<BSONHolder*>(JS_GetPrivate(thisv));
+        if (! holder) {
+            return false;
+        }
+
         auto scope = static_cast<SMScope*>(JS_GetContextPrivate(cx));
 
         std::stringstream ss;
@@ -340,8 +372,6 @@ namespace mongo {
         ss << "BSON(\"" << val << "\")";
 
         std::string ret = ss.str();
-
-        std::cerr << "ret: " << ret << std::endl;
 
         scope->fromStringData(ret, args.rval());
 
