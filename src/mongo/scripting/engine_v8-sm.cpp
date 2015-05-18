@@ -1205,6 +1205,7 @@ namespace mongo {
     void SMScope::installBSONTypes() {
         _oid.install(_global);
         _numberLong.install(_global);
+        _bson.install(_global);
     }
 
     void SMScope::installDBAccess() {
