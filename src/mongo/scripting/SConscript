@@ -4,6 +4,7 @@ Import([
     'env',
     'serverJs',
     'usev8',
+    'usemozjs',
     'v8suffix',
 ])
 
@@ -64,6 +65,28 @@ if usev8:
             'bson_template_evaluator',
             'scripting_common',
             '$BUILD_DIR/third_party/shim_v8',
+            '$BUILD_DIR/mongo/shell/mongojs',
+            '$BUILD_DIR/mongo/db/service_context',
+        ],
+    )
+elif usemozjs:
+    scriptingEnv = env.Clone()
+    scriptingEnv.InjectThirdPartyIncludePaths(libraries=['mozjs'])
+
+    if not env.TargetOSIs('windows'):
+        scriptingEnv.Prepend(CCFLAGS=[
+            '-Wno-non-virtual-dtor',
+            '-Wno-invalid-offsetof',
+        ])
+
+    scriptingEnv.Library(
+        target='scripting',
+        source=[
+        ],
+        LIBDEPS=[
+            'bson_template_evaluator',
+            'scripting_common',
+            '$BUILD_DIR/third_party/shim_mozjs',
             '$BUILD_DIR/mongo/shell/mongojs',
             '$BUILD_DIR/mongo/db/service_context',
         ],

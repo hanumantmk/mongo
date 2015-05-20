@@ -214,7 +214,7 @@ add_option('wiredtiger',
 )
 
 # library choices
-js_engine_choices = ['v8-3.12', 'v8-3.25', 'none']
+js_engine_choices = ['v8-3.12', 'v8-3.25', 'mozjs', 'none']
 add_option('js-engine',
     choices=js_engine_choices,
     default=js_engine_choices[0],
@@ -752,12 +752,14 @@ jsEngine = get_option( "js-engine")
 
 serverJs = get_option( "server-js" ) == "on"
 
-usev8 = (jsEngine != 'none')
+usev8 = (jsEngine.startswith('v8'))
+
+usemozjs = (jsEngine.startswith('mozjs'))
 
 v8version = jsEngine[3:] if jsEngine.startswith('v8-') else 'none'
 v8suffix = '' if v8version == '3.12' else '-' + v8version
 
-if not serverJs and not usev8:
+if not serverJs and not usev8 and not usemozjs:
     print("Warning: --server-js=off is not needed with --js-engine=none")
 
 # We defer building the env until we have determined whether we want certain values. Some values
@@ -2284,6 +2286,7 @@ Export("get_option")
 Export("has_option use_system_version_of_library")
 Export("serverJs")
 Export("usev8")
+Export("usemozjs")
 Export("v8version v8suffix")
 Export("boostSuffix")
 Export('module_sconscripts')
