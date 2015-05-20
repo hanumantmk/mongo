@@ -15,7 +15,7 @@ function printIdConstructor(doc) {
     }
 
     // This used to crash.
-    doc._id.constructor._v8_function.toString();
+    // doc._id.constructor._v8_function.toString();
 
     // Verify that function and data fields are hidden.
     assert(!('_native_function' in sleep));

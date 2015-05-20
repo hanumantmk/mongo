@@ -357,7 +357,7 @@ var _bulk_api_module = (function() {
     if(!(this instanceof BulkWriteError))
         return new BulkWriteError(bulkResult, singleBatchType, writeConcern, message);
       
-    Error.captureStackTrace(this, this.constructor);
+//    Error.captureStackTrace(this, this.constructor);
     this.name = 'BulkWriteError';
     this.message = message || 'unknown bulk write error';
       
@@ -403,7 +403,7 @@ var _bulk_api_module = (function() {
     defineReadOnlyProperty(this, "code", commandError.code);
     defineReadOnlyProperty(this, "errmsg", commandError.errmsg);
 
-    Error.captureStackTrace(this, this.constructor);
+//    Error.captureStackTrace(this, this.constructor);
     this.name = 'WriteCommandError';
     this.message = this.errmsg;
 
