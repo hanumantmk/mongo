@@ -211,7 +211,8 @@ if usemozjs:
     mozjsEnv.SConscript('mozjs/SConscript', exports={'env' : mozjsEnv })
     mozjsEnv = mozjsEnv.Clone(
         LIBDEPS=[
-            'mozjs/mozjs'
+            'mozjs/mozjs',
+            'shim_zlib',
         ])
 
     mozjsEnv.Library(

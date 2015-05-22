@@ -3,6 +3,7 @@
 Import("env")
 
 env = env.Clone()
+env.InjectThirdPartyIncludePaths(libraries=['zlib'])
 
 def removeIfPresent(lst, item):
     try:

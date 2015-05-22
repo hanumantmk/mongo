@@ -506,46 +506,6 @@ namespace mongo {
         return static_cast<V8Scope*>(isolate->GetData());
     }
 
-    class V8ScriptEngine : public ScriptEngine {
-    public:
-        V8ScriptEngine();
-        virtual ~V8ScriptEngine();
-        virtual Scope* createScope() { return new V8Scope(this); }
-        virtual void runTest() {}
-        bool utf8Ok() const { return true; }
-
-        /**
-         * Interrupt a single active v8 execution context
-         * NB: To interrupt a context, we must acquire the following locks (in order):
-         *       - mutex to protect the the map of all scopes (_globalInterruptLock)
-         *       - mutex to protect the scope that's being interrupted (_interruptLock)
-         * The scope will be removed from the map upon destruction, and the op id
-         * will be updated if the scope is ever reused from a pool.
-         */
-        virtual void interrupt(unsigned opId);
-
-        /**
-         * Interrupt all v8 contexts (and isolates).  @see interrupt().
-         */
-        virtual void interruptAll();
-
-    private:
-        friend class V8Scope;
-
-        std::string printKnownOps_inlock();
-
-        /**
-         * Get the deadline monitor instance for the v8 ScriptEngine
-         */
-        DeadlineMonitor<V8Scope>* getDeadlineMonitor() { return &_deadlineMonitor; }
-
-        typedef std::map<unsigned, V8Scope*> OpIdToScopeMap;
-        mongo::mutex _globalInterruptLock;  // protects map of all operation ids -> scope
-        OpIdToScopeMap _opToScopeMap;       // map of mongo op ids to scopes (protected by
-                                            // _globalInterruptLock).
-        DeadlineMonitor<V8Scope> _deadlineMonitor;
-    };
-
     class BSONHolder {
     MONGO_DISALLOW_COPYING(BSONHolder);
     public:
