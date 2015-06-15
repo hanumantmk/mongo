@@ -1,6 +1,4 @@
-//engine_v8.h
-
-/*    Copyright 2009 10gen Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -29,18 +27,34 @@
 
 #pragma once
 
-#include <v8.h>
-#include <vector>
+#include "mongo/scripting/mozjs/wraptype.h"
 
-#include "mongo/base/disallow_copying.h"
-#include "mongo/base/string_data.h"
-#include "mongo/client/dbclientinterface.h"
-#include "mongo/client/dbclientcursor.h"
-#include "mongo/platform/unordered_map.h"
 #include "mongo/scripting/engine.h"
-#include "mongo/scripting/v8_deadline_monitor.h"
-#include "mongo/scripting/v8_profiler.h"
 
 namespace mongo {
+namespace mozjs {
+struct NativeFunctionInfo {
+    static void construct(JSContext* cx, JS::CallArgs args);
+    static void call(JSContext* cx, JS::CallArgs args);
+    static void finalize(JSFreeOp* fop, JSObject* obj);
 
-}
+    static constexpr char inheritFrom[] = "Function";
+    static constexpr char className[] = "NativeFunction";
+    static const int classFlags = JSCLASS_HAS_PRIVATE;
+
+    struct Functions {
+        MONGO_DEFINE_JS_FUNCTION(toString);
+    };
+
+    static constexpr JSFunctionSpec methods[] = {
+        MONGO_ATTACH_JS_FUNCTION(toString), JS_FS_END,
+    };
+
+    static void make(JSContext* cx,
+                     JS::MutableHandleObject obj,
+                     NativeFunction function,
+                     void* data);
+};
+
+}  // namespace mozjs
+}  // namespace mongo

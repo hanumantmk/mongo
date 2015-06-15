@@ -1,6 +1,4 @@
-//engine_v8.h
-
-/*    Copyright 2009 10gen Inc.
+/*    Copyright 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -29,18 +27,24 @@
 
 #pragma once
 
-#include <v8.h>
-#include <vector>
-
-#include "mongo/base/disallow_copying.h"
-#include "mongo/base/string_data.h"
-#include "mongo/client/dbclientinterface.h"
-#include "mongo/client/dbclientcursor.h"
-#include "mongo/platform/unordered_map.h"
-#include "mongo/scripting/engine.h"
-#include "mongo/scripting/v8_deadline_monitor.h"
-#include "mongo/scripting/v8_profiler.h"
+#include "mongo/scripting/mozjs/wraptype.h"
 
 namespace mongo {
+namespace mozjs {
 
-}
+struct ObjectInfo {
+    struct Functions {
+        MONGO_DEFINE_JS_FUNCTION(bsonsize);
+        MONGO_DEFINE_JS_FUNCTION(invalidForStorage);
+    };
+
+    static constexpr JSFunctionSpec methods[] = {
+        MONGO_ATTACH_JS_FUNCTION(bsonsize), MONGO_ATTACH_JS_FUNCTION(invalidForStorage), JS_FS_END,
+    };
+
+    static constexpr char className[] = "Object";
+    static constexpr InstallType installType = InstallType::OverNative;
+};
+
+}  // namespace mozjs
+}  // namespace mongo
