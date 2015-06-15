@@ -179,15 +179,6 @@ namespace mongo {
 
     // ----- internal -----
 
-    v8::Local<v8::Value> V8Scope::newId(const OID &id) {
-        v8::HandleScope handle_scope;
-        v8::Handle<v8::Function> idCons = ObjectIdFT()->GetFunction();
-        v8::Handle<v8::Value> argv[1];
-        const string& idString = id.toString();
-        argv[0] = v8::String::New(idString.c_str(), idString.length());
-        return handle_scope.Close(idCons->NewInstance(1, argv));
-    }
-
     // --- random utils ----
 
     v8::Handle<v8::Value> V8Scope::startCpuProfiler(V8Scope* scope, const v8::Arguments& args) {

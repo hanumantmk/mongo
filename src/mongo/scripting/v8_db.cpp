@@ -113,34 +113,6 @@ namespace mongo {
         return cursor;
     }
 
-    v8::Handle<v8::Value> objectIdInit(V8Scope* scope, const v8::Arguments& args) {
-        if (!args.IsConstructCall()) {
-            v8::Handle<v8::Function> f = scope->ObjectIdFT()->GetFunction();
-            return newInstance(f, args);
-        }
-
-        v8::Handle<v8::Object> it = args.This();
-        verify(scope->ObjectIdFT()->HasInstance(it));
-
-        OID oid;
-        if (args.Length() == 0) {
-            oid.init();
-        }
-        else {
-            string s = toSTLString(args[0]);
-            try {
-                Scope::validateObjectIdString(s);
-            }
-            catch (const MsgAssertionException& m) {
-                return v8AssertionException(m.toString());
-            }
-            oid.init(s);
-        }
-
-        it->ForceSet(scope->v8StringData("str"), v8::String::New(oid.toString().c_str()));
-        return it;
-    }
-
     v8::Handle<v8::Value> dbTimestampInit(V8Scope* scope, const v8::Arguments& args) {
         if (!args.IsConstructCall()) {
             v8::Handle<v8::Function> f = scope->TimestampFT()->GetFunction();
