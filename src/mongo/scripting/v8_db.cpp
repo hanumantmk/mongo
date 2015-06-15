@@ -664,25 +664,6 @@ namespace mongo {
         return it;
     }
 
-    v8::Handle<v8::Value> dbPointerInit(V8Scope* scope, const v8::Arguments& args) {
-        if (!args.IsConstructCall()) {
-            v8::Handle<v8::Function> f = scope->DBPointerFT()->GetFunction();
-            return newInstance(f, args);
-        }
-
-        v8::Handle<v8::Object> it = args.This();
-        verify(scope->DBPointerFT()->HasInstance(it));
-
-        argumentCheck(args.Length() == 2, "DBPointer needs 2 arguments")
-        argumentCheck(args[0]->IsString(), "DBPointer 1st parameter must be a string")
-        argumentCheck(scope->ObjectIdFT()->HasInstance(args[1]),
-                      "DBPointer 2nd parameter must be an ObjectId")
-
-        it->ForceSet(scope->v8StringData("ns"), args[0]);
-        it->ForceSet(scope->v8StringData("id"), args[1]);
-        return it;
-    }
-
     v8::Handle<v8::Value> dbTimestampInit(V8Scope* scope, const v8::Arguments& args) {
         if (!args.IsConstructCall()) {
             v8::Handle<v8::Function> f = scope->TimestampFT()->GetFunction();
