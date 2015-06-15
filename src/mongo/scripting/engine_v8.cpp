@@ -59,11 +59,6 @@ namespace mongo {
     const int V8Scope::objectDepthLimit;
 #endif
 
-    v8::Handle<v8::FunctionTemplate> getTimestampFunctionTemplate(V8Scope* scope) {
-        v8::Handle<v8::FunctionTemplate> ts = scope->createV8Function(dbTimestampInit);
-        return ts;
-    }
-
     std::string V8Scope::v8ExceptionToSTLString(const v8::TryCatch* try_catch) {
         stringstream ss;
         v8::Local<v8::Value> stackTrace = try_catch->StackTrace();

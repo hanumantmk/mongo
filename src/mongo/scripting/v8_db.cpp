@@ -113,42 +113,6 @@ namespace mongo {
         return cursor;
     }
 
-    v8::Handle<v8::Value> dbTimestampInit(V8Scope* scope, const v8::Arguments& args) {
-        if (!args.IsConstructCall()) {
-            v8::Handle<v8::Function> f = scope->TimestampFT()->GetFunction();
-            return newInstance(f, args);
-        }
-
-        v8::Handle<v8::Object> it = args.This();
-        verify(scope->TimestampFT()->HasInstance(it));
-
-        if (args.Length() == 0) {
-            it->ForceSet(scope->v8StringData("t"), v8::Number::New(0));
-            it->ForceSet(scope->v8StringData("i"), v8::Number::New(0));
-        }
-        else if (args.Length() == 2) {
-            if (!args[0]->IsNumber()) {
-                return v8AssertionException("Timestamp time must be a number");
-            }
-            if (!args[1]->IsNumber()) {
-                return v8AssertionException("Timestamp increment must be a number");
-            }
-            int64_t t = args[0]->IntegerValue();
-            int64_t largestVal = int64_t(Timestamp::max().getSecs());
-            if( t > largestVal )
-                return v8AssertionException( str::stream()
-                        << "The first argument must be in seconds; "
-                        << t << " is too large (max " << largestVal << ")");
-            it->ForceSet(scope->v8StringData("t"), args[0]);
-            it->ForceSet(scope->v8StringData("i"), args[1]);
-        }
-        else {
-            return v8AssertionException("Timestamp needs 0 or 2 arguments");
-        }
-
-        return it;
-    }
-
     v8::Handle<v8::Value> v8ObjectInvalidForStorage(V8Scope* scope, const v8::Arguments& args) {
         argumentCheck(args.Length() == 1, "invalidForStorage needs 1 argument")
         if (args[0]->IsNull()) {
