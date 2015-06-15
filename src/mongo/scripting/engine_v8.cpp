@@ -59,15 +59,6 @@ namespace mongo {
     const int V8Scope::objectDepthLimit;
 #endif
 
-    v8::Handle<v8::FunctionTemplate> getNumberLongFunctionTemplate(V8Scope* scope) {
-        v8::Handle<v8::FunctionTemplate> numberLong = scope->createV8Function(numberLongInit);
-        v8::Handle<v8::ObjectTemplate> proto = numberLong->PrototypeTemplate();
-        scope->injectV8Method("valueOf", numberLongValueOf, proto);
-        scope->injectV8Method("toNumber", numberLongToNumber, proto);
-        scope->injectV8Method("toString", numberLongToString, proto);
-        return numberLong;
-    }
-
     v8::Handle<v8::FunctionTemplate> getTimestampFunctionTemplate(V8Scope* scope) {
         v8::Handle<v8::FunctionTemplate> ts = scope->createV8Function(dbTimestampInit);
         return ts;
