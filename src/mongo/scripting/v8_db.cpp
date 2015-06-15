@@ -269,48 +269,6 @@ namespace mongo {
         return v8::String::New(ret.c_str());
     }
 
-    v8::Handle<v8::Value> numberIntInit(V8Scope* scope, const v8::Arguments& args) {
-        if (!args.IsConstructCall()) {
-            v8::Handle<v8::Function> f = scope->NumberIntFT()->GetFunction();
-            return newInstance(f, args);
-        }
-
-        v8::Handle<v8::Object> it = args.This();
-        verify(scope->NumberIntFT()->HasInstance(it));
-
-        argumentCheck(args.Length() == 0 || args.Length() == 1, "NumberInt needs 0 or 1 arguments")
-        if (args.Length() == 0) {
-            it->SetHiddenValue(v8::String::New("__NumberInt"), v8::Number::New(0));
-        }
-        else if (args.Length() == 1) {
-            it->SetHiddenValue(v8::String::New("__NumberInt"), args[0]->ToInt32());
-        }
-        return it;
-    }
-
-    int numberIntVal(V8Scope* scope, const v8::Handle<v8::Object>& it) {
-        verify(scope->NumberIntFT()->HasInstance(it));
-        v8::Handle<v8::Value> value = it->GetHiddenValue(v8::String::New("__NumberInt"));
-        verify(!value.IsEmpty());
-        return value->Int32Value();
-    }
-
-    v8::Handle<v8::Value> numberIntValueOf(V8Scope* scope, const v8::Arguments& args) {
-        v8::Handle<v8::Object> it = args.This();
-        return v8::Integer::New(numberIntVal(scope, it));
-    }
-
-    v8::Handle<v8::Value> numberIntToNumber(V8Scope* scope, const v8::Arguments& args) {
-        return numberIntValueOf(scope, args);
-    }
-
-    v8::Handle<v8::Value> numberIntToString(V8Scope* scope, const v8::Arguments& args) {
-        v8::Handle<v8::Object> it = args.This();
-        int val = numberIntVal(scope, it);
-        string ret = str::stream() << "NumberInt(" << val << ")";
-        return v8::String::New(ret.c_str());
-    }
-
     v8::Handle<v8::Value> v8ObjectInvalidForStorage(V8Scope* scope, const v8::Arguments& args) {
         argumentCheck(args.Length() == 1, "invalidForStorage needs 1 argument")
         if (args[0]->IsNull()) {

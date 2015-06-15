@@ -68,15 +68,6 @@ namespace mongo {
         return numberLong;
     }
 
-    v8::Handle<v8::FunctionTemplate> getNumberIntFunctionTemplate(V8Scope* scope) {
-        v8::Handle<v8::FunctionTemplate> numberInt = scope->createV8Function(numberIntInit);
-        v8::Handle<v8::ObjectTemplate> proto = numberInt->PrototypeTemplate();
-        scope->injectV8Method("valueOf", numberIntValueOf, proto);
-        scope->injectV8Method("toNumber", numberIntToNumber, proto);
-        scope->injectV8Method("toString", numberIntToString, proto);
-        return numberInt;
-    }
-
     v8::Handle<v8::FunctionTemplate> getTimestampFunctionTemplate(V8Scope* scope) {
         v8::Handle<v8::FunctionTemplate> ts = scope->createV8Function(dbTimestampInit);
         return ts;
