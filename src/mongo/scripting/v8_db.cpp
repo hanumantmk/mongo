@@ -566,28 +566,6 @@ namespace mongo {
         return it;
     }
 
-    v8::Handle<v8::Value> dbRefInit(V8Scope* scope, const v8::Arguments& args) {
-        if (!args.IsConstructCall()) {
-            v8::Handle<v8::Function> f = scope->DBRefFT()->GetFunction();
-            return newInstance(f, args);
-        }
-
-        v8::Handle<v8::Object> it = args.This();
-        verify(scope->DBRefFT()->HasInstance(it));
-
-        argumentCheck(args.Length() >= 2 && args.Length() <= 3, "DBRef needs 2 or 3 arguments")
-        argumentCheck(args[0]->IsString(), "DBRef 1st parameter must be a string")
-        it->ForceSet(scope->v8StringData("$ref"), args[0]);
-        it->ForceSet(scope->v8StringData("$id"),  args[1]);
-
-        if (args.Length() == 3) {
-            argumentCheck(args[2]->IsString(), "DBRef 3rd parameter must be a string")
-            it->ForceSet(scope->v8StringData("$db"), args[2]);
-        }
-
-        return it;
-    }
-
     v8::Handle<v8::Value> dbTimestampInit(V8Scope* scope, const v8::Arguments& args) {
         if (!args.IsConstructCall()) {
             v8::Handle<v8::Function> f = scope->TimestampFT()->GetFunction();
