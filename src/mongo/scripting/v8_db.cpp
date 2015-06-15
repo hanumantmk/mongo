@@ -92,17 +92,6 @@ namespace mongo {
         return handle_scope.Close(f->NewInstance(argc, argv));
     }
 
-    v8::Handle<v8::FunctionTemplate> getInternalCursorFunctionTemplate(V8Scope* scope) {
-        v8::Handle<v8::FunctionTemplate> ic = scope->createV8Function(internalCursorCons);
-        ic->InstanceTemplate()->SetInternalFieldCount(1);
-        v8::Handle<v8::ObjectTemplate> icproto = ic->PrototypeTemplate();
-        scope->injectV8Method("next", internalCursorNext, icproto);
-        scope->injectV8Method("hasNext", internalCursorHasNext, icproto);
-        scope->injectV8Method("objsLeftInBatch", internalCursorObjsLeftInBatch, icproto);
-        scope->injectV8Method("readOnly", internalCursorReadOnly, icproto);
-        return ic;
-    }
-
     v8::Handle<v8::FunctionTemplate> getMongoFunctionTemplate(V8Scope* scope, bool local) {
         v8::Handle<v8::FunctionTemplate> mongo;
         if (local)
@@ -546,56 +535,6 @@ namespace mongo {
         verify(args.This()->InternalFieldCount() == 1);
         v8::Local<v8::External> c = v8::External::Cast(*(args.This()->GetInternalField(0)));
         mongo::DBClientCursor* cursor = static_cast<mongo::DBClientCursor*>(c->Value());
-        return cursor;
-    }
-
-    v8::Handle<v8::Value> internalCursorCons(V8Scope* scope, const v8::Arguments& args) {
-        return v8::Undefined();
-    }
-
-    /**
-     * cursor.next()
-     */
-    v8::Handle<v8::Value> internalCursorNext(V8Scope* scope, const v8::Arguments& args) {
-        mongo::DBClientCursor* cursor = getCursor(scope, args);
-        if (! cursor)
-            return v8::Undefined();
-        BSONObj o = cursor->next();
-        bool ro = false;
-        if (args.This()->Has(v8::String::New("_ro")))
-            ro = args.This()->Get(v8::String::New("_ro"))->BooleanValue();
-        return scope->mongoToLZV8(o, ro);
-    }
-
-    /**
-     * cursor.hasNext()
-     */
-    v8::Handle<v8::Value> internalCursorHasNext(V8Scope* scope, const v8::Arguments& args) {
-        mongo::DBClientCursor* cursor = getCursor(scope, args);
-        if (! cursor)
-            return v8::Boolean::New(false);
-        return v8::Boolean::New(cursor->more());
-    }
-
-    /**
-     * cursor.objsLeftInBatch()
-     */
-    v8::Handle<v8::Value> internalCursorObjsLeftInBatch(V8Scope* scope,
-                                                        const v8::Arguments& args) {
-        mongo::DBClientCursor* cursor = getCursor(scope, args);
-        if (! cursor)
-            return v8::Number::New(0.0);
-        return v8::Number::New(static_cast<double>(cursor->objsLeftInBatch()));
-    }
-
-    /**
-     * cursor.readOnly()
-     */
-    v8::Handle<v8::Value> internalCursorReadOnly(V8Scope* scope, const v8::Arguments& args) {
-        verify(scope->InternalCursorFT()->HasInstance(args.This()));
-
-        v8::Local<v8::Object> cursor = args.This();
-        cursor->ForceSet(v8::String::New("_ro"), v8::Boolean::New(true));
         return cursor;
     }
 
