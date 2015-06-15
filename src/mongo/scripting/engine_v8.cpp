@@ -77,16 +77,6 @@ namespace mongo {
         return numberInt;
     }
 
-    v8::Handle<v8::FunctionTemplate> getBinDataFunctionTemplate(V8Scope* scope) {
-        v8::Handle<v8::FunctionTemplate> binData = scope->createV8Function(binDataInit);
-        binData->InstanceTemplate()->SetInternalFieldCount(1);
-        v8::Handle<v8::ObjectTemplate> proto = binData->PrototypeTemplate();
-        scope->injectV8Method("toString", binDataToString, proto);
-        scope->injectV8Method("base64", binDataToBase64, proto);
-        scope->injectV8Method("hex", binDataToHex, proto);
-        return binData;
-    }
-
     v8::Handle<v8::FunctionTemplate> getTimestampFunctionTemplate(V8Scope* scope) {
         v8::Handle<v8::FunctionTemplate> ts = scope->createV8Function(dbTimestampInit);
         return ts;
