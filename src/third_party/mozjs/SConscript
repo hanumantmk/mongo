@@ -63,17 +63,13 @@ sources = [
     "extract/js/src/jsmath.cpp",
     "extract/js/src/jsutil.cpp",
     "extract/js/src/mfbt/Unified_cpp_mfbt0.cpp",
+    "extract/js/src/perf/pm_stub.cpp",
     "extract/js/src/vm/TraceLogging.cpp",
     "extract/js/src/vm/TraceLoggingGraph.cpp",
     "extract/js/src/vm/TraceLoggingTypes.cpp",
     "extract/mfbt/Compression.cpp",
     "extract/mfbt/decimal/Decimal.cpp",
 ]
-
-if env.TargetOSIs("linux"):
-    sources.append("extract/js/src/perf/pm_linux.cpp")
-else:
-    sources.append("extract/js/src/perf/pm_stub.cpp")
 
 sources.extend(Glob('platform/' + env["TARGET_ARCH"] + "/" + env["TARGET_OS"] + "/build/*.cpp")),
 
