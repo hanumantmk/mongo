@@ -19,7 +19,7 @@
 # - 'build_variant' (references the executing task's buildvariant).
 # - 'config_root' (references the root directory for the executor's configuration artifacts).
 
-stepback: true
+stepback: false
 
 ## Some variables for convenience:
 variables:

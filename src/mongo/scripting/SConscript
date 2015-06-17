@@ -99,6 +99,7 @@ elif usemozjs:
             'mozjs/global.cpp',
             'mozjs/idwrapper.cpp',
             'mozjs/implscope.cpp',
+            'mozjs/jscustomallocator.cpp',
             'mozjs/jsstringwrapper.cpp',
             'mozjs/maxkey.cpp',
             'mozjs/minkey.cpp',

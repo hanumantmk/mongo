@@ -68,7 +68,6 @@ sources = [
     "extract/js/src/vm/TraceLoggingTypes.cpp",
     "extract/mfbt/Compression.cpp",
     "extract/mfbt/decimal/Decimal.cpp",
-    "jscustomallocator/jscustomallocator.cpp",
 ]
 
 if env.TargetOSIs("linux"):
