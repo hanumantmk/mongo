@@ -7,9 +7,6 @@
 #ifndef vm_PosixNSPR_h
 #define vm_PosixNSPR_h
 
-#ifdef JS_POSIX_NSPR
-
-#include <pthread.h>
 #include <stdint.h>
 
 namespace nspr {
@@ -136,7 +133,5 @@ PR_TicksPerSecond();
 
 PRStatus
 PR_WaitCondVar(PRCondVar* cvar, uint32_t timeout);
-
-#endif /* JS_POSIX_NSPR */
 
 #endif /* vm_PosixNSPR_h */

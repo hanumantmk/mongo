@@ -110,6 +110,7 @@ elif usemozjs:
             'mozjs/objectwrapper.cpp',
             'mozjs/object.cpp',
             'mozjs/oid.cpp',
+            'mozjs/PosixNSPR.cpp',
             'mozjs/proxyscope.cpp',
             'mozjs/regexp.cpp',
             'mozjs/timestamp.cpp',

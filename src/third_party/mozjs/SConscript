@@ -49,7 +49,7 @@ env.Prepend(CPPPATH=[
     'extract/mfbt',
     'extract/intl/icu/source/common',
     'include',
-    'jscustomallocator',
+    'mongo_sources',
     'platform/' + env["TARGET_ARCH"] + "/" + env["TARGET_OS"] + "/build",
     'platform/' + env["TARGET_ARCH"] + "/" + env["TARGET_OS"] + "/include",
 ])

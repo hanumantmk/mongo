@@ -74,6 +74,11 @@ rm -rf \
     extract/js/src/tests \
     extract/js/src/_virtualenv
 
+# stuff we have to replace
+rm -rf \
+    extract/js/src/vm/PosixNSPR.cpp \
+    extract/js/src/vm/PosixNSPR.h \
+
 # this is all of the EXPORTS files from the moz.build's
 mkdir include
 cp extract/js/src/js.msg include
