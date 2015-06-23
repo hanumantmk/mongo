@@ -1,29 +1,34 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
+
+#include "mongo/platform/basic.h"
+
+#include "mongo/scripting/mozjs/implscope.h"
 
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
@@ -53,62 +58,80 @@ extern const JSFile assert;
 
 namespace mozjs {
 
-void ImplScope::_reportError(JSContext* cx, const char* message, JSErrorReport* report) {
+namespace {
+
+/**
+ * The maximum amount of memory to be given out per thread to mozilla. We
+ * manage this by trapping all calls to malloc, free, etc. and keeping track of
+ * counts in some thread locals
+ */
+const int kMallocMemoryLimit = 1024 * 1024 * 1024;
+
+/**
+ * The number of bytes to allocate after which garbage collection is run
+ */
+const int kMaxBytesBeforeGC = 8 * 1024 * 1024;
+
+/**
+ * The size, in bytes, of each "stack chunk". 8192 is the recommended amount
+ * from mozilla
+ */
+const int kStackChunkSize = 8192;
+
+}  // namespace
+
+struct MozJSImplScope::MozJSEntry {
+    MozJSEntry(MozJSImplScope* scope) : ar(scope->_context), ac(scope->_context, scope->_global) {}
+
+    JSAutoRequest ar;
+    JSAutoCompartment ac;
+};
+
+void MozJSImplScope::_reportError(JSContext* cx, const char* message, JSErrorReport* report) {
     auto scope = getScope(cx);
 
     if (!JSREPORT_IS_WARNING(report->flags)) {
-        // TODO not cerr
-        std::cerr << JS::FormatStackDump(cx, nullptr, true, true, false) << std::endl;
-
-        scope->_status = Status(ErrorCodes::InternalError, message);
+        scope->_status =
+            Status(report->errorNumber ? static_cast<ErrorCodes::Error>(report->errorNumber)
+                                       : ErrorCodes::JSInterpreterFailure,
+                   str::stream() << message << ":\n"
+                                 << JS::FormatStackDump(cx, nullptr, true, true, false) << "\n");
     }
 }
 
-std::string ImplScope::getError() {
+std::string MozJSImplScope::getError() {
     return "";
 }
 
-void ImplScope::registerOperation(OperationContext* txn) {
-    boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
-
+void MozJSImplScope::registerOperation(OperationContext* txn) {
     invariant(_opId == 0);
     _opId = txn->getOpID();
-    _engine->_opToScopeMap[_opId] = this;
-    LOG(2) << "MSScope " << static_cast<const void*>(this) << " registered for op " << _opId;
-    Status status = txn->checkForInterruptNoAssert();
-    if (!status.isOK()) {
-        kill();
-    }
+
+    _engine->registerOperation(txn, this);
 }
 
-void ImplScope::unregisterOperation() {
-    boost::lock_guard<boost::mutex> giLock(_engine->_globalInterruptLock);
-    LOG(2) << "ImplScope " << static_cast<const void*>(this) << " unregistered for op " << _opId
-           << std::endl;
+void MozJSImplScope::unregisterOperation() {
     if (_opId != 0) {
-        // scope is currently associated with an operation id
-        ScriptEngine::OpIdToScopeMap::iterator it = _engine->_opToScopeMap.find(_opId);
-        if (it != _engine->_opToScopeMap.end())
-            _engine->_opToScopeMap.erase(it);
+        _engine->unregisterOperation(_opId);
+
         _opId = 0;
     }
 }
 
-void ImplScope::kill() {
+void MozJSImplScope::kill() {
     _pendingKill.store(true);
     JS_RequestInterruptCallback(_runtime);
 }
 
-/** check if there is a pending killOp request */
-bool ImplScope::isKillPending() const {
+bool MozJSImplScope::isKillPending() const {
     return _pendingKill.load();
 }
 
-OperationContext* ImplScope::getOpContext() const {
+OperationContext* MozJSImplScope::getOpContext() const {
     return _opCtx;
 }
 
-bool ImplScope::_interruptCallback(JSContext* cx) {
+bool MozJSImplScope::_interruptCallback(JSContext* cx) {
     auto scope = getScope(cx);
 
     if (scope->_pendingGC.load()) {
@@ -117,61 +140,53 @@ bool ImplScope::_interruptCallback(JSContext* cx) {
 
     bool kill = scope->isKillPending();
 
-    std::cerr << "in interrupt callback"
-              << " js_total_bytes(" << mongo::sm::get_total_bytes() << ")"
-                                                                       " js_max_bytes("
-              << mongo::sm::get_max_bytes() << ")"
-                                               " interrupt(" << scope->isKillPending() << ")"
-                                                                                          " kill?("
-              << kill << ")" << std::endl;
-
     if (kill) {
-        scope->_engine->getDeadlineMonitor()->stopDeadline(scope);
+        scope->_engine->getDeadlineMonitor().stopDeadline(scope);
         scope->unregisterOperation();
     }
 
     return !kill;
 }
 
-void ImplScope::_gcCallback(JSRuntime* rt, JSGCStatus status, void* data) {
+void MozJSImplScope::_gcCallback(JSRuntime* rt, JSGCStatus status, void* data) {
     if (!shouldLog(logger::LogSeverity::Debug(1))) {
-         // don't collect stats unless verbose
-         return;
+        // don't collect stats unless verbose
+        return;
     }
 
-    log() << "MozJS GC " << (status == JSGC_BEGIN ? "prologue" : "epilogue")
-          << " heap stats - "
-          << " total: " << mongo::sm::get_total_bytes()
-          << " limit: " << mongo::sm::get_max_bytes()
+    log() << "MozJS GC " << (status == JSGC_BEGIN ? "prologue" : "epilogue") << " heap stats - "
+          << " total: " << mongo::sm::get_total_bytes() << " limit: " << mongo::sm::get_max_bytes()
           << std::endl;
 }
 
-ImplScope::MozRuntime::MozRuntime() {
-    // Set a 1gb limit per runtime
-    mongo::sm::reset(1024 * 1024 * 1024);
+MozJSImplScope::MozRuntime::MozRuntime() {
+    mongo::sm::reset(kMallocMemoryLimit);
 
-    _runtime = JS_NewRuntime(8L * 1024 * 1024);
-    _context = JS_NewContext(_runtime, 8192);
+    _runtime = JS_NewRuntime(kMaxBytesBeforeGC);
+    uassert(ErrorCodes::JSInterpreterFailure, "Failed to initialize JSRuntime", _runtime);
+
+    _context = JS_NewContext(_runtime, kStackChunkSize);
+    uassert(ErrorCodes::JSInterpreterFailure, "Failed to initialize JSContext", _context);
 }
 
-ImplScope::MozRuntime::~MozRuntime() {
+MozJSImplScope::MozRuntime::~MozRuntime() {
     JS_DestroyContext(_context);
     JS_DestroyRuntime(_runtime);
 }
 
-ImplScope::ImplScope(ScriptEngine* engine)
+MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
     : _engine(engine),
       _mr(),
       _runtime(_mr._runtime),
       _context(_mr._context),
       _globalProto(_context),
-      _global(_globalProto.proto()),
+      _global(_globalProto.getProto()),
       _funcs(),
       _pendingKill(false),
       _opId(0),
       _opCtx(nullptr),
       _pendingGC(false),
-      _connectState(NOT),
+      _connectState(ConnectState::Not),
       _status(ErrorCodes::InternalError, "Unknown MozJS error"),
       _binDataProto(_context),
       _bsonProto(_context),
@@ -213,14 +228,14 @@ ImplScope::ImplScope(ScriptEngine* engine)
     execSetup(JSFiles::types);
 
     // install process-specific utilities in the global scope (dependancy: types.js, assert.js)
-    if (_engine->_scopeInitCallback)
-        _engine->_scopeInitCallback(*this);
+    if (_engine->getScopeInitCallback())
+        _engine->getScopeInitCallback()(*this);
 
     // install global utility functions
     installGlobalUtils(*this);
 }
 
-ImplScope::~ImplScope() {
+MozJSImplScope::~MozJSImplScope() {
     for (auto&& x : _funcs) {
         x.reset();
     }
@@ -228,11 +243,11 @@ ImplScope::~ImplScope() {
     unregisterOperation();
 }
 
-bool ImplScope::hasOutOfMemoryException() {
+bool MozJSImplScope::hasOutOfMemoryException() {
     return false;
 }
 
-void ImplScope::init(const BSONObj* data) {
+void MozJSImplScope::init(const BSONObj* data) {
     if (!data)
         return;
 
@@ -243,89 +258,84 @@ void ImplScope::init(const BSONObj* data) {
     }
 }
 
-#define SMMAGIC_HEADER          \
-    JSAutoRequest ar(_context); \
-    JSAutoCompartment ac(_context, _global)
-
-void ImplScope::setNumber(const char* field, double val) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setNumber(const char* field, double val) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).setNumber(field, val);
 }
 
-void ImplScope::setString(const char* field, StringData val) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setString(const char* field, StringData val) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).setString(field, val);
 }
 
-void ImplScope::setBoolean(const char* field, bool val) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setBoolean(const char* field, bool val) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).setBoolean(field, val);
 }
 
-void ImplScope::setElement(const char* field, const BSONElement& e) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setElement(const char* field, const BSONElement& e) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).setBSONElement(field, e, false);
 }
 
-void ImplScope::setObject(const char* field, const BSONObj& obj, bool readOnly) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setObject(const char* field, const BSONObj& obj, bool readOnly) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).setBSON(field, obj, false);
 }
 
-int ImplScope::type(const char* field) {
-    SMMAGIC_HEADER;
+int MozJSImplScope::type(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).type(field);
 }
 
-double ImplScope::getNumber(const char* field) {
-    SMMAGIC_HEADER;
+double MozJSImplScope::getNumber(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getNumber(field);
 }
 
-int ImplScope::getNumberInt(const char* field) {
-    SMMAGIC_HEADER;
+int MozJSImplScope::getNumberInt(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getNumberInt(field);
 }
 
-long long ImplScope::getNumberLongLong(const char* field) {
-    SMMAGIC_HEADER;
+long long MozJSImplScope::getNumberLongLong(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getNumberLongLong(field);
 }
 
-std::string ImplScope::getString(const char* field) {
-    SMMAGIC_HEADER;
+std::string MozJSImplScope::getString(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getString(field);
 }
 
-bool ImplScope::getBoolean(const char* field) {
-    SMMAGIC_HEADER;
+bool MozJSImplScope::getBoolean(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getBoolean(field);
 }
 
-BSONObj ImplScope::getObject(const char* field) {
-    SMMAGIC_HEADER;
+BSONObj MozJSImplScope::getObject(const char* field) {
+    MozJSEntry entry(this);
 
     return ObjectWrapper(_context, _global).getObject(field);
 }
 
-void ImplScope::newFunction(StringData raw, JS::MutableHandleValue out) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::newFunction(StringData raw, JS::MutableHandleValue out) {
+    MozJSEntry entry(this);
 
     std::string code = str::stream() << "____MongoToSM_newFunction_temp = " << raw;
 
     JS::CompileOptions co(_context);
-
     _checkErrorState(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), out));
 }
 
@@ -337,11 +347,13 @@ bool hasFunctionIdentifier(StringData code) {
     return code[8] == ' ' || code[8] == '(';
 }
 
-void ImplScope::__createFunction(const char* raw,
-                                 ScriptingFunction functionNumber,
-                                 JS::MutableHandleValue fun) {
-    raw = jsSkipWhiteSpace(raw);
-    std::string code = raw;
+// TODO: This function identification code is broken.  Fix it up to be more robust
+//
+// See: SERVER-16703 for more info
+void MozJSImplScope::_MozJSCreateFunction(const char* raw,
+                                          ScriptingFunction functionNumber,
+                                          JS::MutableHandleValue fun) {
+    std::string code = jsSkipWhiteSpace(raw);
     if (!hasFunctionIdentifier(code)) {
         if (code.find('\n') == std::string::npos && !hasJSReturn(code) &&
             (code.find(';') == std::string::npos || code.find(';') == code.size() - 1)) {
@@ -350,7 +362,6 @@ void ImplScope::__createFunction(const char* raw,
         code = "function(){ " + code + "}";
     }
 
-    std::string fn = str::stream() << "_funcs" << functionNumber;
     code = str::stream() << "_funcs" << functionNumber << " = " << code;
 
     JS::CompileOptions co(_context);
@@ -361,42 +372,41 @@ void ImplScope::__createFunction(const char* raw,
             fun.isObject() && JS_ObjectIsFunction(_context, fun.toObjectOrNull()));
 }
 
-ScriptingFunction ImplScope::_createFunction(const char* raw, ScriptingFunction functionNumber) {
-    SMMAGIC_HEADER;
+ScriptingFunction MozJSImplScope::_createFunction(const char* raw,
+                                                  ScriptingFunction functionNumber) {
+    MozJSEntry entry(this);
 
     JS::RootedValue fun(_context);
-
-    __createFunction(raw, functionNumber, &fun);
-
+    _MozJSCreateFunction(raw, functionNumber, &fun);
     _funcs.emplace_back(_context, fun.get());
 
     return functionNumber;
 }
 
-void ImplScope::setFunction(const char* field, const char* code) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::setFunction(const char* field, const char* code) {
+    MozJSEntry entry(this);
 
     JS::RootedValue fun(_context);
 
-    __createFunction(code, getFunctionCache().size() + 1, &fun);
+    _MozJSCreateFunction(code, getFunctionCache().size() + 1, &fun);
 
     ObjectWrapper(_context, _global).setValue(field, fun);
 }
 
-void ImplScope::rename(const char* from, const char* to) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::rename(const char* from, const char* to) {
+    MozJSEntry entry(this);
 
     ObjectWrapper(_context, _global).rename(from, to);
 }
 
-int ImplScope::invoke(ScriptingFunction func,
-                      const BSONObj* argsObject,
-                      const BSONObj* recv,
-                      int timeoutMs,
-                      bool ignoreReturn,
-                      bool readOnlyArgs,
-                      bool readOnlyRecv) {
-    SMMAGIC_HEADER;
+int MozJSImplScope::invoke(ScriptingFunction func,
+                           const BSONObj* argsObject,
+                           const BSONObj* recv,
+                           int timeoutMs,
+                           bool ignoreReturn,
+                           bool readOnlyArgs,
+                           bool readOnlyRecv) {
+    MozJSEntry entry(this);
 
     auto funcValue = _funcs[func - 1];
     JS::RootedValue result(_context);
@@ -411,7 +421,6 @@ int ImplScope::invoke(ScriptingFunction func,
             BSONElement next = it.next();
 
             JS::RootedValue value(_context);
-
             ValueReader(_context, &value).fromBSONElement(next, readOnlyArgs);
 
             args.append(value);
@@ -425,70 +434,69 @@ int ImplScope::invoke(ScriptingFunction func,
         smrecv.setObjectOrNull(_global);
 
     if (timeoutMs)
-        _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
+        _engine->getDeadlineMonitor().startDeadline(this, timeoutMs);
 
     JS::RootedValue out(_context);
     JS::RootedObject obj(_context, smrecv.toObjectOrNull());
 
-    JS_MaybeGC(_context);
-
     bool success = JS::Call(_context, obj, funcValue, args, &out);
 
     if (timeoutMs)
-        _engine->getDeadlineMonitor()->stopDeadline(this);
+        _engine->getDeadlineMonitor().stopDeadline(this);
 
     _checkErrorState(success);
 
     if (!ignoreReturn) {
         // must validate the handle because TerminateExecution may have
         // been thrown after the above checks
-        if (out.isObject() && nativeFunctionProto().instanceOf(out)) {
+        if (out.isObject() && _nativeFunctionProto.instanceOf(out)) {
             log() << "storing native function as return value" << std::endl;
             _lastRetIsNativeCode = true;
         } else {
             _lastRetIsNativeCode = false;
         }
 
-        ObjectWrapper(_context, _global).setValue("__returnValue", out);
+        ObjectWrapper(_context, _global).setValue(kInvokeResult, out);
     }
 
     return 0;
 }
 
-bool ImplScope::exec(StringData code,
-                     const std::string& name,
-                     bool printResult,
-                     bool reportError,
-                     bool assertOnError,
-                     int timeoutMs) {
-    SMMAGIC_HEADER;
+bool MozJSImplScope::exec(StringData code,
+                          const std::string& name,
+                          bool printResult,
+                          bool reportError,
+                          bool assertOnError,
+                          int timeoutMs) {
+    MozJSEntry entry(this);
 
     JS::CompileOptions co(_context);
     JS::RootedScript script(_context);
 
-    bool success;
-
-    success = JS::Compile(_context, _global, co, code.rawData(), code.size(), &script);
+    bool success = JS::Compile(_context, _global, co, code.rawData(), code.size(), &script);
 
     if (_checkErrorState(success, reportError, assertOnError))
         return false;
 
     if (timeoutMs)
-        _engine->getDeadlineMonitor()->startDeadline(this, timeoutMs);
+        _engine->getDeadlineMonitor().startDeadline(this, timeoutMs);
 
     JS::RootedValue out(_context);
 
     success = JS_ExecuteScript(_context, _global, script, &out);
 
     if (timeoutMs)
-        _engine->getDeadlineMonitor()->stopDeadline(this);
+        _engine->getDeadlineMonitor().stopDeadline(this);
 
     if (_checkErrorState(success, reportError, assertOnError))
         return false;
 
-    ObjectWrapper(_context, _global).setValue("__lastres__", out);
+    ObjectWrapper(_context, _global).setValue(kExecResult, out);
 
     if (printResult && !out.isUndefined()) {
+        // TODO: We seem to use this productively in v8, but it seems
+        // unecessary under sm.  That probably means somethings off
+        //
         // appears to only be used by shell
         // std::cout << ValueWriter(_context, out).toString() << std::endl;
     }
@@ -496,8 +504,8 @@ bool ImplScope::exec(StringData code,
     return true;
 }
 
-void ImplScope::injectNative(const char* field, NativeFunction func, void* data) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::injectNative(const char* field, NativeFunction func, void* data) {
+    MozJSEntry entry(this);
 
     JS::RootedObject obj(_context);
 
@@ -508,20 +516,20 @@ void ImplScope::injectNative(const char* field, NativeFunction func, void* data)
     ObjectWrapper(_context, _global).setValue(field, value);
 }
 
-void ImplScope::gc() {
+void MozJSImplScope::gc() {
     _pendingGC.store(true);
     JS_RequestInterruptCallback(_runtime);
 }
 
-void ImplScope::localConnectForDbEval(OperationContext* txn, const char* dbName) {
-    SMMAGIC_HEADER;
+void MozJSImplScope::localConnectForDbEval(OperationContext* txn, const char* dbName) {
+    MozJSEntry entry(this);
 
     invariant(_opCtx == NULL);
     _opCtx = txn;
 
-    if (_connectState == EXTERNAL)
+    if (_connectState == ConnectState::External)
         uasserted(12510, "externalSetup already called, can't call localConnect");
-    if (_connectState == LOCAL) {
+    if (_connectState == ConnectState::Local) {
         if (_localDBName == dbName)
             return;
         uasserted(12511,
@@ -537,48 +545,47 @@ void ImplScope::localConnectForDbEval(OperationContext* txn, const char* dbName)
     // install the Mongo function object and instantiate the 'db' global
     _mongoLocalProto.install(_global);
     execCoreFiles();
-    exec("_mongo = new Mongo();", "local connect 2", false, true, true, 0);
-    exec((std::string) "db = _mongo.getDB(\"" + dbName + "\");",
-         "local connect 3",
-         false,
-         true,
-         true,
-         0);
-    _connectState = LOCAL;
+
+    const char* const makeMongo = "_mongo = new Mongo()";
+    exec(makeMongo, "local connect 2", false, true, true, 0);
+
+    std::string makeDB = str::stream() << "db = _mongo.getDB(\"" << dbName << "\");";
+    exec(makeDB, "local connect 3", false, true, true, 0);
+
+    _connectState = ConnectState::Local;
     _localDBName = dbName;
 
     loadStored(txn);
 }
 
-void ImplScope::externalSetup() {
-    SMMAGIC_HEADER;
+void MozJSImplScope::externalSetup() {
+    MozJSEntry entry(this);
 
-    if (_connectState == EXTERNAL)
+    if (_connectState == ConnectState::External)
         return;
-    if (_connectState == LOCAL)
+    if (_connectState == ConnectState::Local)
         uasserted(12512, "localConnect already called, can't call externalSetup");
 
     // install db access functions in the global object
     installDBAccess();
 
     // install thread-related functions (e.g. _threadInject)
+    // TODO: turn this back on!
     // installFork(this, _global, _context);
 
     // install the Mongo function object
     _mongoExternalProto.install(_global);
     execCoreFiles();
-    _connectState = EXTERNAL;
+    _connectState = ConnectState::External;
 }
 
-// ----- internal -----
-
-void ImplScope::reset() {
+void MozJSImplScope::reset() {
     unregisterOperation();
     _pendingKill.store(false);
     _pendingGC.store(false);
 }
 
-void ImplScope::installBSONTypes() {
+void MozJSImplScope::installBSONTypes() {
     _binDataProto.install(_global);
     _bsonProto.install(_global);
     _dbPointerProto.install(_global);
@@ -594,37 +601,39 @@ void ImplScope::installBSONTypes() {
     _timestampProto.install(_global);
 
     // This builtin map is a javascript 6 thing.  We want our version.  so
-    // take there's out
+    // take theirs out
     ObjectWrapper(_context, _global).deleteProperty("Map");
 }
 
-void ImplScope::installDBAccess() {
+void MozJSImplScope::installDBAccess() {
     _cursorProto.install(_global);
     _dbProto.install(_global);
     _dbQueryProto.install(_global);
     _dbCollectionProto.install(_global);
 }
 
-bool ImplScope::_checkErrorState(bool success, bool reportError, bool assertOnError) {
-    bool haveError = false;
+bool MozJSImplScope::_checkErrorState(bool success, bool reportError, bool assertOnError) {
+    if (success)
+        return false;
 
-    if (!success) {
-        _error = _status.reason();
-        haveError = true;
+    if (_status.isOK()) {
+        _status = Status(ErrorCodes::UnknownError, "Unknown Failure from JSInterpreter");
     }
 
-    if (haveError) {
-        if (reportError)
-            error() << _error << std::endl;
-        if (assertOnError) {
-            auto status = std::move(_status);
-            uassertStatusOK(status);
-        }
+    _error = _status.reason();
 
-        return true;
+    if (reportError)
+        error() << _error << std::endl;
+
+    // Clear the status state
+    auto status = std::move(_status);
+
+    if (assertOnError) {
+        // Throw if necessary
+        uassertStatusOK(status);
     }
 
-    return false;
+    return true;
 }
 
 }  // namespace mozjs

@@ -1,38 +1,41 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or  modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #pragma once
+
+#include <jsapi.h>
 
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/scripting/mozjs/bindata.h"
 #include "mongo/scripting/mozjs/bson.h"
 #include "mongo/scripting/mozjs/cursor.h"
-#include "mongo/scripting/mozjs/dbcollection.h"
 #include "mongo/scripting/mozjs/db.h"
+#include "mongo/scripting/mozjs/dbcollection.h"
 #include "mongo/scripting/mozjs/dbpointer.h"
 #include "mongo/scripting/mozjs/dbquery.h"
 #include "mongo/scripting/mozjs/dbref.h"
@@ -49,143 +52,183 @@
 #include "mongo/scripting/mozjs/regexp.h"
 #include "mongo/scripting/mozjs/timestamp.h"
 
-#include "jsapi.h"
-
 namespace mongo {
 namespace mozjs {
 
-class ImplScope : public Scope {
+/**
+ * Implementation Scope for MozJS
+ *
+ * The Implementation scope holds the actual mozjs runtime and context objects,
+ * along with a number of global prototypes for mongoDB specific types. Each
+ * ImplScope requires it's own thread and cannot be accessed from any thread
+ * other than the one it was created on (this is a detail inherited from the
+ * JSRuntime). If you need a scope that can be accessed by different threads
+ * over the course of it's lifetime, see MozJSProxyScope
+ *
+ * For more information about overriden fields, see mongo::Scope
+ */
+class MozJSImplScope final : public Scope {
+    MONGO_DISALLOW_COPYING(MozJSImplScope);
+
 public:
-    ImplScope(ScriptEngine* engine);
-    ~ImplScope();
+    explicit MozJSImplScope(MozJSScriptEngine* engine);
+    ~MozJSImplScope();
 
-    virtual void init(const BSONObj* data);
+    void init(const BSONObj* data) override;
 
-    virtual void reset();
+    void reset() override;
 
-    virtual void kill();
+    void kill();
 
-    bool isKillPending() const;
+    bool isKillPending() const override;
 
     OperationContext* getOpContext() const;
 
-    virtual void registerOperation(OperationContext* txn);
+    void registerOperation(OperationContext* txn) override;
 
-    virtual void unregisterOperation();
+    void unregisterOperation() override;
 
-    virtual void localConnectForDbEval(OperationContext* txn, const char* dbName);
+    void localConnectForDbEval(OperationContext* txn, const char* dbName) override;
 
-    virtual void externalSetup();
+    void externalSetup() override;
 
-    virtual std::string getError();
+    std::string getError() override;
 
-    virtual bool hasOutOfMemoryException();
+    bool hasOutOfMemoryException() override;
 
-    void gc();
+    void gc() override;
 
-    virtual double getNumber(const char* field);
-    virtual int getNumberInt(const char* field);
-    virtual long long getNumberLongLong(const char* field);
-    virtual std::string getString(const char* field);
-    virtual bool getBoolean(const char* field);
-    virtual BSONObj getObject(const char* field);
+    double getNumber(const char* field) override;
+    int getNumberInt(const char* field) override;
+    long long getNumberLongLong(const char* field) override;
+    std::string getString(const char* field) override;
+    bool getBoolean(const char* field) override;
+    BSONObj getObject(const char* field) override;
 
-    virtual void setNumber(const char* field, double val);
-    virtual void setString(const char* field, StringData val);
-    virtual void setBoolean(const char* field, bool val);
-    virtual void setElement(const char* field, const BSONElement& e);
-    virtual void setObject(const char* field, const BSONObj& obj, bool readOnly);
-    virtual void setFunction(const char* field, const char* code);
+    void setNumber(const char* field, double val) override;
+    void setString(const char* field, StringData val) override;
+    void setBoolean(const char* field, bool val) override;
+    void setElement(const char* field, const BSONElement& e) override;
+    void setObject(const char* field, const BSONObj& obj, bool readOnly) override;
+    void setFunction(const char* field, const char* code) override;
 
-    virtual int type(const char* field);
+    int type(const char* field) override;
 
-    virtual void rename(const char* from, const char* to);
+    void rename(const char* from, const char* to) override;
 
-    virtual int invoke(ScriptingFunction func,
-                       const BSONObj* args,
-                       const BSONObj* recv,
-                       int timeoutMs = 0,
-                       bool ignoreReturn = false,
-                       bool readOnlyArgs = false,
-                       bool readOnlyRecv = false);
+    int invoke(ScriptingFunction func,
+               const BSONObj* args,
+               const BSONObj* recv,
+               int timeoutMs = 0,
+               bool ignoreReturn = false,
+               bool readOnlyArgs = false,
+               bool readOnlyRecv = false) override;
 
-    virtual bool exec(StringData code,
-                      const std::string& name,
-                      bool printResult,
-                      bool reportError,
-                      bool assertOnError,
-                      int timeoutMs);
+    bool exec(StringData code,
+              const std::string& name,
+              bool printResult,
+              bool reportError,
+              bool assertOnError,
+              int timeoutMs) override;
 
-    virtual void injectNative(const char* field, NativeFunction func, void* data = 0);
+    void injectNative(const char* field, NativeFunction func, void* data = 0) override;
 
-    virtual ScriptingFunction _createFunction(const char* code,
-                                              ScriptingFunction functionNumber = 0);
+    ScriptingFunction _createFunction(const char* code,
+                                      ScriptingFunction functionNumber = 0) override;
+
     void newFunction(StringData code, JS::MutableHandleValue out);
 
-    WrapType<BinDataInfo>& binDataProto() {
+    WrapType<BinDataInfo>& getBinDataProto() {
         return _binDataProto;
     }
-    WrapType<BSONInfo>& bsonProto() {
+
+    WrapType<BSONInfo>& getBsonProto() {
         return _bsonProto;
     }
-    WrapType<CursorInfo>& cursorProto() {
+
+    WrapType<CursorInfo>& getCursorProto() {
         return _cursorProto;
     }
-    WrapType<DBCollectionInfo>& dbCollectionProto() {
+
+    WrapType<DBCollectionInfo>& getDbCollectionProto() {
         return _dbCollectionProto;
     }
-    WrapType<DBPointerInfo>& dbPointerProto() {
+
+    WrapType<DBPointerInfo>& getDbPointerProto() {
         return _dbPointerProto;
     }
-    WrapType<DBQueryInfo>& dbQueryProto() {
+
+    WrapType<DBQueryInfo>& getDbQueryProto() {
         return _dbQueryProto;
     }
-    WrapType<DBInfo>& dbProto() {
+
+    WrapType<DBInfo>& getDbProto() {
         return _dbProto;
     }
-    WrapType<DBRefInfo>& dbRefProto() {
+
+    WrapType<DBRefInfo>& getDbRefProto() {
         return _dbRefProto;
     }
-    WrapType<MaxKeyInfo>& maxKeyProto() {
+
+    WrapType<MaxKeyInfo>& getMaxKeyProto() {
         return _maxKeyProto;
     }
-    WrapType<MinKeyInfo>& minKeyProto() {
+
+    WrapType<MinKeyInfo>& getMinKeyProto() {
         return _minKeyProto;
     }
-    WrapType<MongoExternalInfo>& mongoExternalProto() {
+
+    WrapType<MongoExternalInfo>& getMongoExternalProto() {
         return _mongoExternalProto;
     }
-    WrapType<MongoLocalInfo>& mongoLocalProto() {
+
+    WrapType<MongoLocalInfo>& getMongoLocalProto() {
         return _mongoLocalProto;
     }
-    WrapType<NativeFunctionInfo>& nativeFunctionProto() {
+
+    WrapType<NativeFunctionInfo>& getNativeFunctionProto() {
         return _nativeFunctionProto;
     }
-    WrapType<NumberIntInfo>& numberIntProto() {
+
+    WrapType<NumberIntInfo>& getNumberIntProto() {
         return _numberIntProto;
     }
-    WrapType<NumberLongInfo>& numberLongProto() {
+
+    WrapType<NumberLongInfo>& getNumberLongProto() {
         return _numberLongProto;
     }
-    WrapType<ObjectInfo>& objectProto() {
+
+    WrapType<ObjectInfo>& getObjectProto() {
         return _objectProto;
     }
-    WrapType<OIDInfo>& oidProto() {
+
+    WrapType<OIDInfo>& getOidProto() {
         return _oidProto;
     }
-    WrapType<RegExpInfo>& regExpProto() {
+
+    WrapType<RegExpInfo>& getRegExpProto() {
         return _regExpProto;
     }
-    WrapType<TimestampInfo>& timestampProto() {
+
+    WrapType<TimestampInfo>& getTimestampProto() {
         return _timestampProto;
     }
 
-private:
-    void __createFunction(const char* raw,
-                          ScriptingFunction functionNumber,
-                          JS::MutableHandleValue fun);
+    const char* const kExecResult = "__lastres__";
+    const char* const kInvokeResult = "__returnValue";
 
-    class MozRuntime {
+private:
+    void _MozJSCreateFunction(const char* raw,
+                              ScriptingFunction functionNumber,
+                              JS::MutableHandleValue fun);
+
+    /**
+     * This structure exists exclusively to construct the runtime and context
+     * ahead of the various global prototypes in the ImplScope construction.
+     * Basically, we have to call some c apis on the way up and down and this
+     * takes care of that
+     */
+    struct MozRuntime {
     public:
         MozRuntime();
         ~MozRuntime();
@@ -193,6 +236,21 @@ private:
         JSRuntime* _runtime;
         JSContext* _context;
     };
+
+    /**
+     * The connection state of the scope.
+     *
+     * This is for dbeval and the shell
+     */
+    enum class ConnectState : char {
+        Not,
+        Local,
+        External,
+    };
+
+    struct MozJSEntry;
+    friend struct MozJSEntry;
+
     static void _reportError(JSContext* cx, const char* message, JSErrorReport* report);
     static bool _interruptCallback(JSContext* cx);
     static void _gcCallback(JSRuntime* rt, JSGCStatus status, void* data);
@@ -201,7 +259,7 @@ private:
     void installDBAccess();
     void installBSONTypes();
 
-    ScriptEngine* _engine;
+    MozJSScriptEngine* _engine;
     MozRuntime _mr;
     JSRuntime* _runtime;
     JSContext* _context;
@@ -213,7 +271,6 @@ private:
     unsigned int _opId;        // op id for this scope
     OperationContext* _opCtx;  // Op context for DbEval
     std::atomic_bool _pendingGC;
-    enum ConnectState { NOT, LOCAL, EXTERNAL };
     ConnectState _connectState;
     Status _status;
 
@@ -238,8 +295,8 @@ private:
     WrapType<TimestampInfo> _timestampProto;
 };
 
-inline ImplScope* getScope(JSContext* cx) {
-    return static_cast<ImplScope*>(JS_GetContextPrivate(cx));
+inline MozJSImplScope* getScope(JSContext* cx) {
+    return static_cast<MozJSImplScope*>(JS_GetContextPrivate(cx));
 }
 
 }  // namespace mozjs

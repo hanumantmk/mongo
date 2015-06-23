@@ -1,37 +1,39 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #include "mongo/platform/basic.h"
 
 #include "mongo/scripting/mozjs/valuewriter.h"
 
-#include "js/Conversions.h"
+#include <js/Conversions.h>
 
 #include "mongo/base/error_codes.h"
+#include "mongo/scripting/mozjs/exception.h"
 #include "mongo/scripting/mozjs/implscope.h"
 #include "mongo/scripting/mozjs/jsstringwrapper.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
@@ -81,15 +83,13 @@ BSONObj ValueWriter::toBSON() {
     JS::RootedObject obj(_context, _value.toObjectOrNull());
 
     BSONObjBuilder bob;
-    ObjectWrapper(_context, obj).writeThis(bob);
+    ObjectWrapper(_context, obj).writeThis(&bob);
 
     return bob.obj();
 }
 
 std::string ValueWriter::toString() {
-    JSStringWrapper jsstr(_context, JS::ToString(_context, _value));
-
-    return jsstr.toString();
+    return JSStringWrapper(_context, JS::ToString(_context, _value)).toString();
 }
 
 double ValueWriter::toNumber() {
@@ -97,7 +97,7 @@ double ValueWriter::toNumber() {
     if (JS::ToNumber(_context, _value, &out))
         return out;
 
-    uasserted(ErrorCodes::BadValue, "Failure to convert value to number");
+    throwCurrentJSException(_context, ErrorCodes::BadValue, "Failure to convert value to number");
 }
 
 bool ValueWriter::toBoolean() {
@@ -109,7 +109,7 @@ int32_t ValueWriter::toInt32() {
     if (JS::ToInt32(_context, _value, &out))
         return out;
 
-    uasserted(ErrorCodes::BadValue, "Failure to convert value to number");
+    throwCurrentJSException(_context, ErrorCodes::BadValue, "Failure to convert value to number");
 }
 
 int64_t ValueWriter::toInt64() {
@@ -117,10 +117,10 @@ int64_t ValueWriter::toInt64() {
     if (JS::ToInt64(_context, _value, &out))
         return out;
 
-    uasserted(ErrorCodes::BadValue, "Failure to convert value to number");
+    throwCurrentJSException(_context, ErrorCodes::BadValue, "Failure to convert value to number");
 }
 
-void ValueWriter::writeThis(BSONObjBuilder& b, StringData sd) {
+void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd) {
     uassert(17279,
             str::stream() << "Exceeded depth limit of " << 150
                           << " when converting js object to BSON. Do you have a cycle?",
@@ -134,7 +134,7 @@ void ValueWriter::writeThis(BSONObjBuilder& b, StringData sd) {
             (std::string::npos == sd.find('\0')));
 
     if (_value.isString()) {
-        b.append(sd, toString());
+        b->append(sd, toString());
     } else if (_value.isNumber()) {
         double val = toNumber();
 
@@ -145,28 +145,28 @@ void ValueWriter::writeThis(BSONObjBuilder& b, StringData sd) {
             // This makes copying an object of numbers O(n**2) :(
             BSONElement elmt = _originalParent->getField(sd);
             if (elmt.type() == mongo::NumberInt) {
-                b.append(sd, intval);
+                b->append(sd, intval);
                 return;
             }
         }
 
-        b.append(sd, val);
+        b->append(sd, val);
     } else if (_value.isObject()) {
         JS::RootedObject childObj(_context, _value.toObjectOrNull());
         _writeObject(b, sd, childObj);
     } else if (_value.isBoolean()) {
-        b.appendBool(sd, _value.toBoolean());
+        b->appendBool(sd, _value.toBoolean());
     } else if (_value.isUndefined()) {
-        b.appendUndefined(sd);
+        b->appendUndefined(sd);
     } else if (_value.isNull()) {
-        b.appendNull(sd);
+        b->appendNull(sd);
     } else {
         uasserted(16662,
                   str::stream() << "unable to convert JavaScript property to mongo element " << sd);
     }
 }
 
-void ValueWriter::_writeObject(BSONObjBuilder& b, StringData sd, JS::HandleObject obj) {
+void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj) {
     auto scope = getScope(_context);
 
     ObjectWrapper o(_context, obj);
@@ -174,8 +174,8 @@ void ValueWriter::_writeObject(BSONObjBuilder& b, StringData sd, JS::HandleObjec
     if (JS_ObjectIsFunction(_context, _value.toObjectOrNull())) {
         uassert(16716,
                 "cannot convert native function to BSON",
-                !scope->nativeFunctionProto().instanceOf(obj));
-        b.appendCode(sd, ValueWriter(_context, _value).toString());
+                !scope->getNativeFunctionProto().instanceOf(obj));
+        b->appendCode(sd, ValueWriter(_context, _value).toString());
     } else if (JS_ObjectIsRegExp(_context, obj)) {
         JS::RootedValue v(_context);
         v.setObjectOrNull(obj);
@@ -185,46 +185,46 @@ void ValueWriter::_writeObject(BSONObjBuilder& b, StringData sd, JS::HandleObjec
         std::string r = regex.substr(0, regex.rfind('/'));
         std::string o = regex.substr(regex.rfind('/') + 1);
 
-        b.appendRegex(sd, r, o);
+        b->appendRegex(sd, r, o);
     } else if (JS_ObjectIsDate(_context, obj)) {
         JS::RootedValue dateval(_context);
         o.callMethod("getTime", &dateval);
 
         auto d = Date_t::fromMillisSinceEpoch(ValueWriter(_context, dateval).toNumber());
-        b.appendDate(sd, d);
-    } else if (scope->oidProto().instanceOf(obj)) {
+        b->appendDate(sd, d);
+    } else if (scope->getOidProto().instanceOf(obj)) {
         auto oid = static_cast<OID*>(JS_GetPrivate(obj));
-        b.append(sd, *oid);
-    } else if (scope->numberLongProto().instanceOf(obj)) {
+        b->append(sd, *oid);
+    } else if (scope->getNumberLongProto().instanceOf(obj)) {
         long long out = NumberLongInfo::ToNumberLong(_context, obj);
-        b.append(sd, out);
-    } else if (scope->numberIntProto().instanceOf(obj)) {
-        b.append(sd, NumberIntInfo::ToNumberInt(_context, obj));
-    } else if (scope->dbPointerProto().instanceOf(obj)) {
+        b->append(sd, out);
+    } else if (scope->getNumberIntProto().instanceOf(obj)) {
+        b->append(sd, NumberIntInfo::ToNumberInt(_context, obj));
+    } else if (scope->getDbPointerProto().instanceOf(obj)) {
         JS::RootedValue id(_context);
         o.getValue("id", &id);
         auto oid = static_cast<OID*>(JS_GetPrivate(id.toObjectOrNull()));
 
-        b.appendDBRef(sd, o.getString("ns"), *oid);
-    } else if (scope->binDataProto().instanceOf(obj)) {
+        b->appendDBRef(sd, o.getString("ns"), *oid);
+    } else if (scope->getBinDataProto().instanceOf(obj)) {
         auto str = static_cast<std::string*>(JS_GetPrivate(obj));
 
         auto binData = base64::decode(*str);
 
-        b.appendBinData(
+        b->appendBinData(
             sd, binData.size(), mongo::BinDataType(o.getNumber("type")), binData.c_str());
-    } else if (scope->timestampProto().instanceOf(obj)) {
+    } else if (scope->getTimestampProto().instanceOf(obj)) {
         Timestamp ot(o.getNumber("t"), o.getNumber("i"));
-        b.append(sd, ot);
-    } else if (scope->minKeyProto().instanceOf(obj)) {
-        b.appendMinKey(sd);
-    } else if (scope->maxKeyProto().instanceOf(obj)) {
-        b.appendMaxKey(sd);
+        b->append(sd, ot);
+    } else if (scope->getMinKeyProto().instanceOf(obj)) {
+        b->appendMinKey(sd);
+    } else if (scope->getMaxKeyProto().instanceOf(obj)) {
+        b->appendMaxKey(sd);
     } else {
         // nested object or array
 
-        BSONObjBuilder subbob(JS_IsArrayObject(_context, obj) ? b.subarrayStart(sd)
-                                                              : b.subobjStart(sd));
+        BSONObjBuilder subbob(JS_IsArrayObject(_context, obj) ? b->subarrayStart(sd)
+                                                              : b->subobjStart(sd));
 
         ObjectWrapper child(_context, obj, _depth + 1);
 

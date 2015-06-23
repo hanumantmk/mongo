@@ -1,28 +1,29 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #include "mongo/platform/basic.h"
@@ -55,7 +56,7 @@ void ObjectWrapper::Key::get(JSContext* cx, JS::HandleObject o, JS::MutableHandl
             break;
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to get value");
+    throwCurrentJSException(cx, ErrorCodes::InternalError, "Failed to get value on a JSObject");
 }
 
 void ObjectWrapper::Key::set(JSContext* cx, JS::HandleObject o, JS::HandleValue value) {
@@ -74,7 +75,7 @@ void ObjectWrapper::Key::set(JSContext* cx, JS::HandleObject o, JS::HandleValue 
             break;
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to set value");
+    throwCurrentJSException(cx, ErrorCodes::InternalError, "Failed to set value on a JSObject");
 }
 
 void ObjectWrapper::Key::define(JSContext* cx,
@@ -96,7 +97,7 @@ void ObjectWrapper::Key::define(JSContext* cx,
             break;
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to define value");
+    throwCurrentJSException(cx, ErrorCodes::InternalError, "Failed to define value on a JSObject");
 }
 
 bool ObjectWrapper::Key::has(JSContext* cx, JS::HandleObject o) {
@@ -117,7 +118,7 @@ bool ObjectWrapper::Key::has(JSContext* cx, JS::HandleObject o) {
             break;
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to has");
+    throwCurrentJSException(cx, ErrorCodes::InternalError, "Failed to has value on a JSObject");
 }
 
 void ObjectWrapper::Key::del(JSContext* cx, JS::HandleObject o) {
@@ -140,7 +141,7 @@ void ObjectWrapper::Key::del(JSContext* cx, JS::HandleObject o) {
         }
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to delete");
+    throwCurrentJSException(cx, ErrorCodes::InternalError, "Failed to delete value on a JSObject");
 }
 
 std::string ObjectWrapper::Key::toString(JSContext* cx) {
@@ -156,7 +157,8 @@ std::string ObjectWrapper::Key::toString(JSContext* cx) {
             break;
     }
 
-    uasserted(ErrorCodes::InternalError, "Failed to toString");
+    throwCurrentJSException(
+        cx, ErrorCodes::InternalError, "Failed to toString a ObjectWrapper::Key");
 }
 
 ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleObject obj, int depth)
@@ -164,95 +166,6 @@ ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleObject obj, int depth)
 
 ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleValue value, int depth)
     : _context(cx), _object(cx, value.toObjectOrNull()), _depth(depth) {}
-
-JS::HandleObject ObjectWrapper::thisv() {
-    return _object;
-}
-
-void ObjectWrapper::callMethod(JS::HandleValue fun,
-                               const JS::HandleValueArray& args,
-                               JS::MutableHandleValue out) {
-    if (JS::Call(_context, _object, fun, args, out))
-        return;
-
-    uasserted(ErrorCodes::InternalError, "Failed to call function");
-}
-
-void ObjectWrapper::callMethod(JS::HandleValue fun, JS::MutableHandleValue out) {
-    JS::AutoValueVector args(_context);
-
-    callMethod(fun, args, out);
-}
-
-void ObjectWrapper::setValue(Key key, JS::HandleValue val) {
-    key.set(_context, _object, val);
-}
-
-void ObjectWrapper::setObject(Key key, JS::HandleObject object) {
-    JS::RootedValue value(_context);
-    value.setObjectOrNull(object);
-
-    setValue(key, value);
-}
-
-void ObjectWrapper::setNumber(Key key, double val) {
-    JS::RootedValue jsValue(_context);
-    jsValue.setDouble(val);
-
-    setValue(key, jsValue);
-}
-
-void ObjectWrapper::defineProperty(Key key, JS::HandleValue val, unsigned attrs) {
-    key.define(_context, _object, val, attrs);
-}
-
-void ObjectWrapper::deleteProperty(Key key) {
-    key.del(_context, _object);
-}
-
-void ObjectWrapper::setString(Key key, StringData val) {
-    JS::RootedValue jsValue(_context);
-    ValueReader(_context, &jsValue).fromStringData(val);
-
-    setValue(key, jsValue);
-}
-
-void ObjectWrapper::setBoolean(Key key, bool val) {
-    JS::RootedValue jsValue(_context);
-    jsValue.setBoolean(val);
-
-    setValue(key, jsValue);
-}
-
-void ObjectWrapper::callMethod(const char* field,
-                               const JS::HandleValueArray& args,
-                               JS::MutableHandleValue out) {
-    if (JS::Call(_context, _object, field, args, out))
-        return;
-
-    uasserted(ErrorCodes::InternalError, "Failed to call method");
-}
-
-void ObjectWrapper::callMethod(const char* field, JS::MutableHandleValue out) {
-    JS::AutoValueVector args(_context);
-
-    callMethod(field, args, out);
-}
-
-int ObjectWrapper::type(Key key) {
-    JS::RootedValue x(_context);
-    getValue(key, &x);
-
-    return ValueWriter(_context, x).type();
-}
-
-bool ObjectWrapper::hasField(Key key) {
-    return key.has(_context, _object);
-}
-
-void ObjectWrapper::getValue(Key key, JS::MutableHandleValue value) {
-    key.get(_context, _object, value);
-}
 
 double ObjectWrapper::getNumber(Key key) {
     JS::RootedValue x(_context);
@@ -296,11 +209,122 @@ BSONObj ObjectWrapper::getObject(Key key) {
     return ValueWriter(_context, x).toBSON();
 }
 
-void ObjectWrapper::writeThis(BSONObjBuilder& b) {
+void ObjectWrapper::getValue(Key key, JS::MutableHandleValue value) {
+    key.get(_context, _object, value);
+}
+
+void ObjectWrapper::setNumber(Key key, double val) {
+    JS::RootedValue jsValue(_context);
+    jsValue.setDouble(val);
+
+    setValue(key, jsValue);
+}
+
+void ObjectWrapper::setString(Key key, StringData val) {
+    JS::RootedValue jsValue(_context);
+    ValueReader(_context, &jsValue).fromStringData(val);
+
+    setValue(key, jsValue);
+}
+
+void ObjectWrapper::setBoolean(Key key, bool val) {
+    JS::RootedValue jsValue(_context);
+    jsValue.setBoolean(val);
+
+    setValue(key, jsValue);
+}
+
+void ObjectWrapper::setBSONElement(Key key, const BSONElement& elem, bool readOnly) {
+    JS::RootedValue value(_context);
+    ValueReader(_context, &value, _depth).fromBSONElement(elem, readOnly);
+
+    setValue(key, value);
+}
+
+void ObjectWrapper::setBSON(Key key, const BSONObj& obj, bool readOnly) {
+    JS::RootedValue value(_context);
+    ValueReader(_context, &value, _depth).fromBSON(obj, readOnly);
+
+    setValue(key, value);
+}
+
+void ObjectWrapper::setValue(Key key, JS::HandleValue val) {
+    key.set(_context, _object, val);
+}
+
+void ObjectWrapper::setObject(Key key, JS::HandleObject object) {
+    JS::RootedValue value(_context);
+    value.setObjectOrNull(object);
+
+    setValue(key, value);
+}
+
+void ObjectWrapper::defineProperty(Key key, JS::HandleValue val, unsigned attrs) {
+    key.define(_context, _object, val, attrs);
+}
+
+void ObjectWrapper::deleteProperty(Key key) {
+    key.del(_context, _object);
+}
+
+int ObjectWrapper::type(Key key) {
+    JS::RootedValue x(_context);
+    getValue(key, &x);
+
+    return ValueWriter(_context, x).type();
+}
+
+void ObjectWrapper::rename(Key from, const char* to) {
+    JS::RootedValue value(_context);
+
+    JS::RootedValue undefValue(_context);
+    undefValue.setUndefined();
+
+    getValue(from, &value);
+
+    setValue(to, value);
+    setValue(from, undefValue);
+}
+
+bool ObjectWrapper::hasField(Key key) {
+    return key.has(_context, _object);
+}
+
+void ObjectWrapper::callMethod(const char* field,
+                               const JS::HandleValueArray& args,
+                               JS::MutableHandleValue out) {
+    if (JS::Call(_context, _object, field, args, out))
+        return;
+
+    throwCurrentJSException(_context, ErrorCodes::InternalError, "Failed to call method");
+}
+
+void ObjectWrapper::callMethod(const char* field, JS::MutableHandleValue out) {
+    JS::AutoValueVector args(_context);
+
+    callMethod(field, args, out);
+}
+
+void ObjectWrapper::callMethod(JS::HandleValue fun,
+                               const JS::HandleValueArray& args,
+                               JS::MutableHandleValue out) {
+    if (JS::Call(_context, _object, fun, args, out))
+        return;
+
+    throwCurrentJSException(_context, ErrorCodes::InternalError, "Failed to call method");
+}
+
+void ObjectWrapper::callMethod(JS::HandleValue fun, JS::MutableHandleValue out) {
+    JS::AutoValueVector args(_context);
+
+    callMethod(fun, args, out);
+}
+
+void ObjectWrapper::writeThis(BSONObjBuilder* b) {
     auto scope = getScope(_context);
 
     BSONObj* originalBSON = nullptr;
-    if (scope->bsonProto().instanceOf(_object)) {
+    if (scope->getBsonProto().instanceOf(_object)) {
         bool altered;
 
         std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, _object);
@@ -329,7 +353,7 @@ void ObjectWrapper::writeThis(BSONObjBuilder& b) {
         _writeField(b, id, originalBSON);
     });
 
-    const int sizeWithEOO = b.len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
+    const int sizeWithEOO = b->len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
     uassert(17260,
             str::stream() << "Converting from JavaScript to BSON failed: "
                           << "Object size " << sizeWithEOO << " exceeds limit of "
@@ -337,7 +361,7 @@ void ObjectWrapper::writeThis(BSONObjBuilder& b) {
             sizeWithEOO <= BSONObjMaxInternalSize);
 }
 
-void ObjectWrapper::_writeField(BSONObjBuilder& b, Key key, BSONObj* originalParent) {
+void ObjectWrapper::_writeField(BSONObjBuilder* b, Key key, BSONObj* originalParent) {
     JS::RootedValue value(_context);
     key.get(_context, _object, &value);
 
@@ -345,32 +369,6 @@ void ObjectWrapper::_writeField(BSONObjBuilder& b, Key key, BSONObj* originalPar
     x.setOriginalBSON(originalParent);
 
     x.writeThis(b, key.toString(_context));
-}
-
-void ObjectWrapper::setBSONElement(Key key, const BSONElement& elem, bool readOnly) {
-    JS::RootedValue value(_context);
-    ValueReader(_context, &value, _depth).fromBSONElement(elem, readOnly);
-
-    setValue(key, value);
-}
-
-void ObjectWrapper::setBSON(Key key, const BSONObj& obj, bool readOnly) {
-    JS::RootedValue value(_context);
-    ValueReader(_context, &value, _depth).fromBSON(obj, readOnly);
-
-    setValue(key, value);
-}
-
-void ObjectWrapper::rename(Key from, const char* to) {
-    JS::RootedValue value(_context);
-    JS::RootedValue undefValue(_context);
-
-    getValue(from, &value);
-
-    undefValue.setUndefined();
-
-    setValue(to, value);
-    setValue(from, undefValue);
 }
 
 }  // namespace mozjs

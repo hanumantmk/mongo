@@ -1,28 +1,29 @@
-/*    Copyright 2015 MongoMongo Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #include "mongo/platform/basic.h"
@@ -41,10 +42,6 @@
 
 namespace mongo {
 namespace mozjs {
-
-constexpr JSFunctionSpec MongoBase::methods[];
-constexpr char MongoBase::className[];
-constexpr JSFunctionSpec MongoExternalInfo::freeFunctions[];
 
 namespace {
 DBClientBase* getConnection(JS::CallArgs& args) {
@@ -133,7 +130,7 @@ void MongoBase::Functions::find(JSContext* cx, JS::CallArgs args) {
     }
 
     JS::RootedObject c(cx);
-    scope->cursorProto().newInstance(&c);
+    scope->getCursorProto().newInstance(&c);
 
     JS_SetPrivate(c, cursor.release());
 
@@ -170,7 +167,7 @@ void MongoBase::Functions::insert(JSContext* cx, JS::CallArgs args) {
 
         if (!ele.hasField("_id")) {
             JS::RootedValue value(cx);
-            scope->oidProto().newInstance(&value);
+            scope->getOidProto().newInstance(&value);
             ele.setValue("_id", value);
         }
 
@@ -307,7 +304,7 @@ void MongoBase::Functions::cursorFromId(JSContext* cx, JS::CallArgs args) {
     if (!(args.length() == 2 || args.length() == 3))
         uasserted(ErrorCodes::BadValue, "cursorFromId needs 2 or 3 args");
 
-    if (!scope->numberLongProto().instanceOf(args.get(1)))
+    if (!scope->getNumberLongProto().instanceOf(args.get(1)))
         uasserted(ErrorCodes::BadValue, "3rd arg must be a js Number");
 
     auto conn = getConnection(args);
@@ -322,7 +319,7 @@ void MongoBase::Functions::cursorFromId(JSContext* cx, JS::CallArgs args) {
         cursor->setBatchSize(args.get(2).toInt32());
 
     JS::RootedObject c(cx);
-    scope->cursorProto().newInstance(&c);
+    scope->getCursorProto().newInstance(&c);
 
     JS_SetPrivate(c, cursor.release());
 
@@ -470,7 +467,7 @@ void MongoLocalInfo::construct(JSContext* cx, JS::CallArgs args) {
     conn.reset(createDirectClient(scope->getOpContext()));
 
     JS::RootedObject thisv(cx);
-    scope->mongoLocalProto().newObject(&thisv);
+    scope->getMongoLocalProto().newObject(&thisv);
     ObjectWrapper o(cx, thisv);
 
     JS_SetPrivate(thisv, conn.release());
@@ -503,7 +500,7 @@ void MongoExternalInfo::construct(JSContext* cx, JS::CallArgs args) {
     }
 
     JS::RootedObject thisv(cx);
-    scope->mongoExternalProto().newObject(&thisv);
+    scope->getMongoExternalProto().newObject(&thisv);
     ObjectWrapper o(cx, thisv);
 
     JS_SetPrivate(thisv, conn.release());

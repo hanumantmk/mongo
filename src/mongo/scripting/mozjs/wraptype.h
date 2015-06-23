@@ -1,47 +1,50 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or  modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #pragma once
 
 #include <cstddef>
+#include <jsapi.h>
 #include <type_traits>
-#include "jsapi.h"
 
 #include "mongo/scripting/mozjs/exception.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/util/assert_util.h"
 
 #pragma push_macro("HAS_MEMBER_T")
+#pragma push_macro("INSTALL_INSTANCE_POINTER")
 #pragma push_macro("INSTALL_POINTER")
 #pragma push_macro("INSTALL_VALUE")
 #pragma push_macro("INSTALL_WRAPPED_POINTER")
 #pragma push_macro("WRAPPED_NAME_OR_NULLPTR")
 
 #undef HAS_MEMBER_T
+#undef INSTALL_INSTANCE_POINTER
 #undef INSTALL_POINTER
 #undef INSTALL_VALUE
 #undef INSTALL_WRAPPED_POINTER
@@ -49,16 +52,17 @@
 
 // The purpose of this class is to take in specially crafted types and generate
 // a wrapper which installs the type, along with any useful life cycle methods
-// and free functions that might be associated with it.  The template magic in
+// and free functions that might be associated with it. The template magic in
 // here, along with some useful macros, hides a lot of the implementation
-// complexity of exposing C++ code into javascript.  Most prominently, we have
+// complexity of exposing C++ code into javascript. Most prominently, we have
 // to wrap every function that can be called from javascript to prevent any C++
-// exceptions from leaking out.  We do this, with template and macro based
-// codegen, and turn mongo exceptions into status', then convert those into
-// javascript exceptions before returning.  That allows all consumers of this
-// library to throw exceptions freely, with the understanding that they'll be
-// visible in javascript.  Javascript exceptions are trapped at the top level
-// and converted back to mongo exceptions by an error handler on ImplScope.
+// exceptions from leaking out. We do this, with template and macro based
+// codegen, and turn mongo exceptions into instances of Status, then convert
+// those into javascript exceptions before returning. That allows all consumers
+// of this library to throw exceptions freely, with the understanding that
+// they'll be visible in javascript. Javascript exceptions are trapped at the
+// top level and converted back to mongo exceptions by an error handler on
+// ImplScope.
 
 // MONGO_*_JS_FUNCTION_* macros are public and allow wrapped types to install
 // their own functions on types and into the global scope
@@ -90,54 +94,79 @@
     template <typename T>                                                                       \
     class has_##name {                                                                          \
     private:                                                                                    \
+        struct fatChar {                                                                        \
+            char x[2];                                                                          \
+        };                                                                                      \
         template <typename U>                                                                   \
         class check {};                                                                         \
         template <typename C>                                                                   \
         static char f(check<decltype(&C::name)>*);                                              \
         template <typename C>                                                                   \
-        static long f(...);                                                                     \
+        static fatChar f(...);                                                                  \
                                                                                                 \
     public:                                                                                     \
-        static const bool value = (sizeof(f<T>(0)) == sizeof(char));                            \
+        static const bool value = (sizeof(f<T>(nullptr)) == sizeof(char));                      \
     };                                                                                          \
     template <typename T, typename = void>                                                      \
     struct name##_or_nullptr {                                                                  \
-        static constexpr std::nullptr_t value = nullptr;                                        \
+        std::nullptr_t value;                                                                   \
     };                                                                                          \
     template <typename T>                                                                       \
     struct name##_or_nullptr<T, typename std::enable_if<smUtils::has_##name<T>::value>::type> { \
-        static constexpr auto value = T::name;                                                  \
+        decltype(&T::name) value = &T::name;                                                    \
+    };                                                                                          \
+    template <typename T, typename = void>                                                      \
+    struct instance_##name##_or_nullptr {                                                       \
+        std::nullptr_t value(T& t) {                                                            \
+            return nullptr;                                                                     \
+        };                                                                                      \
+    };                                                                                          \
+    template <typename T>                                                                       \
+    struct instance_##name##_or_nullptr<                                                        \
+        T,                                                                                      \
+        typename std::enable_if<smUtils::has_##name<T>::value>::type> {                         \
+        typename std::decay<decltype(T().name)>::type value(T& t) {                             \
+            return t.name;                                                                      \
+        };                                                                                      \
     };                                                                                          \
     template <typename T, typename = void>                                                      \
     struct name##_or_0 {                                                                        \
-        static constexpr int value = 0;                                                         \
+        unsigned value = 0;                                                                     \
     };                                                                                          \
     template <typename T>                                                                       \
     struct name##_or_0<T, typename std::enable_if<smUtils::has_##name<T>::value>::type> {       \
-        static constexpr auto value = T::name;                                                  \
+        decltype(T::name) value = T::name;                                                      \
     };
 
 // WRAPPED_NAME_OR_NULLPTR needs to see the wrapped implementations on smUtils
 #define WRAPPED_NAME_OR_NULLPTR(name)                                   \
     template <typename T, typename = void>                              \
     struct wrapped_##name##_or_nullptr {                                \
-        static constexpr std::nullptr_t value = nullptr;                \
+        std::nullptr_t value;                                           \
     };                                                                  \
     template <typename T>                                               \
     struct wrapped_##name##_or_nullptr<                                 \
         T,                                                              \
         typename std::enable_if<smUtils::has_##name<T>::value>::type> { \
-        static constexpr auto value = name<T>;                          \
+        decltype(&name<T>) value = &name<T>;                            \
     };
 
 // These install values on the wrapped type that we can use in C++
-#define INSTALL_POINTER(name) \
-    static constexpr auto addrOf##name = smUtils::name##_or_nullptr<T>::value;
+#define INSTALL_POINTER(name)                                            \
+    const decltype(smUtils::name##_or_nullptr<T>().value) addrOf##name = \
+        smUtils::name##_or_nullptr<T>().value;
 
-#define INSTALL_WRAPPED_POINTER(name) \
-    static constexpr auto addrOf##name = smUtils::wrapped_##name##_or_nullptr<T>::value;
+#define INSTALL_INSTANCE_POINTER(name)                                                       \
+    auto addrOf##name(T& t)->decltype(smUtils::instance_##name##_or_nullptr<T>().value(t)) { \
+        return smUtils::instance_##name##_or_nullptr<T>().value(t);                          \
+    }
 
-#define INSTALL_VALUE(name) static constexpr auto valueOf##name = smUtils::name##_or_0<T>::value;
+#define INSTALL_WRAPPED_POINTER(name)                                              \
+    const decltype(smUtils::wrapped_##name##_or_nullptr<T>().value) addrOf##name = \
+        smUtils::wrapped_##name##_or_nullptr<T>().value;
+
+#define INSTALL_VALUE(name) \
+    const decltype(smUtils::name##_or_0<T>().value) valueOf##name = smUtils::name##_or_0<T>().value;
 
 namespace mongo {
 namespace mozjs {
@@ -185,9 +214,53 @@ static bool addProperty(JSContext* cx,
 };
 
 template <typename T>
+static bool call(JSContext* cx, unsigned argc, JS::Value* vp) {
+    try {
+        T::call(cx, JS::CallArgsFromVp(argc, vp));
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+};
+
+template <typename T>
+static bool construct(JSContext* cx, unsigned argc, JS::Value* vp) {
+    try {
+        T::construct(cx, JS::CallArgsFromVp(argc, vp));
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+};
+
+template <typename T>
+static bool convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp) {
+    try {
+        T::convert(cx, obj, type, vp);
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+};
+
+template <typename T>
 static bool delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded) {
     try {
         T::delProperty(cx, obj, id, succeeded);
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+};
+
+template <typename T>
+static bool enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {
+    try {
+        T::enumerate(cx, obj, properties);
         return true;
     } catch (...) {
         mongoToJSException(cx);
@@ -210,6 +283,17 @@ static bool getProperty(JSContext* cx,
 };
 
 template <typename T>
+static bool hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp) {
+    try {
+        T::hasInstance(cx, obj, vp, bp);
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+};
+
+template <typename T>
 static bool setProperty(
     JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool strict, JS::MutableHandleValue vp) {
     try {
@@ -222,64 +306,9 @@ static bool setProperty(
 };
 
 template <typename T>
-static bool enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {
-    try {
-        T::enumerate(cx, obj, properties);
-        return true;
-    } catch (...) {
-        mongoToJSException(cx);
-        return false;
-    }
-};
-
-template <typename T>
 static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp) {
     try {
         T::resolve(cx, obj, id, resolvedp);
-        return true;
-    } catch (...) {
-        mongoToJSException(cx);
-        return false;
-    }
-};
-
-template <typename T>
-static bool convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp) {
-    try {
-        T::convert(cx, obj, type, vp);
-        return true;
-    } catch (...) {
-        mongoToJSException(cx);
-        return false;
-    }
-};
-
-template <typename T>
-static bool call(JSContext* cx, unsigned argc, JS::Value* vp) {
-    try {
-        T::call(cx, JS::CallArgsFromVp(argc, vp));
-        return true;
-    } catch (...) {
-        mongoToJSException(cx);
-        return false;
-    }
-};
-
-template <typename T>
-static bool hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp) {
-    try {
-        T::hasInstance(cx, obj, vp, bp);
-        return true;
-    } catch (...) {
-        mongoToJSException(cx);
-        return false;
-    }
-};
-
-template <typename T>
-static bool construct(JSContext* cx, unsigned argc, JS::Value* vp) {
-    try {
-        T::construct(cx, JS::CallArgsFromVp(argc, vp));
         return true;
     } catch (...) {
         mongoToJSException(cx);
@@ -304,13 +333,13 @@ template <typename T>
 class WrapType : public T {
     // Yep, finalize should never throw
     INSTALL_POINTER(finalize)
+    INSTALL_POINTER(trace)
 
     // None of these are directly callbacks
-    INSTALL_POINTER(freeFunctions)
-    INSTALL_POINTER(inheritFrom)
-    INSTALL_POINTER(methods)
-    INSTALL_POINTER(postInstall)
-    INSTALL_POINTER(trace)
+    INSTALL_INSTANCE_POINTER(freeFunctions)
+    INSTALL_INSTANCE_POINTER(inheritFrom)
+    INSTALL_INSTANCE_POINTER(methods)
+    INSTALL_INSTANCE_POINTER(postInstall)
     INSTALL_VALUE(classFlags)
     INSTALL_VALUE(installType)
 
@@ -330,7 +359,7 @@ public:
     WrapType(JSContext* context)
         : _context(context),
           _proto(),
-          _jsclass({T::className,
+          _jsclass({_t.className,
                     valueOfclassFlags,
                     addrOfaddProperty,
                     addrOfdelProperty,
@@ -355,10 +384,10 @@ public:
 
             _proto.init(_context,
                         _assertPtr(JS_NewGlobalObject(
-                            _context, jsclass(), nullptr, JS::DontFireOnNewGlobalHook)));
+                            _context, &_jsclass, nullptr, JS::DontFireOnNewGlobalHook)));
 
             JSAutoCompartment ac(_context, _proto);
-            _installFunctions(_proto, addrOffreeFunctions);
+            _installFunctions(_proto, addrOffreeFunctions(_t));
         }
     }
 
@@ -381,17 +410,20 @@ public:
         }
     }
 
-    // newObject methods don't invoke the constructor.  So they're good for
-    // types without a constructor or inside the constructor
+    /**
+     * newObject methods don't invoke the constructor.  So they're good for
+     * types without a constructor or inside the constructor
+     */
     void newObject(JS::MutableHandleObject out) {
         // The regular form of JS_NewObject, where we pass proto as the
         // third param, actually does a global object lookup for some
         // reason.  This way allows object creation with non-public
         // prototypes and if someone deletes the symbol up the chain.
-        out.set(_assertPtr(JS_NewObject(_context, jsclass(), JS::NullPtr())));
+        out.set(_assertPtr(JS_NewObject(_context, &_jsclass, JS::NullPtr())));
 
         if (!JS_SetPrototype(_context, out, _proto))
-            uasserted(ErrorCodes::InternalError, "Failed to set prototype");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failed to set prototype");
     }
 
     void newObject(JS::MutableHandleValue out) {
@@ -401,7 +433,9 @@ public:
         out.setObjectOrNull(obj);
     }
 
-    // newInstance calls the constructor, a la new Type() in js
+    /**
+     * newInstance calls the constructor, a la new Type() in js
+     */
     void newInstance(JS::MutableHandleObject out) {
         JS::AutoValueVector args(_context);
 
@@ -436,19 +470,21 @@ public:
         return instanceOf(obj);
     }
 
-    const JSClass* jsclass() const {
+    const JSClass* getJSClass() const {
         return &_jsclass;
     }
 
-    JS::HandleObject proto() const {
+    JS::HandleObject getProto() const {
         return _proto;
     }
 
 private:
-    // Use this if you want your types installed visably in the global scope
+    /**
+     * Use this if you want your types installed visibly in the global scope
+     */
     void _installGlobal(JS::HandleObject global) {
         JS::RootedObject parent(_context);
-        _inheritFrom(addrOfinheritFrom, global, &parent);
+        _inheritFrom(addrOfinheritFrom(_t), global, &parent);
 
         _proto.init(_context,
                     JS_InitClass(_context,
@@ -458,28 +494,28 @@ private:
                                  addrOfconstruct,
                                  0,
                                  nullptr,
-                                 addrOfmethods,
+                                 addrOfmethods(_t),
                                  nullptr,
                                  nullptr));
 
-        _installFunctions(global, addrOffreeFunctions);
-        _postInstall(global, addrOfpostInstall);
+        _installFunctions(global, addrOffreeFunctions(_t));
+        _postInstall(global, addrOfpostInstall(_t));
     }
 
     // Use this if you want your types installed, but not visible in the
     // global scope
     void _installPrivate(JS::HandleObject global) {
         JS::RootedObject parent(_context);
-        _inheritFrom(addrOfinheritFrom, global, &parent);
+        _inheritFrom(addrOfinheritFrom(_t), global, &parent);
 
-        _proto.init(_context, _assertPtr(JS_NewObject(_context, jsclass(), parent)));
+        _proto.init(_context, _assertPtr(JS_NewObject(_context, &_jsclass, parent)));
 
-        _installFunctions(_proto, addrOfmethods);
-        _installFunctions(global, addrOffreeFunctions);
+        _installFunctions(_proto, addrOfmethods(_t));
+        _installFunctions(global, addrOffreeFunctions(_t));
 
         _installConstructor(addrOfconstruct);
 
-        _postInstall(global, addrOfpostInstall);
+        _postInstall(global, addrOfpostInstall(_t));
     }
 
     // Use this to attach things to types that we don't provide like
@@ -487,16 +523,17 @@ private:
     void _installOverNative(JS::HandleObject global) {
         JS::RootedValue value(_context);
         if (!JS_GetProperty(_context, global, T::className, &value))
-            uasserted(ErrorCodes::InternalError, "Couldn't get className property");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Couldn't get className property");
 
         if (!value.isObject())
             uasserted(ErrorCodes::BadValue, "className isn't object");
 
         _proto.init(_context, value.toObjectOrNull());
 
-        _installFunctions(_proto, addrOfmethods);
-        _installFunctions(global, addrOffreeFunctions);
-        _postInstall(global, addrOfpostInstall);
+        _installFunctions(_proto, addrOfmethods(_t));
+        _installFunctions(global, addrOffreeFunctions(_t));
+        _postInstall(global, addrOfpostInstall(_t));
     }
 
     void _installFunctions(JS::HandleObject global, const JSFunctionSpec* fs) {
@@ -505,7 +542,8 @@ private:
         if (JS_DefineFunctions(_context, global, fs))
             return;
 
-        uasserted(ErrorCodes::InternalError, "Failed to define functions");
+        throwCurrentJSException(
+            _context, ErrorCodes::JSInterpreterFailure, "Failed to define functions");
     }
 
     // We have to do this awkward dance to set the new style enumeration.
@@ -533,11 +571,12 @@ private:
         JS::RootedValue val(_context);
 
         if (!JS_GetProperty(_context, global, name, &val)) {
-            uasserted(ErrorCodes::InternalError, "Failed to get parent");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failed to get parent");
         }
 
         if (!val.isObject()) {
-            uasserted(ErrorCodes::InternalError, "Parent is not an object");
+            uasserted(ErrorCodes::JSInterpreterFailure, "Parent is not an object");
         }
 
         out.set(val.toObjectOrNull());
@@ -557,22 +596,27 @@ private:
 
         auto ptr = JS_NewFunction(_context, ctor, 0, JSFUN_CONSTRUCTOR, JS::NullPtr(), nullptr);
         if (!ptr) {
-            uasserted(ErrorCodes::InternalError, "Failed to install constructor");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failed to install constructor");
         }
 
         JS::RootedObject ctorObj(_context, JS_GetFunctionObject(ptr));
 
         if (!JS_LinkConstructorAndPrototype(_context, ctorObj, _proto))
-            uasserted(ErrorCodes::InternalError, "Failed to link constructor and prototype");
+            throwCurrentJSException(_context,
+                                    ErrorCodes::JSInterpreterFailure,
+                                    "Failed to link constructor and prototype");
     }
 
     JSObject* _assertPtr(JSObject* ptr) {
         if (!ptr)
-            uasserted(ErrorCodes::InternalError, "Failed to JS_NewX");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failed to JS_NewX");
 
         return ptr;
     }
 
+    T _t;
     JSContext* _context;
     JS::PersistentRootedObject _proto;
     JSClass _jsclass;
@@ -582,12 +626,14 @@ private:
 }  // namespace mongo
 
 #undef HAS_MEMBER_T
+#undef INSTALL_INSTANCE_POINTER
 #undef INSTALL_POINTER
 #undef INSTALL_VALUE
 #undef INSTALL_WRAPPED_POINTER
 #undef WRAPPED_NAME_OR_NULLPTR
 
 #pragma pop_macro("HAS_MEMBER_T")
+#pragma pop_macro("INSTALL_INSTANCE_POINTER")
 #pragma pop_macro("INSTALL_POINTER")
 #pragma pop_macro("INSTALL_VALUE")
 #pragma pop_macro("INSTALL_WRAPPED_POINTER")

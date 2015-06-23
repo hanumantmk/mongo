@@ -1,28 +1,29 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #include "mongo/platform/basic.h"
@@ -40,9 +41,17 @@
 namespace mongo {
 namespace mozjs {
 
-class BSONHolder {
+namespace {
+
+/**
+ * Holder for bson objects which tracks state for the js wrapper
+ *
+ * Basically, we have read only and read/write variants, and a need to manage
+ * the appearance of mutable state on the read/write versions.
+ */
+struct BSONHolder {
 public:
-    BSONHolder(BSONObj obj, bool ro)
+    BSONHolder(const BSONObj& obj, bool ro)
         : _obj(obj.getOwned()), _resolved(false), _readOnly(ro), _altered(false) {}
 
     BSONObj _obj;
@@ -52,19 +61,16 @@ public:
     std::set<std::string> _removed;
 };
 
-namespace {
 BSONHolder* getHolder(JSObject* obj) {
     return static_cast<BSONHolder*>(JS_GetPrivate(obj));
 }
-}
 
-constexpr char BSONInfo::className[];
-constexpr JSFunctionSpec BSONInfo::freeFunctions[];
+}  // namespace
 
 void BSONInfo::make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson, bool ro) {
     auto scope = getScope(cx);
 
-    scope->bsonProto().newInstance(obj);
+    scope->getBsonProto().newInstance(obj);
     JS_SetPrivate(obj, new BSONHolder(bson, ro));
 }
 
@@ -86,20 +92,21 @@ void BSONInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& 
     BSONObjIterator i(holder->_obj);
 
     ObjectWrapper o(cx, obj);
+    JS::RootedValue val(cx);
+    JS::RootedId id(cx);
 
     while (i.more()) {
         BSONElement e = i.next();
 
+        // TODO: when we get heterogenous set lookup, switch to StringData
+        // rather than involving the temporary string
         if (holder->_removed.count(e.fieldName()))
             continue;
 
-        JS::RootedValue val(cx);
         ValueReader(cx, &val).fromStringData(e.fieldNameStringData());
 
-        JS::RootedId id(cx);
-
         if (!JS_ValueToId(cx, val, &id))
-            uasserted(ErrorCodes::InternalError, "Failed to value to id");
+            uasserted(ErrorCodes::JSInterpreterFailure, "Failed to invoke JS_ValueToId");
 
         properties.append(id);
     }
@@ -176,19 +183,14 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
 void BSONInfo::construct(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 
-    scope->bsonProto().newObject(args.rval());
+    scope->getBsonProto().newObject(args.rval());
 }
 
 std::tuple<BSONObj*, bool> BSONInfo::originalBSON(JSContext* cx, JS::HandleObject obj) {
     std::tuple<BSONObj*, bool> out(nullptr, false);
 
-    auto holder = getHolder(obj);
-
-    if (!holder)
-        return out;
-
-    std::get<0>(out) = &holder->_obj;
-    std::get<1>(out) = holder->_altered;
+    if (auto holder = getHolder(obj))
+        out = std::make_tuple(&holder->_obj, holder->_altered);
 
     return out;
 }
@@ -198,10 +200,10 @@ void BSONInfo::Functions::bsonWoCompare(JSContext* cx, JS::CallArgs args) {
         uasserted(ErrorCodes::BadValue, "bsonWoCompare needs 2 argument");
 
     if (!args.get(0).isObject())
-        uasserted(ErrorCodes::BadValue, "first argument to bsonWoCompare has to be an object");
+        uasserted(ErrorCodes::BadValue, "first argument to bsonWoCompare must be an object");
 
     if (!args.get(1).isObject())
-        uasserted(ErrorCodes::BadValue, "second argument to bsonWoCompare has to be an object");
+        uasserted(ErrorCodes::BadValue, "second argument to bsonWoCompare must be an object");
 
     BSONObj firstObject = ValueWriter(cx, args.get(0)).toBSON();
     BSONObj secondObject = ValueWriter(cx, args.get(1)).toBSON();

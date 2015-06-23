@@ -1,44 +1,60 @@
-/*    Copyright 2015 MongoDB Inc.
+/**
+ * Copyright (C) 2015 MongoDB Inc.
  *
- *    This program is free software: you can redistribute it and/or  modify
- *    it under the terms of the GNU Affero General Public License, version 3,
- *    as published by the Free Software Foundation.
+ * This program is free software: you can redistribute it and/or  modify
+ * it under the terms of the GNU Affero General Public License, version 3,
+ * as published by the Free Software Foundation.
  *
- *    This program is distributed in the hope that it will be useful,
- *    but WITHOUT ANY WARRANTY; without even the implied warranty of
- *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *    GNU Affero General Public License for more details.
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
  *
- *    You should have received a copy of the GNU Affero General Public License
- *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
- *    As a special exception, the copyright holders give permission to link the
- *    code of portions of this program with the OpenSSL library under certain
- *    conditions as described in each individual source file and distribute
- *    linked combinations including the program with the OpenSSL library. You
- *    must comply with the GNU Affero General Public License in all respects
- *    for all of the code used other than as permitted herein. If you modify
- *    file(s) with this exception, you may extend this exception to your
- *    version of the file(s), but you are not obligated to do so. If you do not
- *    wish to do so, delete this exception statement from your version. If you
- *    delete this exception statement from all source files in the program,
- *    then also delete it in the license file.
+ * As a special exception, the copyright holders give permission to link the
+ * code of portions of this program with the OpenSSL library under certain
+ * conditions as described in each individual source file and distribute
+ * linked combinations including the program with the OpenSSL library. You
+ * must comply with the GNU Affero General Public License in all respects
+ * for all of the code used other than as permitted herein. If you modify
+ * file(s) with this exception, you may extend this exception to your
+ * version of the file(s), but you are not obligated to do so. If you do not
+ * wish to do so, delete this exception statement from your version. If you
+ * delete this exception statement from all source files in the program,
+ * then also delete it in the license file.
  */
 
 #pragma once
 
-#include "jsapi.h"
+#include <jsapi.h>
 #include <string>
 
-#include "mongo/bson/bsonobj.h"
+#include "mongo/scripting/mozjs/exception.h"
 
 namespace mongo {
+
+class BSONObj;
+class BSONObjBuilder;
+class BSONElement;
+
 namespace mozjs {
 
-class ImplScope;
+class MozJSImplScope;
 
+/**
+ * Wraps JSObject's with helpers for accessing their properties
+ *
+ * This wraps a RootedObject, so should only be allocated on the stack and is
+ * not movable or copyable
+ */
 class ObjectWrapper {
 public:
+    /**
+     * Helper subclass that provides some easy boilerplate for accessing
+     * properties by string, index or id.
+     */
     class Key {
         friend class ObjectWrapper;
 
@@ -69,6 +85,10 @@ public:
         Type _type;
     };
 
+    /**
+     * The depth parameter here allows us to detect overly nested or circular
+     * objects and bail without blowing the stack.
+     */
     ObjectWrapper(JSContext* cx, JS::HandleObject obj, int depth = 0);
     ObjectWrapper(JSContext* cx, JS::HandleValue value, int depth = 0);
 
@@ -88,10 +108,18 @@ public:
     void setValue(Key key, JS::HandleValue value);
     void setObject(Key key, JS::HandleObject value);
 
+    /**
+     * See JS_DefineProperty for what sort of attributes might be useful
+     */
     void defineProperty(Key key, JS::HandleValue value, unsigned attrs);
+
     void deleteProperty(Key key);
 
+    /**
+     * Returns the bson type of the property
+     */
     int type(Key key);
+
     void rename(Key key, const char* to);
 
     bool hasField(Key key);
@@ -103,28 +131,49 @@ public:
                     JS::MutableHandleValue out);
     void callMethod(JS::HandleValue fun, JS::MutableHandleValue out);
 
+    /**
+     * Safely enumerates fields in the object, invoking a callback for each id
+     */
     template <typename T>
     void enumerate(T&& t) {
         JS::AutoIdArray ids(_context, JS_Enumerate(_context, _object));
 
         if (!ids)
-            uasserted(ErrorCodes::InternalError, "Failure to enumerate object");
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failure to enumerate object");
 
+        JS::RootedId rid(_context);
         for (size_t i = 0; i < ids.length(); ++i) {
-            JS::RootedId rid(_context, ids[i]);
+            rid.set(ids[i]);
             t(rid);
         }
     }
 
-    void writeThis(BSONObjBuilder& b);
+    /**
+     * concatenates all of the fields in the object into the associated builder
+     */
+    void writeThis(BSONObjBuilder* b);
 
-    JS::HandleObject thisv();
+    JS::HandleObject thisv() {
+        return _object;
+    }
 
 private:
-    void _writeField(BSONObjBuilder& b, Key key, BSONObj* originalBSON);
+    /**
+     * writes the field "key" into the associated builder
+     *
+     * optional originalBSON is used to track updates to types (NumberInt
+     * overwritten by a float, but coercible to the original type, etc.)
+     */
+    void _writeField(BSONObjBuilder* b, Key key, BSONObj* originalBSON);
 
     JSContext* _context;
     JS::RootedObject _object;
+
+    /**
+     * The depth of an object wrapper has to do with how many parents it has.
+     * Used to avoid circular object graphs and associate stack smashing.
+     */
     int _depth;
 };
 
