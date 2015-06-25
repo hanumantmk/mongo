@@ -26,18 +26,14 @@
  * then also delete it in the license file.
  */
 
-#include "mongo/platform/basic.h"
-
-#include "mongo/scripting/mozjs/implscope.h"
-
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
 #include "mongo/platform/basic.h"
 
 #include "mongo/scripting/mozjs/implscope.h"
 
-#include "jscustomallocator.h"
-#include "jsfriendapi.h"
+#include <jscustomallocator.h>
+#include <jsfriendapi.h>
 
 #include "mongo/base/error_codes.h"
 #include "mongo/db/operation_context.h"
@@ -190,12 +186,14 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
       _status(ErrorCodes::InternalError, "Unknown MozJS error"),
       _binDataProto(_context),
       _bsonProto(_context),
+      _countDownLatchProto(_context),
       _cursorProto(_context),
       _dbCollectionProto(_context),
       _dbPointerProto(_context),
       _dbQueryProto(_context),
       _dbProto(_context),
       _dbRefProto(_context),
+      _jsThreadProto(_context),
       _maxKeyProto(_context),
       _minKeyProto(_context),
       _mongoExternalProto(_context),
@@ -339,6 +337,43 @@ void MozJSImplScope::newFunction(StringData raw, JS::MutableHandleValue out) {
     _checkErrorState(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), out));
 }
 
+BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
+    MozJSEntry entry(this);
+
+    JS::RootedValue f(_context);
+    ValueReader(_context, &f).fromBSONElement(args.firstElement(), true);
+
+    int argc = args.nFields() - 1;
+
+    // TODO SERVER-8016: properly allocate handles on the stack
+    JS::AutoValueVector argv(_context);
+    BSONObjIterator it(args);
+    it.next();
+    JS::RootedValue value(_context);
+    for (int i = 0; i < argc; ++i) {
+        ValueReader(_context, &value).fromBSONElement(*it, true);
+        argv.append(value);
+        it.next();
+    }
+
+    JS::RootedValue out(_context);
+    JS::RootedObject thisv(_context);
+
+    bool success = JS::Call(_context, thisv, f, argv, &out);
+
+    if (!success) {
+        auto status = currentJSExceptionToStatus(_context, ErrorCodes::JSInterpreterFailure, "Unknown callThread failure");
+
+        log() << "js thread raised js exception: " << status;
+
+        uasserted(status.code(), status.reason());
+    }
+
+    BSONObjBuilder b;
+    ValueWriter(_context, out).writeThis(&b, "ret");
+
+    return b.obj();
+}
 
 bool hasFunctionIdentifier(StringData code) {
     if (code.size() < 9 || code.find("function") != 0)
@@ -450,7 +485,7 @@ int MozJSImplScope::invoke(ScriptingFunction func,
         // must validate the handle because TerminateExecution may have
         // been thrown after the above checks
         if (out.isObject() && _nativeFunctionProto.instanceOf(out)) {
-            log() << "storing native function as return value" << std::endl;
+            warning() << "storing native function as return value";
             _lastRetIsNativeCode = true;
         } else {
             _lastRetIsNativeCode = false;
@@ -570,8 +605,7 @@ void MozJSImplScope::externalSetup() {
     installDBAccess();
 
     // install thread-related functions (e.g. _threadInject)
-    // TODO: turn this back on!
-    // installFork(this, _global, _context);
+    installFork();
 
     // install the Mongo function object
     _mongoExternalProto.install(_global);
@@ -610,6 +644,11 @@ void MozJSImplScope::installDBAccess() {
     _dbProto.install(_global);
     _dbQueryProto.install(_global);
     _dbCollectionProto.install(_global);
+}
+
+void MozJSImplScope::installFork() {
+    _countDownLatchProto.install(_global);
+    _jsThreadProto.install(_global);
 }
 
 bool MozJSImplScope::_checkErrorState(bool success, bool reportError, bool assertOnError) {

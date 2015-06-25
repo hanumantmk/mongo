@@ -33,6 +33,12 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "RegExp" Javascript object.
+ *
+ * Note that this installs over native.  We only use this to grab the regexp
+ * prototype early in case users overwrite it.
+ */
 struct RegExpInfo {
     const char* const className = "RegExp";
 

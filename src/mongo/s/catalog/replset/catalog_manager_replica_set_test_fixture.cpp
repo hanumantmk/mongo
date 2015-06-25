@@ -32,63 +32,100 @@
 
 #include <vector>
 
+#include "mongo/base/status_with.h"
 #include "mongo/client/remote_command_runner_mock.h"
 #include "mongo/client/remote_command_targeter_factory_mock.h"
-#include "mongo/executor/task_executor.h"
-#include "mongo/s/catalog/dist_lock_catalog_mock.h"
+#include "mongo/db/repl/replication_executor.h"
+#include "mongo/executor/network_interface_mock.h"
+#include "mongo/s/catalog/dist_lock_manager_mock.h"
 #include "mongo/s/catalog/replset/catalog_manager_replica_set.h"
-#include "mongo/s/catalog/replset/replset_dist_lock_manager.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
 #include "mongo/stdx/memory.h"
 
 namespace mongo {
 
-    using std::vector;
+using executor::NetworkInterfaceMock;
+using executor::NetworkTestEnv;
 
-    CatalogManagerReplSetTestFixture::CatalogManagerReplSetTestFixture() {
-        std::unique_ptr<CatalogManagerReplicaSet> cm(
-            stdx::make_unique<CatalogManagerReplicaSet>());
+using std::vector;
 
-        std::unique_ptr<ReplSetDistLockManager> distLockMgr(
-            stdx::make_unique<ReplSetDistLockManager>("Test",
-                                                      stdx::make_unique<DistLockCatalogMock>(),
-                                                      Milliseconds(2),
-                                                      Seconds(10)));
+CatalogManagerReplSetTestFixture::CatalogManagerReplSetTestFixture() = default;
 
-        ASSERT_OK(cm->init(ConnectionString::forReplicaSet("CatalogManagerReplSetTest",
-                                                           { HostAndPort{ "TestHost1" },
-                                                             HostAndPort{ "TestHost2" } }),
-                           std::move(distLockMgr)));
+CatalogManagerReplSetTestFixture::~CatalogManagerReplSetTestFixture() = default;
 
-        std::unique_ptr<ShardRegistry> shardRegistry(
-            stdx::make_unique<ShardRegistry>(stdx::make_unique<RemoteCommandTargeterFactoryMock>(),
-                                             stdx::make_unique<RemoteCommandRunnerMock>(),
-                                             std::unique_ptr<executor::TaskExecutor>{nullptr},
-                                             cm.get()));
+void CatalogManagerReplSetTestFixture::setUp() {
+    std::unique_ptr<NetworkInterfaceMock> network(
+        stdx::make_unique<executor::NetworkInterfaceMock>());
 
-        // For now initialize the global grid object. All sharding objects will be accessible
-        // from there until we get rid of it.
-        grid.init(std::move(cm), std::move(shardRegistry));
-    }
+    _mockNetwork = network.get();
+    _networkTestEnv = stdx::make_unique<NetworkTestEnv>(_mockNetwork);
 
-    CatalogManagerReplSetTestFixture::~CatalogManagerReplSetTestFixture() {
-        grid.clearForUnitTests();
-    }
+    std::unique_ptr<repl::ReplicationExecutor> executor(
+        stdx::make_unique<repl::ReplicationExecutor>(network.release(), nullptr, 0));
 
-    CatalogManagerReplicaSet* CatalogManagerReplSetTestFixture::catalogManager() const {
-        auto cm = dynamic_cast<CatalogManagerReplicaSet*>(grid.catalogManager());
-        invariant(cm);
+    _networkTestEnv->startUp(executor.get());
 
-        return cm;
-    }
+    std::unique_ptr<CatalogManagerReplicaSet> cm(stdx::make_unique<CatalogManagerReplicaSet>());
 
-    ShardRegistry* CatalogManagerReplSetTestFixture::shardRegistry() const {
-        return grid.shardRegistry();
-    }
+    ASSERT_OK(cm->init(
+        ConnectionString::forReplicaSet("CatalogManagerReplSetTest",
+                                        {HostAndPort{"TestHost1"}, HostAndPort{"TestHost2"}}),
+        stdx::make_unique<DistLockManagerMock>()));
 
-    RemoteCommandRunnerMock* CatalogManagerReplSetTestFixture::commandRunner() const {
-        return RemoteCommandRunnerMock::get(shardRegistry()->getCommandRunner());
-    }
+    std::unique_ptr<ShardRegistry> shardRegistry(
+        stdx::make_unique<ShardRegistry>(stdx::make_unique<RemoteCommandTargeterFactoryMock>(),
+                                         stdx::make_unique<RemoteCommandRunnerMock>(),
+                                         std::move(executor),
+                                         cm.get()));
 
-} // namespace mongo
+    // For now initialize the global grid object. All sharding objects will be accessible
+    // from there until we get rid of it.
+    grid.init(std::move(cm), std::move(shardRegistry));
+}
+
+void CatalogManagerReplSetTestFixture::tearDown() {
+    // Stop the executor and wait for the executor thread to complete. This means that there
+    // will be no more calls into the executor and it can be safely deleted.
+    shardRegistry()->getExecutor()->shutdown();
+    _networkTestEnv->shutDown();
+
+    // This call will delete the shard registry, which will terminate the executor
+    grid.clearForUnitTests();
+}
+
+CatalogManagerReplicaSet* CatalogManagerReplSetTestFixture::catalogManager() const {
+    auto cm = dynamic_cast<CatalogManagerReplicaSet*>(grid.catalogManager());
+    invariant(cm);
+
+    return cm;
+}
+
+ShardRegistry* CatalogManagerReplSetTestFixture::shardRegistry() const {
+    return grid.shardRegistry();
+}
+
+RemoteCommandRunnerMock* CatalogManagerReplSetTestFixture::commandRunner() const {
+    return RemoteCommandRunnerMock::get(shardRegistry()->getCommandRunner());
+}
+
+executor::NetworkInterfaceMock* CatalogManagerReplSetTestFixture::network() const {
+    return _mockNetwork;
+}
+
+DistLockManagerMock* CatalogManagerReplSetTestFixture::distLock() const {
+    auto distLock = dynamic_cast<DistLockManagerMock*>(catalogManager()->getDistLockManager());
+    invariant(distLock);
+
+    return distLock;
+}
+
+void CatalogManagerReplSetTestFixture::onCommand(NetworkTestEnv::OnCommandFunction func) {
+    _networkTestEnv->onCommand(func);
+}
+
+void CatalogManagerReplSetTestFixture::onFindCommand(NetworkTestEnv::OnFindCommandFunction func) {
+    _networkTestEnv->onFindCommand(func);
+}
+
+}  // namespace mongo

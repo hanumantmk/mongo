@@ -40,6 +40,12 @@
 namespace mongo {
 namespace mozjs {
 
+namespace {
+const char* const kTop = "top";
+const char* const kBottom = "bottom";
+const char* const kFloatApprox = "floatApprox";
+}  // namespace
+
 long long NumberLongInfo::ToNumberLong(JSContext* cx, JS::HandleValue thisv) {
     JS::RootedObject obj(cx, thisv.toObjectOrNull());
     return ToNumberLong(cx, obj);
@@ -48,18 +54,18 @@ long long NumberLongInfo::ToNumberLong(JSContext* cx, JS::HandleValue thisv) {
 long long NumberLongInfo::ToNumberLong(JSContext* cx, JS::HandleObject thisv) {
     ObjectWrapper o(cx, thisv);
 
-    if (!o.hasField("top")) {
-        if (!o.hasField("floatApprox"))
+    if (!o.hasField(kTop)) {
+        if (!o.hasField(kFloatApprox))
             uasserted(ErrorCodes::InternalError, "No top and no floatApprox fields");
 
-        return o.getNumber("floatApprox");
+        return o.getNumber(kFloatApprox);
     }
 
-    if (!o.hasField("bottom"))
+    if (!o.hasField(kBottom))
         uasserted(ErrorCodes::InternalError, "top but no bottom field");
 
-    return ((unsigned long long)((long long)o.getNumber("top") << 32) +
-            (unsigned)(o.getNumber("bottom")));
+    return ((unsigned long long)((long long)o.getNumber(kTop) << 32) +
+            (unsigned)(o.getNumber(kBottom)));
 }
 
 void NumberLongInfo::Functions::valueOf(JSContext* cx, JS::CallArgs args) {
@@ -88,6 +94,10 @@ void NumberLongInfo::Functions::toString(JSContext* cx, JS::CallArgs args) {
 }
 
 void NumberLongInfo::construct(JSContext* cx, JS::CallArgs args) {
+    uassert(ErrorCodes::BadValue,
+            "NumberLong needs 0, 1 or 3 arguments",
+            args.length() == 0 || args.length() == 1 || args.length() == 3);
+
     auto scope = getScope(cx);
 
     JS::RootedObject thisv(cx);
@@ -100,10 +110,10 @@ void NumberLongInfo::construct(JSContext* cx, JS::CallArgs args) {
     JS::RootedValue bottom(cx);
 
     if (args.length() == 0) {
-        o.setNumber("floatApprox", 0);
+        o.setNumber(kFloatApprox, 0);
     } else if (args.length() == 1) {
         if (args.get(0).isNumber()) {
-            o.setValue("floatApprox", args.get(0));
+            o.setValue(kFloatApprox, args.get(0));
         } else {
             std::string str = ValueWriter(cx, args.get(0)).toString();
 
@@ -112,24 +122,30 @@ void NumberLongInfo::construct(JSContext* cx, JS::CallArgs args) {
             // values above 2^53 are not accurately represented in JS
             if ((long long)val == (long long)(double)(long long)(val) &&
                 val < 9007199254740992ULL) {
-                o.setNumber("floatApprox", val);
+                o.setNumber(kFloatApprox, val);
             } else {
-                o.setNumber("floatApprox", val);
-                o.setNumber("top", val >> 32);
-                o.setNumber("bottom", val & 0x00000000ffffffff);
+                o.setNumber(kFloatApprox, val);
+                o.setNumber(kTop, val >> 32);
+                o.setNumber(kBottom, val & 0x00000000ffffffff);
             }
         }
     } else {
         if (!args.get(0).isNumber())
-            uasserted(ErrorCodes::BadValue, "arguments must be numbers");
-        if (!args.get(1).isNumber())
-            uasserted(ErrorCodes::BadValue, "arguments must be numbers");
-        if (!args.get(2).isNumber())
-            uasserted(ErrorCodes::BadValue, "arguments must be numbers");
+            uasserted(ErrorCodes::BadValue, "floatApprox must be a number");
 
-        o.setValue("floatApprox", args.get(0));
-        o.setValue("top", args.get(1));
-        o.setValue("bottom", args.get(2));
+        if (!args.get(1).isNumber() ||
+            args.get(1).toNumber() !=
+                static_cast<double>(static_cast<uint32_t>(args.get(1).toNumber())))
+            uasserted(ErrorCodes::BadValue, "top must be a 32 bit unsigned number");
+
+        if (!args.get(2).isNumber() ||
+            args.get(2).toNumber() !=
+                static_cast<double>(static_cast<uint32_t>(args.get(2).toNumber())))
+            uasserted(ErrorCodes::BadValue, "bottom must be a 32 bit unsigned number");
+
+        o.setValue(kFloatApprox, args.get(0));
+        o.setValue(kTop, args.get(1));
+        o.setValue(kBottom, args.get(2));
     }
 
     args.rval().setObjectOrNull(thisv);

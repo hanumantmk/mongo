@@ -33,6 +33,12 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * Wraps a DBClientCursor in javascript
+ *
+ * Note that the install is private, so this class should only be constructible
+ * from C++. Current callers are all via the Mongo object.
+ */
 struct CursorInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);

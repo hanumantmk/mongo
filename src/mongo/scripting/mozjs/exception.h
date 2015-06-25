@@ -48,6 +48,13 @@ void mongoToJSException(JSContext* cx);
 void setJSException(JSContext* cx, ErrorCodes::Error code, StringData sd);
 
 /**
+ * Converts the current pending js expection into a status
+ *
+ * The altCode and altReason are used if no JS exception is pending
+ */
+Status currentJSExceptionToStatus(JSContext* cx, ErrorCodes::Error altCode, StringData altReason);
+
+/**
  * Turns the current JS exception into a C++ exception
  *
  * The altCode and altReason are used if no JS exception is pending

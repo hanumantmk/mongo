@@ -32,6 +32,12 @@
 
 namespace mongo {
 namespace mozjs {
+
+/**
+ * Wrapper for the BinData bson type
+ *
+ * It offers some simple methods and a handful of specialized constructors
+ */
 struct BinDataInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);

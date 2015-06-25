@@ -33,6 +33,16 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "DBRef" Javascript object.
+ *
+ * These look like:
+ * {
+ *     $ref : String(),
+ *     $id : Any,
+ *     $db : String(),
+ * }
+ */
 struct DBRefInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 

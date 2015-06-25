@@ -33,6 +33,12 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * Adds some methods onto the JS type "Object"
+ *
+ * Note that this installs "overNative", so we don't actually do anything other
+ * than layer a couple of our own functions on top of the existing prototype.
+ */
 struct ObjectInfo {
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(bsonsize);

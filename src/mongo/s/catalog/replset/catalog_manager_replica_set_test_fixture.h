@@ -28,29 +28,64 @@
 
 #pragma once
 
+#include <functional>
+#include <thread>
+#include <vector>
+
+#include "mongo/executor/network_test_env.h"
+#include "mongo/stdx/thread.h"
 #include "mongo/unittest/unittest.h"
 
 namespace mongo {
 
-    class CatalogManagerReplicaSet;
-    class RemoteCommandRunnerMock;
-    class ShardRegistry;
+class BSONObj;
+class CatalogManagerReplicaSet;
+class DistLockManagerMock;
+struct RemoteCommandRequest;
+class RemoteCommandRunnerMock;
+class ShardRegistry;
+template <typename T>
+class StatusWith;
+
+namespace executor {
+
+class NetworkInterfaceMock;
+
+}  // namespace executor
+
+/**
+ * Sets up the mocked out objects for testing the replica-set backed catalog manager.
+ */
+class CatalogManagerReplSetTestFixture : public mongo::unittest::Test {
+public:
+    CatalogManagerReplSetTestFixture();
+    ~CatalogManagerReplSetTestFixture();
+
+protected:
+    CatalogManagerReplicaSet* catalogManager() const;
+
+    ShardRegistry* shardRegistry() const;
+
+    RemoteCommandRunnerMock* commandRunner() const;
+
+    executor::NetworkInterfaceMock* network() const;
+
+    DistLockManagerMock* distLock() const;
 
     /**
-     * Sets up the mocked out objects for testing the replica-set backed catalog manager.
+     * Blocking methods, which receive one message from the network and respond using the
+     * responses returned from the input function. This is a syntactic sugar for simple,
+     * single request + response or find tests.
      */
-    class CatalogManagerReplSetTestFixture : public mongo::unittest::Test {
-    public:
-        CatalogManagerReplSetTestFixture();
-        ~CatalogManagerReplSetTestFixture();
+    void onCommand(executor::NetworkTestEnv::OnCommandFunction func);
+    void onFindCommand(executor::NetworkTestEnv::OnFindCommandFunction func);
 
-    protected:
-        // Shortcut methods, which return the main testable objects
-        CatalogManagerReplicaSet* catalogManager() const;
+    void setUp() override;
 
-        ShardRegistry* shardRegistry() const;
+    void tearDown() override;
 
-        RemoteCommandRunnerMock* commandRunner() const;
-    };
+    executor::NetworkInterfaceMock* _mockNetwork;
+    std::unique_ptr<executor::NetworkTestEnv> _networkTestEnv;
+};
 
-} // namespace mongo
+}  // namespace mongo

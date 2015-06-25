@@ -33,6 +33,12 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The global object for all of our JS.
+ *
+ * This function is super special and it's properties are the globally visible
+ * symbol for JS execution.
+ */
 struct GlobalInfo {
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(gc);

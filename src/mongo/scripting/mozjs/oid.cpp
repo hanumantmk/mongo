@@ -56,12 +56,9 @@ void OIDInfo::Functions::toString(JSContext* cx, JS::CallArgs args) {
     JS::RootedValue value(cx);
     o.getValue("str", &value);
 
-    auto str = ValueWriter(cx, value).toString();
+    std::string str = str::stream() << "ObjectId(\"" << ValueWriter(cx, value).toString() << "\")";
 
-    str::stream ss;
-
-    ss << "ObjectId(\"" << str << "\")";
-    ValueReader(cx, args.rval()).fromStringData(ss.operator std::string());
+    ValueReader(cx, args.rval()).fromStringData(str);
 }
 
 void OIDInfo::construct(JSContext* cx, JS::CallArgs args) {

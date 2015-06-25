@@ -114,7 +114,7 @@ void BinDataInfo::Functions::HexData(JSContext* cx, JS::CallArgs args) {
 
     JS::RootedValue type(cx, args.get(0));
 
-    if (!type.isNumber() || type.toInt32() < 0 || type.toInt32() > 255)
+    if (!type.isInt32() || type.toInt32() < 0 || type.toInt32() > 255)
         uasserted(ErrorCodes::BadValue,
                   "HexData subtype must be a Number between 0 and 255 inclusive");
 
@@ -130,7 +130,7 @@ void BinDataInfo::Functions::toString(JSContext* cx, JS::CallArgs args) {
 
     str::stream ss;
 
-    ss << "BinData(\"" << o.getNumber("type") << ",\"" << *str << "\")";
+    ss << "BinData(" << o.getNumber("type") << ",\"" << *str << "\")";
 
     ValueReader(cx, args.rval()).fromStringData(ss.operator std::string());
 }
@@ -166,7 +166,7 @@ void BinDataInfo::construct(JSContext* cx, JS::CallArgs args) {
 
     auto type = args.get(0);
 
-    if (!type.isNumber() || type.toInt32() < 0 || type.toInt32() > 255) {
+    if (!type.isInt32() || type.toInt32() < 0 || type.toInt32() > 255) {
         uasserted(ErrorCodes::BadValue,
                   "BinData subtype must be a Number between 0 and 255 inclusive");
     }

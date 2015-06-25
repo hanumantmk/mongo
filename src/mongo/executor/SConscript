@@ -17,6 +17,7 @@ env.Library(target='network_interface_impl', # TODO: rename to thread_pool_netwo
             source=['network_interface_impl.cpp',],
             LIBDEPS=[
                 '$BUILD_DIR/mongo/client/remote_command_runner_impl',
+                '$BUILD_DIR/mongo/util/concurrency/thread_pool',
                 'network_interface',
                 # TODO: add dependency on the task executor *interface* once available.
             ])
@@ -26,3 +27,12 @@ env.Library('network_interface_mock',
             LIBDEPS=[
                 'network_interface',
             ])
+
+env.Library(target='network_test_env',
+            source=['network_test_env.cpp',],
+            LIBDEPS=[
+                'network_interface_mock',
+                '$BUILD_DIR/mongo/db/coredb',
+                '$BUILD_DIR/mongo/db/repl/replication_executor',
+            ])
+

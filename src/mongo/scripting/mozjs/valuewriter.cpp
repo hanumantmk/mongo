@@ -83,7 +83,7 @@ BSONObj ValueWriter::toBSON() {
     JS::RootedObject obj(_context, _value.toObjectOrNull());
 
     BSONObjBuilder bob;
-    ObjectWrapper(_context, obj).writeThis(&bob);
+    ObjectWrapper(_context, obj, _depth).writeThis(&bob);
 
     return bob.obj();
 }
@@ -169,7 +169,7 @@ void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd) {
 void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj) {
     auto scope = getScope(_context);
 
-    ObjectWrapper o(_context, obj);
+    ObjectWrapper o(_context, obj, _depth);
 
     if (JS_ObjectIsFunction(_context, _value.toObjectOrNull())) {
         uassert(16716,

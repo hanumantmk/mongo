@@ -33,6 +33,15 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "DB" Javascript object.
+ *
+ * This maps to the 'db' global variable you can call db.COLLECTION_NAME.X() on
+ * in the shell.
+ *
+ * Its major magic is in its getProperty() callback, which threads through to
+ * a getCollection method installed in js
+ */
 struct DBInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void getProperty(JSContext* cx,

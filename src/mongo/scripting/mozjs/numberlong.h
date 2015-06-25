@@ -32,6 +32,21 @@
 
 namespace mongo {
 namespace mozjs {
+
+/**
+ * The "NumberLong" Javascript object.
+ *
+ * Represents a 64 integer with a JS representation like:
+ *
+ * {
+ *     top         : Double,
+ *     bottom      : Double,
+ *     floatApprox : Double,
+ * }
+ *
+ * Where top is the high 32 bits, bottom the low 32 bits and floatApprox a
+ * floating point approximation.
+ */
 struct NumberLongInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 
@@ -50,7 +65,7 @@ struct NumberLongInfo {
 
     const char* const className = "NumberLong";
 
-    static long long ToNumberLong(JSContext* cx, JS::HandleObject value);
+    static long long ToNumberLong(JSContext* cx, JS::HandleObject object);
     static long long ToNumberLong(JSContext* cx, JS::HandleValue value);
 };
 

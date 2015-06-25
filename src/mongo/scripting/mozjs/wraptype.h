@@ -487,16 +487,16 @@ private:
         _inheritFrom(addrOfinheritFrom(_t), global, &parent);
 
         _proto.init(_context,
-                    JS_InitClass(_context,
-                                 global,
-                                 parent,
-                                 &_jsclass,
-                                 addrOfconstruct,
-                                 0,
-                                 nullptr,
-                                 addrOfmethods(_t),
-                                 nullptr,
-                                 nullptr));
+                    _assertPtr(JS_InitClass(_context,
+                                            global,
+                                            parent,
+                                            &_jsclass,
+                                            addrOfconstruct,
+                                            0,
+                                            nullptr,
+                                            addrOfmethods(_t),
+                                            nullptr,
+                                            nullptr)));
 
         _installFunctions(global, addrOffreeFunctions(_t));
         _postInstall(global, addrOfpostInstall(_t));
@@ -508,7 +508,12 @@ private:
         JS::RootedObject parent(_context);
         _inheritFrom(addrOfinheritFrom(_t), global, &parent);
 
-        _proto.init(_context, _assertPtr(JS_NewObject(_context, &_jsclass, parent)));
+        // See newObject() for why we have to do this dance with the explicit
+        // SetPrototype
+        _proto.init(_context, _assertPtr(JS_NewObject(_context, &_jsclass, JS::NullPtr())));
+        if (parent.get() && !JS_SetPrototype(_context, _proto, parent))
+            throwCurrentJSException(
+                _context, ErrorCodes::JSInterpreterFailure, "Failed to set prototype");
 
         _installFunctions(_proto, addrOfmethods(_t));
         _installFunctions(global, addrOffreeFunctions(_t));

@@ -50,17 +50,17 @@ public:
     /**
      * Converts to a string.  This coerces for integers
      */
-    std::string toString();
+    std::string toString() const;
 
     /**
      * Converts to an int.  This throws if the id is not an integer
      */
-    uint32_t toInt32();
+    uint32_t toInt32() const;
 
-    bool isString();
-    bool isInt();
+    bool isString() const;
+    bool isInt() const;
 
-    bool equals(StringData sd);
+    bool equals(StringData sd) const;
 
 private:
     JSContext* _context;

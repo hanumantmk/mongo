@@ -61,11 +61,11 @@ void DBInfo::getProperty(JSContext* cx,
             ObjectWrapper o(cx, vp);
 
             if (o.hasField("_fullName")) {
-                auto context = scope->getOpContext();
+                auto opContext = scope->getOpContext();
 
                 // need to check every time that the collection did not get sharded
-                if (context &&
-                    haveLocalShardingInfo(context->getClient(), o.getString("_fullName")))
+                if (opContext &&
+                    haveLocalShardingInfo(opContext->getClient(), o.getString("_fullName")))
                     uasserted(ErrorCodes::BadValue, "can't use sharded collection from db.eval");
             }
         }
@@ -109,6 +109,12 @@ void DBInfo::construct(JSContext* cx, JS::CallArgs args) {
 
     if (args.length() != 2)
         uasserted(ErrorCodes::BadValue, "db constructor requires 2 arguments");
+
+    for (unsigned i = 0; i < args.length(); ++i) {
+        uassert(ErrorCodes::BadValue,
+                "db initializer called with undefined argument",
+                !args.get(i).isUndefined());
+    }
 
     JS::RootedObject thisv(cx);
     scope->getDbProto().newObject(&thisv);

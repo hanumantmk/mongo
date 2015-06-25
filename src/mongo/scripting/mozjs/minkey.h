@@ -33,6 +33,13 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "MinKey" Javascript object.
+ *
+ * These are slightly special, in that there is only one MinKey object and
+ * whenever you call the constructor to make a new one you just get the
+ * "singleton" MinKey from the prototype. See the postInstall for details.
+ */
 struct MinKeyInfo {
     static void call(JSContext* cx, JS::CallArgs args);
     static void construct(JSContext* cx, JS::CallArgs args);

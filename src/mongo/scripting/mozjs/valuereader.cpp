@@ -26,10 +26,6 @@
  * then also delete it in the license file.
  */
 
-#include "mongo/platform/basic.h"
-
-#include "mongo/scripting/mozjs/valuereader.h"
-
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
 #include "mongo/platform/basic.h"
@@ -80,10 +76,15 @@ void ValueReader::fromBSONElement(const BSONElement& elem, bool readOnly) {
             _value.setInt32(elem.Int());
             return;
         case mongo::Array: {
-            JS::RootedObject array(_context, JS_NewArrayObject(_context, 0));
-            int i = 0;
+            auto arrayPtr = JS_NewArrayObject(_context, 0);
+            uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_NewArrayObject", arrayPtr);
+            JS::RootedObject array(_context, arrayPtr);
+
+            unsigned i = 0;
             BSONForEach(subElem, elem.embeddedObject()) {
-                char str[20];
+                // We use an unsigned 32 bit integer, so 10 base 10 digits and
+                // 1 null byte
+                char str[11];
                 snprintf(str, sizeof(str), "%i", i++);
                 JS::RootedValue member(_context);
 
@@ -105,7 +106,7 @@ void ValueReader::fromBSONElement(const BSONElement& elem, bool readOnly) {
             return;
         case mongo::EOO:
         case mongo::jstNULL:
-        case mongo::Undefined:  // duplicate sm behavior
+        case mongo::Undefined:
             _value.setNull();
             return;
         case mongo::RegEx: {
@@ -207,7 +208,9 @@ void ValueReader::fromBSON(const BSONObj& obj, bool readOnly) {
             JS::AutoValueArray<2> args(_context);
 
             ValueReader(_context, args[0]).fromBSONElement(ref, readOnly);
-            ValueReader(_context, args[1]).fromBSONElement(id, readOnly);
+
+            // id can be a subobject
+            ValueReader(_context, args[1], _depth + 1).fromBSONElement(id, readOnly);
 
             JS::RootedObject obj(_context);
 

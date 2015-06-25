@@ -28,10 +28,45 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/util/concurrency/mutex.h"
+#include "mongo/db/auth/impersonation_session.h"
+
+#include <boost/optional.hpp>
+#include <tuple>
+
+#include "mongo/db/auth/action_type.h"
+#include "mongo/db/auth/authorization_session.h"
+#include "mongo/db/auth/privilege.h"
+#include "mongo/db/auth/resource_pattern.h"
+#include "mongo/db/client.h"
+#include "mongo/db/operation_context.h"
+#include "mongo/rpc/metadata/audit_metadata.h"
+#include "mongo/util/assert_util.h"
 
 namespace mongo {
 
-    bool StaticObserver::_destroyingStatics = false;
+ImpersonationSessionGuard::ImpersonationSessionGuard(OperationContext* txn) : _txn(txn) {
+    auto authSession = AuthorizationSession::get(_txn->getClient());
 
-} // namespace mongo
+    const auto& impersonatedUsersAndRoles =
+        rpc::AuditMetadata::get(txn).getImpersonatedUsersAndRoles();
+
+    if (impersonatedUsersAndRoles != boost::none) {
+        uassert(ErrorCodes::Unauthorized,
+                "Unauthorized use of impersonation metadata.",
+                authSession->isAuthorizedForPrivilege(
+                    Privilege(ResourcePattern::forClusterResource(), ActionType::impersonate)));
+
+        fassert(ErrorCodes::InternalError, !authSession->isImpersonating());
+
+        authSession->setImpersonatedUserData(std::get<0>(*impersonatedUsersAndRoles),
+                                             std::get<1>(*impersonatedUsersAndRoles));
+        _active = true;
+    }
+}
+
+ImpersonationSessionGuard::~ImpersonationSessionGuard() {
+    DESTRUCTOR_GUARD(
+        if (_active) { AuthorizationSession::get(_txn->getClient())->clearImpersonatedUserData(); })
+}
+
+}  // namespace mongo

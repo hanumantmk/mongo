@@ -41,10 +41,34 @@
 #error "need some kind of malloc usable size"
 #endif
 
+/**
+ * This shim interface (which controls dynamic allocation within SpiderMonkey),
+ * consciously uses std::malloc and friends over mongoMalloc. It does this
+ * because SpiderMonkey has some plausible options in the event of OOM,
+ * specifically it can begin aggressive garbage collection. It would also be
+ * reasonable to go the other route and fail, but for the moment I erred on the
+ * side of maintaining the contract that SpiderMonkey expects.
+ *
+ * The overall strategy here is to keep track of allocations in a thread local,
+ * offering us the chance to enforce soft limits on memory use rather than
+ * waiting for the OS to OOM us.
+ */
+
 namespace mongo {
 namespace sm {
+
+namespace {
+/**
+ * These two variables track the total number of bytes handed out, and the
+ * maximum number of bytes we will consider handing out. They are set by
+ * MozJSImplScope on start up.
+ *
+ * TODO: convert these to MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL after
+ *       rebasing to make that available
+ */
 ThreadLocalValue<size_t> total_bytes;
 ThreadLocalValue<size_t> max_bytes;
+}  // namespace
 
 size_t get_total_bytes() {
     return total_bytes.get();
@@ -64,7 +88,7 @@ void* wrap_alloc(T&& func, size_t bytes) {
     size_t mb = get_max_bytes();
     size_t tb = get_total_bytes();
 
-    if (mb && tb + bytes > mb) {
+    if (mb && (tb + bytes > mb)) {
         return nullptr;
     }
 
@@ -90,8 +114,9 @@ size_t get_current(void* ptr) {
 #error "Must have something like malloc_usable_size"
 #endif
 }
-};
-};
+
+}  // namespace sm
+}  // namespace mongo
 
 void* js_malloc(size_t bytes) {
     return mongo::sm::wrap_alloc(std::malloc, bytes);

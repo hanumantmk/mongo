@@ -33,6 +33,16 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "Timestamp" Javascript object.
+ *
+ * Represents a bson timestamp that looks like:
+ *
+ * {
+ *     t : Double,
+ *     i : Double,
+ * }
+ */
 struct TimestampInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 

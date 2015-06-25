@@ -37,10 +37,19 @@
 namespace mongo {
 namespace mozjs {
 
+namespace {
+const char* const kSingleton = "singleton";
+}  // namespace
+
 void MinKeyInfo::construct(JSContext* cx, JS::CallArgs args) {
     call(cx, args);
 }
 
+/**
+ * The idea here is that MinKey and MaxKey are singleton callable objects that
+ * return the singleton when called. This enables all instances to compare
+ * == and === to MinKey even if created by "new MinKey()" in JS.
+ */
 void MinKeyInfo::call(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 
@@ -48,14 +57,14 @@ void MinKeyInfo::call(JSContext* cx, JS::CallArgs args) {
 
     JS::RootedValue val(cx);
 
-    if (!o.hasField("singleton")) {
+    if (!o.hasField(kSingleton)) {
         JS::RootedObject thisv(cx);
         scope->getMinKeyProto().newObject(&thisv);
 
         val.setObjectOrNull(thisv);
-        o.setValue("singleton", val);
+        o.setValue(kSingleton, val);
     } else {
-        o.getValue("singleton", &val);
+        o.getValue(kSingleton, &val);
     }
 
     args.rval().setObjectOrNull(val.toObjectOrNull());
@@ -72,7 +81,7 @@ void MinKeyInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleO
     getScope(cx)->getMinKeyProto().newObject(&value);
 
     ObjectWrapper(cx, global).setValue("MinKey", value);
-    protoWrapper.setValue("singleton", value);
+    protoWrapper.setValue(kSingleton, value);
 }
 
 }  // namespace mozjs

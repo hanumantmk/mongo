@@ -33,6 +33,13 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * Shared code for the "Mongo" javascript object.
+ *
+ * The idea here is that there is a lot of shared functionality between the
+ * "Mongo" we see in the shell and the "Mongo" in dbeval.  So we provide one
+ * info type with common code and differentiate with varying constructors.
+ */
 struct MongoBase {
     static void finalize(JSFreeOp* fop, JSObject* obj);
 
@@ -71,10 +78,16 @@ struct MongoBase {
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
 };
 
+/**
+ * The dbeval variant of "Mongo"
+ */
 struct MongoLocalInfo : public MongoBase {
     static void construct(JSContext* cx, JS::CallArgs args);
 };
 
+/**
+ * The shell variant of "Mongo"
+ */
 struct MongoExternalInfo : public MongoBase {
     static void construct(JSContext* cx, JS::CallArgs args);
 

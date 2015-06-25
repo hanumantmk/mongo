@@ -37,6 +37,10 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * Wraps JSStrings to simplify coercing them to and from C++ style StringData
+ * and std::strings.
+ */
 class JSStringWrapper {
 public:
     JSStringWrapper() = default;

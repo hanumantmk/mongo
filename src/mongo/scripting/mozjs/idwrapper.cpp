@@ -40,7 +40,7 @@ namespace mozjs {
 
 IdWrapper::IdWrapper(JSContext* cx, JS::HandleId value) : _context(cx), _value(cx, value) {}
 
-std::string IdWrapper::toString() {
+std::string IdWrapper::toString() const {
     if (JSID_IS_STRING(_value)) {
         return JSStringWrapper(_context, JSID_TO_STRING(_value)).toString();
     } else if (JSID_IS_INT(_value)) {
@@ -52,21 +52,21 @@ std::string IdWrapper::toString() {
     }
 }
 
-uint32_t IdWrapper::toInt32() {
+uint32_t IdWrapper::toInt32() const {
     uassert(ErrorCodes::TypeMismatch, "Cannot toInt32() non-integer jsid", JSID_IS_INT(_value));
 
     return JSID_TO_INT(_value);
 }
 
-bool IdWrapper::equals(StringData sd) {
+bool IdWrapper::equals(StringData sd) const {
     return sd.compare(toString()) == 0;
 }
 
-bool IdWrapper::isInt() {
+bool IdWrapper::isInt() const {
     return JSID_IS_INT(_value);
 }
 
-bool IdWrapper::isString() {
+bool IdWrapper::isString() const {
     return JSID_IS_STRING(_value);
 }
 

@@ -33,6 +33,12 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "DBQuery" Javascript object.
+ *
+ * This represents the result of a find() and uses its getProperty() callback
+ * to shim operator[]. I.e. db.test.find()[4]
+ */
 struct DBQueryInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void getProperty(JSContext* cx,

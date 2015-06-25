@@ -41,6 +41,9 @@ namespace mozjs {
 
 namespace {
 
+/**
+ * Holder for the caller of ::make()'s callback function and context pointer
+ */
 class NativeHolder {
 public:
     NativeHolder(NativeFunction func, void* ctx) : _func(func), _ctx(ctx) {}

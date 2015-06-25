@@ -32,6 +32,12 @@
 
 namespace mongo {
 namespace mozjs {
+
+/**
+ * The "NumberInt" Javascript object.
+ *
+ * Wraps an actual c++ 'int' as its private member
+ */
 struct NumberIntInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);

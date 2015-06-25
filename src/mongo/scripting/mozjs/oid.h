@@ -33,6 +33,11 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "ObjectId" Javascript object.
+ *
+ * Holds a private bson OID
+ */
 struct OIDInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);

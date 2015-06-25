@@ -268,7 +268,7 @@ void MozJSProxyScope::shutdownThread() {
 }
 
 /**
- * The mainloop for the implementation thread
+ * The main loop for the implementation thread
  *
  * This owns the actual implementation scope (which needs to be created on this
  * child thread) and has essentially two transition paths:

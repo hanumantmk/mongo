@@ -148,13 +148,10 @@ std::string ObjectWrapper::Key::toString(JSContext* cx) {
     switch (_type) {
         case Type::Field:
             return _field;
-            break;
         case Type::Index:
             return std::to_string(_idx);
-            break;
         case Type::Id:
             return IdWrapper(cx, _id).toString();
-            break;
     }
 
     throwCurrentJSException(
@@ -206,7 +203,7 @@ BSONObj ObjectWrapper::getObject(Key key) {
     JS::RootedValue x(_context);
     getValue(key, &x);
 
-    return ValueWriter(_context, x).toBSON();
+    return ValueWriter(_context, x, _depth).toBSON();
 }
 
 void ObjectWrapper::getValue(Key key, JS::MutableHandleValue value) {
@@ -328,12 +325,6 @@ void ObjectWrapper::writeThis(BSONObjBuilder* b) {
         bool altered;
 
         std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, _object);
-
-        // TODO, this would be nice, but we have to track changes in children
-        // if (originalBSON && !altered) {
-        //    b.appendElements(*originalBSON);
-        //    return;
-        //}
     }
 
     // We special case the _id field in top-level objects and move it to the front.

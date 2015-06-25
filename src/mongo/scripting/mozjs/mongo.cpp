@@ -76,7 +76,7 @@ void MongoBase::Functions::runCommand(JSContext* cx, JS::CallArgs args) {
 
     BSONObj cmdObj = ValueWriter(cx, args.get(1)).toBSON();
 
-    int queryOptions = args.get(2).toInt32();
+    int queryOptions = ValueWriter(cx, args.get(2)).toInt32();
     BSONObj cmdRes;
     conn->runCommand(database, cmdObj, cmdRes, queryOptions);
 
@@ -116,15 +116,13 @@ void MongoBase::Functions::find(JSContext* cx, JS::CallArgs args) {
     if (haveFields)
         fields = ValueWriter(cx, args.get(2)).toBSON();
 
-    std::unique_ptr<DBClientCursor> cursor;
+    int nToReturn = ValueWriter(cx, args.get(3)).toInt32();
+    int nToSkip = ValueWriter(cx, args.get(4)).toInt32();
+    int batchSize = ValueWriter(cx, args.get(5)).toInt32();
+    int options = ValueWriter(cx, args.get(6)).toInt32();
 
-    int nToReturn = args.get(3).toInt32();
-    int nToSkip = args.get(4).toInt32();
-    int batchSize = args.get(5).toInt32();
-    int options = args.get(6).toInt32();
-
-    cursor =
-        conn->query(ns, q, nToReturn, nToSkip, haveFields ? &fields : NULL, options, batchSize);
+    std::unique_ptr<DBClientCursor> cursor(
+        conn->query(ns, q, nToReturn, nToSkip, haveFields ? &fields : NULL, options, batchSize));
     if (!cursor.get()) {
         uasserted(ErrorCodes::InternalError, "error doing query: failed");
     }
@@ -155,9 +153,9 @@ void MongoBase::Functions::insert(JSContext* cx, JS::CallArgs args) {
 
     std::string ns = ValueWriter(cx, args.get(0)).toString();
 
-    int flags = args.get(2).toInt32();
+    int flags = ValueWriter(cx, args.get(2)).toInt32();
 
-    auto addId = [&](JS::HandleValue value) {
+    auto addId = [cx, scope](JS::HandleValue value) {
         if (!value.isObject())
             uasserted(ErrorCodes::BadValue, "attempted to insert a non-object type");
 
@@ -305,6 +303,9 @@ void MongoBase::Functions::cursorFromId(JSContext* cx, JS::CallArgs args) {
         uasserted(ErrorCodes::BadValue, "cursorFromId needs 2 or 3 args");
 
     if (!scope->getNumberLongProto().instanceOf(args.get(1)))
+        uasserted(ErrorCodes::BadValue, "2nd arg must be a NumberLong");
+
+    if (!(args.get(2).isNumber() || args.get(2).isUndefined()))
         uasserted(ErrorCodes::BadValue, "3rd arg must be a js Number");
 
     auto conn = getConnection(args);
@@ -315,8 +316,8 @@ void MongoBase::Functions::cursorFromId(JSContext* cx, JS::CallArgs args) {
 
     std::unique_ptr<DBClientCursor> cursor(new DBClientCursor(conn, ns, cursorId, 0, 0));
 
-    if (!args.get(2).isUndefined())
-        cursor->setBatchSize(args.get(2).toInt32());
+    if (args.get(2).isNumber())
+        cursor->setBatchSize(ValueWriter(cx, args.get(2)).toInt32());
 
     JS::RootedObject c(cx);
     scope->getCursorProto().newInstance(&c);
@@ -377,7 +378,7 @@ void MongoBase::Functions::copyDatabaseWithSCRAM(JSContext* cx, JS::CallArgs arg
 
         commandBuilder.appendElements(saslCommandPrefix);
         commandBuilder.appendBinData(saslCommandPayloadFieldName,
-                                     int(responsePayload.size()),
+                                     static_cast<int>(responsePayload.size()),
                                      BinDataGeneral,
                                      responsePayload.c_str());
         BSONElement conversationId = inputObj[saslCommandConversationIdFieldName];

@@ -33,6 +33,13 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "MaxKey" Javascript object.
+ *
+ * These are slightly special, in that there is only one MaxKey object and
+ * whenever you call the constructor to make a new one you just get the
+ * "singleton" MaxKey from the prototype. See the postInstall for details.
+ */
 struct MaxKeyInfo {
     static void call(JSContext* cx, JS::CallArgs args);
     static void construct(JSContext* cx, JS::CallArgs args);

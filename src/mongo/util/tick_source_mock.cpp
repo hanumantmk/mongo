@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2013 MongoDB Inc.
+ *    Copyright (C) 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -26,24 +26,28 @@
  *    it in the license file.
  */
 
-#include "mongo/platform/basic.h"
+#include "mongo/util/tick_source_mock.h"
 
-#include <vector>
-
-#include "mongo/client/dbclientinterface.h"
-#include "mongo/s/catalog/legacy/config_coordinator.h"
-#include "mongo/s/client/mock_multi_write_command.h"
-#include "mongo/unittest/unittest.h"
+namespace mongo {
 
 namespace {
+const TickSource::Tick kTicksPerSecond = 1000;
+}  // unnamed namespace
 
-    using namespace mongo;
-    using std::vector;
+TickSource::Tick TickSourceMock::getTicks() {
+    return _currentTicks;
+}
 
-    TEST(ConfigCoordinatorTest, Basic) {
-        MockMultiWriteCommand dispatcher;
-        vector<ConnectionString> configHosts;
-        ConfigCoordinator exec(&dispatcher, configHosts);
-    }
+TickSource::Tick TickSourceMock::getTicksPerSecond() {
+    return kTicksPerSecond;
+}
 
-} // namespace
+void TickSourceMock::advance(const stdx::chrono::milliseconds& ms) {
+    _currentTicks += ms.count();
+}
+
+void TickSourceMock::reset(TickSource::Tick tick) {
+    _currentTicks = std::move(tick);
+}
+
+}  // namespace mongo

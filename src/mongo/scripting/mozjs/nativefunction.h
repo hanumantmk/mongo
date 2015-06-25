@@ -33,6 +33,20 @@
 
 namespace mongo {
 namespace mozjs {
+
+/**
+ * Wrapper for JS Interpreter agnostic functions. Think mapReduce, or any use
+ * case that can tolerate automatic json <-> bson translation.
+ *
+ * The business end of the shim methods comes via ::call(). These types are
+ * invokable as js functions, with a little bit of automatic translation for
+ * arguments.
+ *
+ * This inherits from the global Function type.
+ *
+ * Also note that installType is private. So you can only get NativeFunctions
+ * in JS via ::make() from C++.
+ */
 struct NativeFunctionInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void call(JSContext* cx, JS::CallArgs args);
@@ -41,6 +55,7 @@ struct NativeFunctionInfo {
     const char* const inheritFrom = "Function";
     const char* const className = "NativeFunction";
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
+    static const InstallType installType = InstallType::Private;
 
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(toString);

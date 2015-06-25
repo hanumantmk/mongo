@@ -30,12 +30,10 @@
 
 #include "mongo/client/global_conn_pool.h"
 
-#include "mongo/client/connpool.h"
-
 namespace mongo {
 
-    DBConnectionPool pool;
+DBConnectionPool globalConnPool;
 
-    ReplicaSetMonitorManager globalRSMonitorManager;
+ReplicaSetMonitorManager globalRSMonitorManager;
 
 }  // namespace mongo

@@ -33,6 +33,15 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "DBPointer" Javascript Object
+ *
+ * These look like:
+ * {
+ *     id : OID(),
+ *     ns : String(),
+ * }
+ */
 struct DBPointerInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 

@@ -33,6 +33,15 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * The "DBCollection" Javascript object.
+ *
+ * This maps to the object you get after calling db.COLLECTION_NAME on the
+ * global 'db' object in the shell.
+ *
+ * Its major magic is in its getProperty() callback, which threads through to
+ * a getCollection method installed in js
+ */
 struct DBCollectionInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void getProperty(JSContext* cx,

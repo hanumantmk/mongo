@@ -36,6 +36,16 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * Provides a wrapper for BSONObj's in JS. The main idea here is that BSONObj's
+ * can be read only, or read write when we shim them in, and in all cases we
+ * lazily load their member elements into JS. So a bunch of these lifecycle
+ * methods are set up to wrap field access (enumerate, resolve and
+ * del/setProperty).
+ *
+ * Note that installType is private. So you can only get BSON types in JS via
+ * ::make() from C++.
+ */
 struct BSONInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded);

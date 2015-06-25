@@ -36,6 +36,7 @@
 #include "mongo/scripting/mozjs/db.h"
 #include "mongo/scripting/mozjs/implscope.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
+#include "mongo/scripting/mozjs/valuewriter.h"
 
 namespace mongo {
 namespace mozjs {
@@ -53,6 +54,12 @@ void DBCollectionInfo::construct(JSContext* cx, JS::CallArgs args) {
     if (args.length() != 4)
         uasserted(ErrorCodes::BadValue, "collection constructor requires 4 arguments");
 
+    for (unsigned i = 0; i < args.length(); ++i) {
+        uassert(ErrorCodes::BadValue,
+                "collection constructor called with undefined argument",
+                !args.get(i).isUndefined());
+    }
+
     JS::RootedObject thisv(cx);
     scope->getDbCollectionProto().newObject(&thisv);
     ObjectWrapper o(cx, thisv);
@@ -62,7 +69,7 @@ void DBCollectionInfo::construct(JSContext* cx, JS::CallArgs args) {
     o.setValue("_shortName", args.get(2));
     o.setValue("_fullName", args.get(3));
 
-    std::string fullName = o.getString("_fullName");
+    std::string fullName = ValueWriter(cx, args.get(3)).toString();
 
     auto context = scope->getOpContext();
     if (context && haveLocalShardingInfo(context->getClient(), fullName))

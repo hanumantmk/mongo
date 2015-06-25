@@ -1,5 +1,5 @@
 /**
-f *    Copyright (C) 2015 MongoDB Inc.
+ *    Copyright (C) 2015 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,40 +28,116 @@ f *    Copyright (C) 2015 MongoDB Inc.
 
 #include "mongo/platform/basic.h"
 
+#include <future>
+
 #include "mongo/base/status.h"
 #include "mongo/base/status_with.h"
 #include "mongo/bson/json.h"
 #include "mongo/client/remote_command_runner_mock.h"
+#include "mongo/client/remote_command_targeter_factory_mock.h"
 #include "mongo/client/remote_command_targeter_mock.h"
+#include "mongo/db/commands.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/db/query/find_and_modify_request.h"
+#include "mongo/db/repl/replication_executor.h"
+#include "mongo/executor/network_interface_mock.h"
+#include "mongo/executor/network_test_env.h"
+#include "mongo/s/catalog/catalog_manager_mock.h"
 #include "mongo/s/catalog/dist_lock_catalog_impl.h"
+#include "mongo/s/client/shard_registry.h"
 #include "mongo/s/type_lockpings.h"
 #include "mongo/s/type_locks.h"
+#include "mongo/stdx/memory.h"
+#include "mongo/stdx/thread.h"
 #include "mongo/unittest/unittest.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
+
+using std::async;
+using std::vector;
+using executor::NetworkInterfaceMock;
+using executor::NetworkTestEnv;
+
 namespace {
 
-    const HostAndPort dummyHost("dummy", 123);
-    const Milliseconds kWTimeout(100);
+const HostAndPort dummyHost("dummy", 123);
+const Milliseconds kWTimeout(100);
 
-    const auto noTest = [](const RemoteCommandRequest& request) {};
+/**
+ * Sets up the mocked out objects for testing the replica-set backed catalog manager.
+ */
+class DistLockCatalogFixture : public mongo::unittest::Test {
+public:
+    void onCommand(NetworkTestEnv::OnCommandFunction func) {
+        _networkTestEnv->onCommand(func);
+    }
 
-    TEST(DistLockCatalogImpl, BasicPing) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    void onFindCommand(NetworkTestEnv::OnFindCommandFunction func) {
+        _networkTestEnv->onFindCommand(func);
+    }
 
-        targeter.setFindHostReturnValue(dummyHost);
+    RemoteCommandTargeterMock* targeter() {
+        return &_targeter;
+    }
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    DistLockCatalogImpl* catalog() {
+        return _distLockCatalog.get();
+    }
 
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
+    ShardRegistry* shardRegistry() {
+        return _shardRegistry.get();
+    }
 
-            BSONObj expectedCmd(fromjson(R"({
+private:
+    void setUp() override {
+        _targeter.setFindHostReturnValue(dummyHost);
+
+        auto network = stdx::make_unique<executor::NetworkInterfaceMock>();
+        _networkTestEnv = stdx::make_unique<NetworkTestEnv>(network.get());
+
+        auto executor = stdx::make_unique<repl::ReplicationExecutor>(network.release(), nullptr, 0);
+        _networkTestEnv->startUp(executor.get());
+
+        _shardRegistry =
+            stdx::make_unique<ShardRegistry>(stdx::make_unique<RemoteCommandTargeterFactoryMock>(),
+                                             stdx::make_unique<RemoteCommandRunnerMock>(),
+                                             std::move(executor),
+                                             &_catalogMgr);
+
+        _distLockCatalog =
+            stdx::make_unique<DistLockCatalogImpl>(&_targeter, _shardRegistry.get(), kWTimeout);
+    }
+
+    void tearDown() override {
+        // Stop the executor and wait for the executor thread to complete. This means that
+        // there will be no more calls into the executor and it can be safely deleted.
+        shardRegistry()->getExecutor()->shutdown();
+        _networkTestEnv->shutDown();
+    }
+
+    std::unique_ptr<executor::NetworkTestEnv> _networkTestEnv;
+
+    RemoteCommandTargeterMock _targeter;
+    CatalogManagerMock _catalogMgr;
+
+    std::unique_ptr<ShardRegistry> _shardRegistry;
+    std::unique_ptr<DistLockCatalogImpl> _distLockCatalog;
+};
+
+TEST_F(DistLockCatalogFixture, BasicPing) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            Date_t ping(dateFromISOString("2014-03-11T09:17:18.098Z").getValue());
+                            auto status = catalog()->ping("abcd", ping);
+                            ASSERT_OK(status);
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "lockpings",
                 query: { _id: "abcd" },
                 update: {
@@ -73,170 +149,162 @@ namespace {
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(fromjson(R"({
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
+
+        return fromjson(R"({
                 ok: 1,
                 value: {
                     _id: "abcd",
                     ping: { $date: "2014-03-11T09:17:18.098Z" }
                 }
-            })"), Milliseconds(0)));
+            })");
+    });
 
-        Date_t ping(dateFromISOString("2014-03-11T09:17:18.098Z").getValue());
-        auto status = catalog.ping("abcd", ping);
-        ASSERT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, PingTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, PingTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->ping("abcd", Date_t::now());
+    ASSERT_NOT_OK(status);
+}
 
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+TEST_F(DistLockCatalogFixture, PingRunnerError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
 
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, PingRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, PingCommandError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    future.get();
+}
 
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
+TEST_F(DistLockCatalogFixture, PingWriteError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                code: 11000,
+                errmsg: "E11000 duplicate key error"
+            })");
+    });
 
-    TEST(DistLockCatalogImpl, PingCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    future.get();
+}
 
-        targeter.setFindHostReturnValue(dummyHost);
+TEST_F(DistLockCatalogFixture, PingWriteConcernError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: 64,
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    future.get();
+}
 
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+TEST_F(DistLockCatalogFixture, PingUnsupportedWriteConcernResponse) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-    TEST(DistLockCatalogImpl, PingWriteError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: "bad format",
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    future.get();
+}
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+TEST_F(DistLockCatalogFixture, PingUnsupportedResponseFormat) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->ping("abcd", Date_t::now());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                        });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            code: 11000,
-            errmsg: "E11000 duplicate key error"
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return BSON("ok" << 1 << "value"
+                         << "NaN");
+    });
 
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, PingWriteConcernError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, GrabLockNoOp) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  OID myID("555f80be366c194b13fb0372");
+                  Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
+                  auto resultStatus =
+                      catalog()->grabLock("test", myID, "me", "mongos", now, "because").getStatus();
 
-        targeter.setFindHostReturnValue(dummyHost);
+                  ASSERT_NOT_OK(resultStatus);
+                  ASSERT_EQUALS(ErrorCodes::LockStateChangeFailed, resultStatus.code());
+              });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: 64,
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, PingUnsupportedWriteConcernResponse) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: "bad format",
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, PingUnsupportedResponseFormat) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(BSON("ok" << 1 << "value" << "NaN"), Milliseconds(0)));
-
-        auto status = catalog.ping("abcd", Date_t::now());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-    }
-
-    TEST(DistLockCatalogImpl, GrabLockNoOp) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj responseObj(fromjson("{ ok: 1, value: null }"));
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: { _id: "test", state: 0 },
                 update: {
@@ -254,51 +322,37 @@ namespace {
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(responseObj, Milliseconds(0)));
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
 
-        OID myID("555f80be366c194b13fb0372");
-        Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
-        auto resultStatus = catalog.grabLock("test", myID, "me",
-                "mongos", now, "because").getStatus();
+        return fromjson("{ ok: 1, value: null }");
+    });
 
-        ASSERT_NOT_OK(resultStatus);
-        ASSERT_EQUALS(ErrorCodes::LockStateChangeFailed, resultStatus.code());
+    future.get();
+}
 
-    }
+TEST_F(DistLockCatalogFixture, GrabLockWithNewDoc) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            OID myID("555f80be366c194b13fb0372");
+                            Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
+                            auto resultStatus =
+                                catalog()->grabLock("test", myID, "me", "mongos", now, "because");
+                            ASSERT_OK(resultStatus.getStatus());
 
-    TEST(DistLockCatalogImpl, GrabLockWithNewDoc) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+                            const auto& lockDoc = resultStatus.getValue();
+                            ASSERT_TRUE(lockDoc.isValid(nullptr));
+                            ASSERT_EQUALS("test", lockDoc.getName());
+                            ASSERT_EQUALS(myID, lockDoc.getLockID());
+                            ASSERT_EQUALS("me", lockDoc.getWho());
+                            ASSERT_EQUALS("mongos", lockDoc.getProcess());
+                            ASSERT_EQUALS("because", lockDoc.getWhy());
+                        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj responseObj(fromjson(R"({
-            lastErrorObject: {
-                updatedExisting: false,
-                n: 1,
-                upserted: 1
-            },
-            value: {
-                _id: "test",
-                ts: ObjectId("555f80be366c194b13fb0372"),
-                state: 2,
-                who: "me",
-                process: "mongos",
-                when: { $date: "2015-05-22T19:17:18.098Z" },
-                why: "because"
-            },
-            ok: 1
-        })"));
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: { _id: "test", state: 0 },
                 update: {
@@ -316,174 +370,187 @@ namespace {
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(responseObj, Milliseconds(0)));
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
 
-        OID myID("555f80be366c194b13fb0372");
-        Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
-        auto resultStatus = catalog.grabLock("test", myID, "me", "mongos", now, "because");
-        ASSERT_OK(resultStatus.getStatus());
+        return fromjson(R"({
+                lastErrorObject: {
+                    updatedExisting: false,
+                    n: 1,
+                    upserted: 1
+                },
+                value: {
+                    _id: "test",
+                    ts: ObjectId("555f80be366c194b13fb0372"),
+                    state: 2,
+                    who: "me",
+                    process: "mongos",
+                    when: { $date: "2015-05-22T19:17:18.098Z" },
+                    why: "because"
+                },
+                ok: 1
+            })");
+    });
 
-        const auto& lockDoc = resultStatus.getValue();
-        ASSERT_TRUE(lockDoc.isValid(nullptr));
-        ASSERT_EQUALS("test", lockDoc.getName());
-        ASSERT_EQUALS(myID, lockDoc.getLockID());
-        ASSERT_EQUALS("me", lockDoc.getWho());
-        ASSERT_EQUALS("mongos", lockDoc.getProcess());
-        ASSERT_EQUALS("because", lockDoc.getWhy());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, GrabLockTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, GrabLockTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+    ASSERT_NOT_OK(status);
+}
 
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+TEST_F(DistLockCatalogFixture, GrabLockRunnerError) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+                  ASSERT_FALSE(status.reason().empty());
+              });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
 
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, GrabLockRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, GrabLockCommandError) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+                  ASSERT_FALSE(status.reason().empty());
+              });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    future.get();
+}
 
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
+TEST_F(DistLockCatalogFixture, GrabLockWriteError) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
+                  ASSERT_FALSE(status.reason().empty());
+              });
 
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                code: 11000,
+                errmsg: "E11000 duplicate key error"
+            })");
+    });
 
-    TEST(DistLockCatalogImpl, GrabLockCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    future.get();
+}
 
-        targeter.setFindHostReturnValue(dummyHost);
+TEST_F(DistLockCatalogFixture, GrabLockWriteConcernError) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
+                  ASSERT_FALSE(status.reason().empty());
+              });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: 64,
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    future.get();
+}
 
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+TEST_F(DistLockCatalogFixture, GrabLockUnsupportedWriteConcernResponse) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                  ASSERT_FALSE(status.reason().empty());
+              });
 
-    TEST(DistLockCatalogImpl, GrabLockWriteError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: "bad format",
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    future.get();
+}
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+TEST_F(DistLockCatalogFixture, GrabLockUnsupportedResponseFormat) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  auto status =
+                      catalog()->grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
+                  ASSERT_NOT_OK(status);
+                  ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+              });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            code: 11000,
-            errmsg: "E11000 duplicate key error"
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return BSON("ok" << 1 << "value"
+                         << "NaN");
+    });
 
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, GrabLockWriteConcernError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, OvertakeLockNoOp) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  OID myID("555f80be366c194b13fb0372");
+                  OID currentOwner("555f99712c99a78c5b083358");
+                  Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
+                  auto resultStatus =
+                      catalog()
+                          ->overtakeLock("test", myID, currentOwner, "me", "mongos", now, "because")
+                          .getStatus();
 
-        targeter.setFindHostReturnValue(dummyHost);
+                  ASSERT_NOT_OK(resultStatus);
+                  ASSERT_EQUALS(ErrorCodes::LockStateChangeFailed, resultStatus.code());
+              });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: 64,
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GrabLockUnsupportedWriteConcernResponse) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: "bad format",
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GrabLockUnsupportedResponseFormat) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(BSON("ok" << 1 << "value" << "NaN"), Milliseconds(0)));
-
-        auto status = catalog.grabLock("", OID::gen(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-    }
-
-    TEST(DistLockCatalogImpl, OvertakeLockNoOp) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj responseObj(fromjson("{ ok: 1, value: null }"));
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: {
                     $or: [
@@ -505,51 +572,38 @@ namespace {
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(responseObj, Milliseconds(0)));
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
 
-        OID myID("555f80be366c194b13fb0372");
-        OID currentOwner("555f99712c99a78c5b083358");
-        Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
-        auto resultStatus = catalog.overtakeLock("test", myID, currentOwner,
-                "me", "mongos", now, "because").getStatus();
+        return fromjson("{ ok: 1, value: null }");
+    });
 
-        ASSERT_NOT_OK(resultStatus);
-        ASSERT_EQUALS(ErrorCodes::LockStateChangeFailed, resultStatus.code());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, OvertakeLockWithNewDoc) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, OvertakeLockWithNewDoc) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            OID myID("555f80be366c194b13fb0372");
+                            OID currentOwner("555f99712c99a78c5b083358");
+                            Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
+                            auto resultStatus = catalog()->overtakeLock(
+                                "test", myID, currentOwner, "me", "mongos", now, "because");
+                            ASSERT_OK(resultStatus.getStatus());
 
-        targeter.setFindHostReturnValue(dummyHost);
+                            const auto& lockDoc = resultStatus.getValue();
+                            ASSERT_TRUE(lockDoc.isValid(nullptr));
+                            ASSERT_EQUALS("test", lockDoc.getName());
+                            ASSERT_EQUALS(myID, lockDoc.getLockID());
+                            ASSERT_EQUALS("me", lockDoc.getWho());
+                            ASSERT_EQUALS("mongos", lockDoc.getProcess());
+                            ASSERT_EQUALS("because", lockDoc.getWhy());
+                        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        BSONObj responseObj(fromjson(R"({
-            lastErrorObject: {
-                updatedExisting: false,
-                n: 1,
-                upserted: 1
-            },
-            value: {
-                _id: "test",
-                ts: ObjectId("555f80be366c194b13fb0372"),
-                state: 2,
-                who: "me",
-                process: "mongos",
-                when: { $date: "2015-05-22T19:17:18.098Z" },
-                why: "because"
-            },
-            ok: 1
-        })"));
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: {
                     $or: [
@@ -571,707 +625,669 @@ namespace {
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(responseObj, Milliseconds(0)));
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
 
-        OID myID("555f80be366c194b13fb0372");
-        OID currentOwner("555f99712c99a78c5b083358");
-        Date_t now(dateFromISOString("2015-05-22T19:17:18.098Z").getValue());
-        auto resultStatus = catalog.overtakeLock("test", myID, currentOwner,
-                "me", "mongos", now, "because");
-        ASSERT_OK(resultStatus.getStatus());
+        return fromjson(R"({
+                lastErrorObject: {
+                    updatedExisting: false,
+                    n: 1,
+                    upserted: 1
+                },
+                value: {
+                    _id: "test",
+                    ts: ObjectId("555f80be366c194b13fb0372"),
+                    state: 2,
+                    who: "me",
+                    process: "mongos",
+                    when: { $date: "2015-05-22T19:17:18.098Z" },
+                    why: "because"
+                },
+                ok: 1
+            })");
+    });
 
-        const auto& lockDoc = resultStatus.getValue();
-        ASSERT_TRUE(lockDoc.isValid(nullptr));
-        ASSERT_EQUALS("test", lockDoc.getName());
-        ASSERT_EQUALS(myID, lockDoc.getLockID());
-        ASSERT_EQUALS("me", lockDoc.getWho());
-        ASSERT_EQUALS("mongos", lockDoc.getProcess());
-        ASSERT_EQUALS("because", lockDoc.getWhy());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, OvertakeLockTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, OvertakeLockTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+    ASSERT_NOT_OK(status);
+}
 
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+TEST_F(DistLockCatalogFixture, OvertakeLockRunnerError) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+            ASSERT_FALSE(status.reason().empty());
+        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
 
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, OvertakeLockRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, OvertakeLockCommandError) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+            ASSERT_FALSE(status.reason().empty());
+        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    future.get();
+}
 
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
+TEST_F(DistLockCatalogFixture, OvertakeLockWriteError) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
+            ASSERT_FALSE(status.reason().empty());
+        });
 
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                code: 11000,
+                errmsg: "E11000 duplicate key error"
+            })");
+    });
 
-    TEST(DistLockCatalogImpl, OvertakeLockCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    future.get();
+}
 
-        targeter.setFindHostReturnValue(dummyHost);
+TEST_F(DistLockCatalogFixture, OvertakeLockWriteConcernError) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
+            ASSERT_FALSE(status.reason().empty());
+        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: 64,
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    future.get();
+}
 
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+TEST_F(DistLockCatalogFixture, OvertakeLockUnsupportedWriteConcernResponse) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+            ASSERT_FALSE(status.reason().empty());
+        });
 
-    TEST(DistLockCatalogImpl, OvertakeLockWriteError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: "bad format",
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    future.get();
+}
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+TEST_F(DistLockCatalogFixture, OvertakeLockUnsupportedResponseFormat) {
+    auto future = async(
+        std::launch::async,
+        [this] {
+            auto status =
+                catalog()->overtakeLock("", OID(), OID(), "", "", Date_t::now(), "").getStatus();
+            ASSERT_NOT_OK(status);
+            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+        });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            code: 11000,
-            errmsg: "E11000 duplicate key error"
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return BSON("ok" << 1 << "value"
+                         << "NaN");
+    });
 
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, OvertakeLockWriteConcernError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, BasicUnlock) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID("555f99712c99a78c5b083358"));
+                            ASSERT_OK(status);
+                        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: 64,
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, OvertakeLockUnsupportedWriteConcernResponse) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: "bad format",
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, OvertakeLockUnsupportedResponseFormat) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(BSON("ok" << 1 << "value" << "NaN"), Milliseconds(0)));
-
-        auto status = catalog.overtakeLock(
-                "", OID(), OID(), "", "", Date_t::now(), "").getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-    }
-
-    TEST(DistLockCatalogImpl, BasicUnlock) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: { ts: ObjectId("555f99712c99a78c5b083358") },
                 update: { $set: { state: 0 }},
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(fromjson(R"({
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
+
+        return fromjson(R"({
                 ok: 1,
                 value: {
                     _id: "",
                     ts: ObjectId("555f99712c99a78c5b083358"),
                     state: 0
                 }
-            })"), Milliseconds(0)));
+            })");
+    });
 
-        auto status = catalog.unlock(OID("555f99712c99a78c5b083358"));
-        ASSERT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, UnlockWithNoNewDoc) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, UnlockWithNoNewDoc) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID("555f99712c99a78c5b083358"));
+                            ASSERT_OK(status);
+                        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "locks",
                 query: { ts: ObjectId("555f99712c99a78c5b083358") },
                 update: { $set: { state: 0 }},
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(fromjson(R"({
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
+
+        return fromjson(R"({
                 ok: 1,
                 value: null
-            })"), Milliseconds(0)));
-
-        auto status = catalog.unlock(OID("555f99712c99a78c5b083358"));
-        ASSERT_OK(status);
-    }
-
-    TEST(DistLockCatalogImpl, UnlockTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-    }
-
-    TEST(DistLockCatalogImpl, UnlockRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, UnlockCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, UnlockWriteError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            code: 11000,
-            errmsg: "E11000 duplicate key error"
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, UnlockWriteConcernError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: 64,
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, UnlockUnsupportedWriteConcernResponse) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: "bad format",
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, UnlockUnsupportedResponseFormat) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(BSON("ok" << 1 << "value" << "NaN"), Milliseconds(0)));
-
-        auto status = catalog.unlock(OID());
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-    }
-
-    TEST(DistLockCatalogImpl, BasicGetServerInfo) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj responseObj(fromjson(R"({
-            localTime: { $date: "2015-05-26T13:06:27.293Z" },
-            $gleStats: {
-                lastOpTime: { $timestamp: { t: 0, i: 0 }},
-                electionId: ObjectId("555fa85d4d8640862a0fc79b")
-            },
-            ok: 1
-        })"));
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("admin", request.dbname);
-            ASSERT_EQUALS(BSON("serverStatus" << 1), request.cmdObj);
-        },
-        RemoteCommandResponse(responseObj, Milliseconds(0)));
-
-        Date_t localTime(dateFromISOString("2015-05-26T13:06:27.293Z").getValue());
-        OID electionID("555fa85d4d8640862a0fc79b");
-        auto resultStatus = catalog.getServerInfo();
-        ASSERT_OK(resultStatus.getStatus());
-
-        const auto& serverInfo = resultStatus.getValue();
-        ASSERT_EQUALS(electionID, serverInfo.electionId);
-        ASSERT_EQUALS(localTime, serverInfo.serverTime);
-    }
-
-    TEST(DistLockCatalogImpl, GetServerTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-    }
-
-    TEST(DistLockCatalogImpl, GetServerRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GetServerCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GetServerBadElectionId) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            localTime: { $date: "2015-05-26T13:06:27.293Z" },
-            $gleStats: {
-                lastOpTime: { $timestamp: { t: 0, i: 0 }},
-                electionId: 34
-            },
-            ok: 1
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GetServerBadLocalTime) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            localTime: "2015-05-26T13:06:27.293Z",
-            $gleStats: {
-                lastOpTime: { $timestamp: { t: 0, i: 0 }},
-                electionId: ObjectId("555fa85d4d8640862a0fc79b")
-            },
-            ok: 1
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GetServerNoGLEStats) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            localTime: { $date: "2015-05-26T13:06:27.293Z" },
-            ok: 1
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, GetServerNoElectionId) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            localTime: { $date: "2015-05-26T13:06:27.293Z" },
-            $gleStats: {
-                lastOpTime: { $timestamp: { t: 0, i: 0 }},
-                termNumber: 64
-            },
-            ok: 1
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.getServerInfo().getStatus();
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, BasicStopPing) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand([](const RemoteCommandRequest& request) {
-            ASSERT_EQUALS(dummyHost, request.target);
-            ASSERT_EQUALS("config", request.dbname);
-
-            BSONObj expectedCmd(fromjson(R"({
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->unlock(OID());
+    ASSERT_NOT_OK(status);
+}
+
+TEST_F(DistLockCatalogFixture, UnlockRunnerError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockCommandError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockWriteError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::DuplicateKey, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                code: 11000,
+                errmsg: "E11000 duplicate key error"
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockWriteConcernError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: 64,
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockUnsupportedWriteConcernResponse) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: "bad format",
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, UnlockUnsupportedResponseFormat) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->unlock(OID());
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return BSON("ok" << 1 << "value"
+                         << "NaN");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, BasicGetServerInfo) {
+    auto future =
+        async(std::launch::async,
+              [this] {
+                  Date_t localTime(dateFromISOString("2015-05-26T13:06:27.293Z").getValue());
+                  OID electionID("555fa85d4d8640862a0fc79b");
+                  auto resultStatus = catalog()->getServerInfo();
+                  ASSERT_OK(resultStatus.getStatus());
+
+                  const auto& serverInfo = resultStatus.getValue();
+                  ASSERT_EQUALS(electionID, serverInfo.electionId);
+                  ASSERT_EQUALS(localTime, serverInfo.serverTime);
+              });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("admin", request.dbname);
+        ASSERT_EQUALS(BSON("serverStatus" << 1), request.cmdObj);
+
+        return fromjson(R"({
+                localTime: { $date: "2015-05-26T13:06:27.293Z" },
+                $gleStats: {
+                    lastOpTime: { $timestamp: { t: 0, i: 0 }},
+                    electionId: ObjectId("555fa85d4d8640862a0fc79b")
+                },
+                ok: 1
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->getServerInfo().getStatus();
+    ASSERT_NOT_OK(status);
+}
+
+TEST_F(DistLockCatalogFixture, GetServerRunnerError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerCommandError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerBadElectionId) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                localTime: { $date: "2015-05-26T13:06:27.293Z" },
+                $gleStats: {
+                    lastOpTime: { $timestamp: { t: 0, i: 0 }},
+                    electionId: 34
+                },
+                ok: 1
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerBadLocalTime) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                localTime: "2015-05-26T13:06:27.293Z",
+                $gleStats: {
+                    lastOpTime: { $timestamp: { t: 0, i: 0 }},
+                    electionId: ObjectId("555fa85d4d8640862a0fc79b")
+                },
+                ok: 1
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerNoGLEStats) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                localTime: { $date: "2015-05-26T13:06:27.293Z" },
+                ok: 1
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, GetServerNoElectionId) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->getServerInfo().getStatus();
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                localTime: { $date: "2015-05-26T13:06:27.293Z" },
+                $gleStats: {
+                    lastOpTime: { $timestamp: { t: 0, i: 0 }},
+                    termNumber: 64
+                },
+                ok: 1
+            })");
+    });
+
+    future.get();
+}
+
+TEST_F(DistLockCatalogFixture, BasicStopPing) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("test");
+                            ASSERT_OK(status);
+                        });
+
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        ASSERT_EQUALS(dummyHost, request.target);
+        ASSERT_EQUALS("config", request.dbname);
+
+        BSONObj expectedCmd(fromjson(R"({
                 findAndModify: "lockpings",
                 query: { _id: "test" },
                 remove: true,
                 writeConcern: { w: "majority", j: true, wtimeout: 100 }
             })"));
 
-            ASSERT_EQUALS(expectedCmd, request.cmdObj);
-        },
-        RemoteCommandResponse(fromjson(R"({
+        ASSERT_EQUALS(expectedCmd, request.cmdObj);
+
+        return fromjson(R"({
                 ok: 1,
                 value: {
                   _id: "test",
                   ping: { $date: "2014-03-11T09:17:18.098Z" }
                 }
-            })"), Milliseconds(0)));
+            })");
+    });
 
-        auto status = catalog.stopPing("test");
-        ASSERT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, StopPingTargetError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, StopPingTargetError) {
+    targeter()->setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+    auto status = catalog()->stopPing("");
+    ASSERT_NOT_OK(status);
+}
 
-        targeter.setFindHostReturnValue({ErrorCodes::InternalError, "can't target"});
+TEST_F(DistLockCatalogFixture, StopPingRunnerError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return {ErrorCodes::InternalError, "Bad"};
+    });
 
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, StopPingRunnerError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+TEST_F(DistLockCatalogFixture, StopPingCommandError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                errmsg: "bad",
+                code: 9
+            })");
+    });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    future.get();
+}
 
-        executor.setNextExpectedCommand(noTest, {ErrorCodes::InternalError, "Bad"});
+TEST_F(DistLockCatalogFixture, StopPingWriteError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::Unauthorized, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::InternalError, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 0,
+                code: 13,
+                errmsg: "Unauthorized"
+            })");
+    });
 
-    TEST(DistLockCatalogImpl, StopPingCommandError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    future.get();
+}
 
-        targeter.setFindHostReturnValue(dummyHost);
+TEST_F(DistLockCatalogFixture, StopPingWriteConcernError) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: 64,
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            errmsg: "bad",
-            code: 9
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    future.get();
+}
 
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::FailedToParse, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+TEST_F(DistLockCatalogFixture, StopPingUnsupportedWriteConcernResponse) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                            ASSERT_FALSE(status.reason().empty());
+                        });
 
-    TEST(DistLockCatalogImpl, StopPingWriteError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return fromjson(R"({
+                ok: 1,
+                value: null,
+                writeConcernError: {
+                    code: "bad format",
+                    errmsg: "waiting for replication timed out"
+                }
+            })");
+    });
 
-        targeter.setFindHostReturnValue(dummyHost);
+    future.get();
+}
 
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
+TEST_F(DistLockCatalogFixture, StopPingUnsupportedResponseFormat) {
+    auto future = async(std::launch::async,
+                        [this] {
+                            auto status = catalog()->stopPing("");
+                            ASSERT_NOT_OK(status);
+                            ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
+                        });
 
-        BSONObj returnObj(fromjson(R"({
-            ok: 0,
-            code: 13,
-            errmsg: "Unauthorized"
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
+    onCommand([](const RemoteCommandRequest& request) -> StatusWith<BSONObj> {
+        return BSON("ok" << 1 << "value"
+                         << "NaN");
+    });
 
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::Unauthorized, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
+    future.get();
+}
 
-    TEST(DistLockCatalogImpl, StopPingWriteConcernError) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: 64,
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::WriteConcernFailed, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, StopPingUnsupportedWriteConcernResponse) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        BSONObj returnObj(fromjson(R"({
-            ok: 1,
-            value: null,
-            writeConcernError: {
-                code: "bad format",
-                errmsg: "waiting for replication timed out"
-            }
-        })"));
-        executor.setNextExpectedCommand(noTest, RemoteCommandResponse(returnObj, Milliseconds(0)));
-
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-        ASSERT_FALSE(status.reason().empty());
-    }
-
-    TEST(DistLockCatalogImpl, StopPingUnsupportedResponseFormat) {
-        RemoteCommandTargeterMock targeter;
-        RemoteCommandRunnerMock executor;
-
-        targeter.setFindHostReturnValue(dummyHost);
-
-        DistLockCatalogImpl catalog(&targeter, &executor, kWTimeout);
-
-        executor.setNextExpectedCommand(noTest,
-                RemoteCommandResponse(BSON("ok" << 1 << "value" << "NaN"), Milliseconds(0)));
-
-        auto status = catalog.stopPing("");
-        ASSERT_NOT_OK(status);
-        ASSERT_EQUALS(ErrorCodes::UnsupportedFormat, status.code());
-    }
-
-} // unnamed namespace
-} // namespace mongo
+}  // unnamed namespace
+}  // namespace mongo

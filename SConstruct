@@ -612,7 +612,7 @@ env_vars.Add('LINKFLAGS',
 env_vars.Add('MONGO_DIST_SRC_PREFIX',
     help='Sets the prefix for files in the source distribution archive',
     converter=variable_distsrc_converter,
-    default="mongodb-${MONGO_VERSION}")
+    default="mongodb-r${MONGO_VERSION}")
 
 env_vars.Add('MONGO_VERSION',
     help='Sets the version string for MongoDB',
@@ -627,6 +627,10 @@ env_vars.Add('MSVC_USE_SCRIPT',
 
 env_vars.Add('MSVC_VERSION',
     help='Sets the version of Visual Studio to use (e.g.  12.0, 11.0, 10.0)')
+
+env_vars.Add('OBJCOPY',
+    help='Sets the path to objcopy',
+    default=WhereIs('objcopy'))
 
 env_vars.Add('RPATH',
     help='Set the RPATH for dynamic libraries and executables',
@@ -1819,6 +1823,7 @@ def doConfigure(myenv):
         else:
             llvm_symbolizer = myenv.WhereIs(llvm_symbolizer)
 
+        tsan_options = ""
         if llvm_symbolizer:
             myenv['ENV']['ASAN_SYMBOLIZER_PATH'] = llvm_symbolizer
             myenv['ENV']['LSAN_SYMBOLIZER_PATH'] = llvm_symbolizer
@@ -1899,49 +1904,33 @@ def doConfigure(myenv):
     if not myenv.ToolchainIs('msvc'):
         AddToCCFLAGSIfSupported(myenv, "-fno-builtin-memcmp")
 
-    # When using msvc, check for support for __declspec(thread), unless we have been asked
-    # explicitly not to use it. For other compilers, see if __thread works.
-    if myenv.ToolchainIs('msvc'):
-        haveDeclSpecThread = False
-        def CheckDeclspecThread(context):
-            test_body = """
-            __declspec( thread ) int tsp_int;
-            int main(int argc, char* argv[]) {
-            tsp_int = argc;
-            return 0;
-            }
-            """
-            context.Message('Checking for __declspec(thread)... ')
-            ret = context.TryLink(textwrap.dedent(test_body), ".cpp")
-            context.Result(ret)
-            return ret
-        conf = Configure(myenv, help=False, custom_tests = {
-            'CheckDeclspecThread' : CheckDeclspecThread,
-        })
-        haveDeclSpecThread = conf.CheckDeclspecThread()
-        conf.Finish()
-        if haveDeclSpecThread:
-            myenv.SetConfigHeaderDefine("MONGO_CONFIG_HAVE___DECLSPEC_THREAD")
-    else:
-        def CheckUUThread(context):
-            test_body = """
-            __thread int tsp_int;
-            int main(int argc, char* argv[]) {
-                tsp_int = argc;
-                return 0;
-            }
-            """
-            context.Message('Checking for __thread... ')
-            ret = context.TryLink(textwrap.dedent(test_body), ".cpp")
-            context.Result(ret)
-            return ret
-        conf = Configure(myenv, help=False, custom_tests = {
-            'CheckUUThread' : CheckUUThread,
-        })
-        haveUUThread = conf.CheckUUThread()
-        conf.Finish()
-        if haveUUThread:
-            myenv.SetConfigHeaderDefine("MONGO_CONFIG_HAVE___THREAD")
+    def CheckStorageClass(context, storage_class):
+        test_body = """
+        {0} int tsp_int = 1;
+        int main(int argc, char** argv) {{
+            return !(tsp_int == argc);
+        }}
+        """.format(storage_class)
+        context.Message('Checking for storage class {0} '.format(storage_class))
+        ret = context.TryLink(textwrap.dedent(test_body), ".cpp")
+        context.Result(ret)
+        return ret
+
+    conf = Configure(myenv, help=False, custom_tests = {
+        'CheckStorageClass': CheckStorageClass
+    })
+    haveTriviallyConstructibleThreadLocals = False
+    for storage_class, macro_name in [
+            ('thread_local', 'MONGO_CONFIG_HAVE_THREAD_LOCAL'),
+            ('__thread', 'MONGO_CONFIG_HAVE___THREAD'),
+            ('__declspec(thread)', 'MONGO_CONFIG_HAVE___DECLSPEC_THREAD')]:
+        if conf.CheckStorageClass(storage_class):
+            haveTriviallyConstructibleThreadLocals = True
+            myenv.SetConfigHeaderDefine(macro_name)
+    conf.Finish()
+    if not haveTriviallyConstructibleThreadLocals:
+        print "Compiler must support a thread local storage class for trivially constructible types"
+        Exit(1)
 
     # not all C++11-enabled gcc versions have type properties
     def CheckCXX11IsTriviallyCopyable(context):
@@ -2069,6 +2058,20 @@ def doConfigure(myenv):
                     boostlib,
                     [boostlib + suffix for suffix in boostSuffixList],
                     language='C++')
+    else:
+        # For the built in boost, we can set these without risking ODR violations, so do so.
+        conf.env.Append(
+            CPPDEFINES=[
+                # We don't want interruptions because we don't use
+                # them and they have a performance cost.
+                "BOOST_THREAD_DONT_PROVIDE_INTERRUPTIONS",
+
+                # We believe that none of our platforms are affected
+                # by the EINTR bug. Setting this avoids a retry loop
+                # in boosts mutex.hpp that we don't want to pay for.
+                "BOOST_THREAD_HAS_NO_EINTR_BUG",
+            ],
+        )
 
     if posix_system:
         conf.env.SetConfigHeaderDefine("MONGO_CONFIG_HAVE_HEADER_UNISTD_H")
@@ -2217,6 +2220,10 @@ checkErrorCodes()
 # --- lint ----
 
 def doLint( env , target , source ):
+    import buildscripts.clang_format
+    if not buildscripts.clang_format.lint(None, []):
+        raise Exception("clang-format lint errors")
+
     import buildscripts.lint
     if not buildscripts.lint.run_lint( [ "src/mongo/" ] ):
         raise Exception( "lint errors" )
@@ -2231,8 +2238,6 @@ def getSystemInstallName():
     dist_arch = GetOption("distarch")
     arch_name = env['TARGET_ARCH'] if not dist_arch else dist_arch
     n = env.GetTargetOSName() + "-" + arch_name
-    if has_option("nostrip"):
-        n += "-debugsymbols"
 
     if len(mongo_modules):
             n += "-" + "-".join(m.name for m in mongo_modules)

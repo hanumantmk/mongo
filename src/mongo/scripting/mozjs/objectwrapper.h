@@ -135,7 +135,7 @@ public:
      * Safely enumerates fields in the object, invoking a callback for each id
      */
     template <typename T>
-    void enumerate(T&& t) {
+    void enumerate(T&& callback) {
         JS::AutoIdArray ids(_context, JS_Enumerate(_context, _object));
 
         if (!ids)
@@ -145,7 +145,7 @@ public:
         JS::RootedId rid(_context);
         for (size_t i = 0; i < ids.length(); ++i) {
             rid.set(ids[i]);
-            t(rid);
+            callback(rid);
         }
     }
 

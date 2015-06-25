@@ -88,7 +88,5 @@ private:
     DeadlineMonitor<MozJSImplScope> _deadlineMonitor;
 };
 
-extern MozJSScriptEngine* globalScriptEngine;
-
 }  // namespace mozjs
 }  // namespace mongo

@@ -57,18 +57,29 @@ void setJSException(JSContext* cx, ErrorCodes::Error code, StringData sd) {
     JS_ReportErrorNumber(cx, errorCallback, nullptr, code, sd.rawData());
 }
 
-void throwCurrentJSException(JSContext* cx, ErrorCodes::Error altCode, StringData altReason) {
+Status currentJSExceptionToStatus(JSContext* cx, ErrorCodes::Error altCode, StringData altReason) {
     JS::RootedValue vp(cx);
-    uassert(altCode, altReason.rawData(), JS_GetPendingException(cx, &vp));
+    if (!JS_GetPendingException(cx, &vp)) return Status(altCode, altReason.rawData()); 
 
     JS::RootedObject obj(cx, vp.toObjectOrNull());
     JSErrorReport* report = JS_ErrorFromException(cx, obj);
-    uassert(altCode, altReason.rawData(), report);
+    if (!report) return Status(altCode, altReason.rawData()); 
 
     JSStringWrapper jsstr(cx, js::ErrorReportToString(cx, report));
-    uassert(altCode, altReason.rawData(), jsstr);
+    if (!jsstr) return Status(altCode, altReason.rawData()); 
 
-    uasserted(report->errorNumber ? report->errorNumber : altCode, jsstr.toStringData().rawData());
+    /**
+     * errorNumber is only set by library consumers of MozJS, and then only via
+     * JS_ReportErrorNumber, so all of the codes we see here are ours.
+     */
+    return Status(report->errorNumber ? static_cast<ErrorCodes::Error>(report->errorNumber)
+                                      : altCode,
+                  jsstr.toStringData().rawData());
+}
+
+void throwCurrentJSException(JSContext* cx, ErrorCodes::Error altCode, StringData altReason) {
+    auto status = currentJSExceptionToStatus(cx, altCode, altReason);
+    uasserted(status.code(), status.reason());
 }
 
 }  // namespace mozjs

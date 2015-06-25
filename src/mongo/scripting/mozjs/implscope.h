@@ -33,6 +33,7 @@
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/scripting/mozjs/bindata.h"
 #include "mongo/scripting/mozjs/bson.h"
+#include "mongo/scripting/mozjs/countdownlatch.h"
 #include "mongo/scripting/mozjs/cursor.h"
 #include "mongo/scripting/mozjs/db.h"
 #include "mongo/scripting/mozjs/dbcollection.h"
@@ -41,6 +42,7 @@
 #include "mongo/scripting/mozjs/dbref.h"
 #include "mongo/scripting/mozjs/engine.h"
 #include "mongo/scripting/mozjs/global.h"
+#include "mongo/scripting/mozjs/jsthread.h"
 #include "mongo/scripting/mozjs/maxkey.h"
 #include "mongo/scripting/mozjs/minkey.h"
 #include "mongo/scripting/mozjs/mongo.h"
@@ -138,12 +140,18 @@ public:
 
     void newFunction(StringData code, JS::MutableHandleValue out);
 
+    BSONObj callThreadArgs(const BSONObj& obj);
+
     WrapType<BinDataInfo>& getBinDataProto() {
         return _binDataProto;
     }
 
     WrapType<BSONInfo>& getBsonProto() {
         return _bsonProto;
+    }
+
+    WrapType<CountDownLatchInfo>& getCountDownLatchProto() {
+        return _countDownLatchProto;
     }
 
     WrapType<CursorInfo>& getCursorProto() {
@@ -168,6 +176,10 @@ public:
 
     WrapType<DBRefInfo>& getDbRefProto() {
         return _dbRefProto;
+    }
+
+    WrapType<JSThreadInfo>& getJSThreadProto() {
+        return _jsThreadProto;
     }
 
     WrapType<MaxKeyInfo>& getMaxKeyProto() {
@@ -258,6 +270,7 @@ private:
 
     void installDBAccess();
     void installBSONTypes();
+    void installFork();
 
     MozJSScriptEngine* _engine;
     MozRuntime _mr;
@@ -276,12 +289,14 @@ private:
 
     WrapType<BinDataInfo> _binDataProto;
     WrapType<BSONInfo> _bsonProto;
+    WrapType<CountDownLatchInfo> _countDownLatchProto;
     WrapType<CursorInfo> _cursorProto;
     WrapType<DBCollectionInfo> _dbCollectionProto;
     WrapType<DBPointerInfo> _dbPointerProto;
     WrapType<DBQueryInfo> _dbQueryProto;
     WrapType<DBInfo> _dbProto;
     WrapType<DBRefInfo> _dbRefProto;
+    WrapType<JSThreadInfo> _jsThreadProto;
     WrapType<MaxKeyInfo> _maxKeyProto;
     WrapType<MinKeyInfo> _minKeyProto;
     WrapType<MongoExternalInfo> _mongoExternalProto;
