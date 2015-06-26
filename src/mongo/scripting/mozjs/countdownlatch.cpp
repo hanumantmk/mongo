@@ -42,32 +42,20 @@ namespace mozjs {
 
 const char* const CountDownLatchInfo::className = "CountDownLatch";
 
+const JSFunctionSpec CountDownLatchInfo::methods[5] = {
+    MONGO_ATTACH_JS_FUNCTION(_new),
+    MONGO_ATTACH_JS_FUNCTION(_await),
+    MONGO_ATTACH_JS_FUNCTION(_countDown),
+    MONGO_ATTACH_JS_FUNCTION(_getCount),
+    JS_FS_END,
+};
+
+/**
+ * The global CountDownLatch holder.
+ *
+ * Provides an interface for communicating between JSThread's
+ */
 class CountDownLatchHolder {
-private:
-    struct Latch {
-        Latch(int32_t count) : count(count) {}
-
-        stdx::condition_variable cv;
-        stdx::mutex mutex;
-        int32_t count;
-    };
-
-    std::shared_ptr<Latch> get(int32_t desc) {
-        stdx::lock_guard<stdx::mutex> lock(_mutex);
-
-        auto iter = _latches.find(desc);
-        uassert(ErrorCodes::JSInterpreterFailure,
-                "not a valid CountDownLatch descriptor",
-                iter != _latches.end());
-
-        return iter->second;
-    }
-
-    typedef std::unordered_map<int32_t, std::shared_ptr<Latch>> Map;
-    Map _latches;
-    stdx::mutex _mutex;
-    int32_t _counter;
-
 public:
     CountDownLatchHolder() : _counter(0) {}
 
@@ -107,6 +95,35 @@ public:
 
         return latch->count;
     }
+
+private:
+    /**
+     * Latches for communication between threads
+     */
+    struct Latch {
+        Latch(int32_t count) : count(count) {}
+
+        stdx::mutex mutex;
+        stdx::condition_variable cv;
+        int32_t count;
+    };
+
+    std::shared_ptr<Latch> get(int32_t desc) {
+        stdx::lock_guard<stdx::mutex> lock(_mutex);
+
+        auto iter = _latches.find(desc);
+        uassert(ErrorCodes::JSInterpreterFailure,
+                "not a valid CountDownLatch descriptor",
+                iter != _latches.end());
+
+        return iter->second;
+    }
+
+    using Map = std::unordered_map<int32_t, std::shared_ptr<Latch>>;
+
+    stdx::mutex _mutex;
+    Map _latches;
+    int32_t _counter;
 };
 
 namespace {
@@ -115,44 +132,65 @@ CountDownLatchHolder globalCountDownLatchHolder;
 
 void CountDownLatchInfo::Functions::_new(JSContext* cx, JS::CallArgs args) {
     uassert(ErrorCodes::JSInterpreterFailure, "need exactly one argument", args.length() == 1);
-    uassert(ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isInt32());
+    uassert(
+        ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isNumber());
 
-    args.rval().setInt32(globalCountDownLatchHolder.make(args.get(0).toInt32()));
+    args.rval().setInt32(globalCountDownLatchHolder.make(args.get(0).toNumber()));
 }
 
 void CountDownLatchInfo::Functions::_await(JSContext* cx, JS::CallArgs args) {
     uassert(ErrorCodes::JSInterpreterFailure, "need exactly one argument", args.length() == 1);
-    uassert(ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isInt32());
+    uassert(
+        ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isNumber());
 
-    globalCountDownLatchHolder.await(args.get(0).toInt32());
+    globalCountDownLatchHolder.await(args.get(0).toNumber());
 
     args.rval().setUndefined();
 }
 
 void CountDownLatchInfo::Functions::_countDown(JSContext* cx, JS::CallArgs args) {
     uassert(ErrorCodes::JSInterpreterFailure, "need exactly one argument", args.length() == 1);
-    uassert(ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isInt32());
+    uassert(
+        ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isNumber());
 
-    globalCountDownLatchHolder.countDown(args.get(0).toInt32());
+    globalCountDownLatchHolder.countDown(args.get(0).toNumber());
 
     args.rval().setUndefined();
 }
 
 void CountDownLatchInfo::Functions::_getCount(JSContext* cx, JS::CallArgs args) {
     uassert(ErrorCodes::JSInterpreterFailure, "need exactly one argument", args.length() == 1);
-    uassert(ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isInt32());
+    uassert(
+        ErrorCodes::JSInterpreterFailure, "argument must be an integer", args.get(0).isNumber());
 
-    args.rval().setInt32(globalCountDownLatchHolder.getCount(args.get(0).toInt32()));
+    args.rval().setInt32(globalCountDownLatchHolder.getCount(args.get(0).toNumber()));
 }
 
+/**
+ * We have to do this odd dance here because we need the methods from
+ * CountDownLatch to be installed in a plain object as enumerable properties.
+ * This is due to the way CountDownLatch is invoked, specifically after being
+ * transmitted across our js fork(). So we can't inherit and can't rely on the
+ * type. Practically, we also end up wrapping up all of these functions in pure
+ * js variants that call down, which makes them bson <-> js safe.
+ */
 void CountDownLatchInfo::postInstall(JSContext* cx,
                                      JS::HandleObject global,
                                      JS::HandleObject proto) {
-    auto scope = getScope(cx);
+    auto objPtr = JS_NewPlainObject(cx);
+    uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_NewPlainObject", objPtr);
+
+    JS::RootedObject obj(cx, objPtr);
+    ObjectWrapper objWrapper(cx, obj);
+    ObjectWrapper protoWrapper(cx, proto);
 
     JS::RootedValue val(cx);
-    scope->getCountDownLatchProto().newObject(&val);
+    for (auto iter = methods; iter->name; ++iter) {
+        protoWrapper.getValue(iter->name, &val);
+        objWrapper.setValue(iter->name, val);
+    }
 
+    val.setObjectOrNull(obj);
     ObjectWrapper(cx, global).setValue("CountDownLatch", val);
 }
 

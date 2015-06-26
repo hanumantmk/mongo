@@ -64,7 +64,7 @@ const JSFunctionSpec JSThreadInfo::freeFunctions[3] = {
 const char* const JSThreadInfo::className = "JSThread";
 
 /**
- * Holder for JSThreads as exposed by fork() in the shell
+ * Holder for JSThreads as exposed by fork() in the shell.
  *
  * The idea here is that we create a jsthread by taking a js function and its
  * parameters and encoding them into a single bson object. Then we spawn a
@@ -99,6 +99,7 @@ public:
         _thread = stdx::thread(JSThread(*this));
         _started = true;
     }
+
     void join() {
         uassert(ErrorCodes::JSInterpreterFailure, "Thread not running", _started && !_done);
 
@@ -140,11 +141,17 @@ private:
             stdx::lock_guard<stdx::mutex> lck(_erroredMutex);
             _errored = value;
         }
+
         bool getErrored() {
             stdx::lock_guard<stdx::mutex> lck(_erroredMutex);
             return _errored;
         }
 
+        /**
+         * These two members aren't protected in any way, so you have to be
+         * mindful about how they're used. I.e. _args needs to be set before
+         * start() and _returnData can't be touched until after join().
+         */
         BSONObj _args;
         BSONObj _returnData;
 
@@ -164,7 +171,6 @@ private:
             try {
                 MozJSImplScope scope(static_cast<MozJSScriptEngine*>(globalScriptEngine));
 
-                // ret is translated to BSON to switch isolate
                 _sharedData->_returnData = scope.callThreadArgs(_sharedData->_args);
             } catch (...) {
                 auto status = exceptionToStatus();
@@ -252,7 +258,7 @@ void JSThreadInfo::Functions::_threadInject(JSContext* cx, JS::CallArgs args) {
 
     JS::RootedObject o(cx, args.get(0).toObjectOrNull());
 
-    if (!JS_DefineFunctions(cx, o, JSThreadInfo().threadMethods))
+    if (!JS_DefineFunctions(cx, o, JSThreadInfo::threadMethods))
         throwCurrentJSException(cx, ErrorCodes::JSInterpreterFailure, "Failed to define functions");
 
     args.rval().setUndefined();

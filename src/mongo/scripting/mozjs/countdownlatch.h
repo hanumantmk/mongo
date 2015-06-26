@@ -36,10 +36,10 @@ namespace mozjs {
 /**
  * The "CountDownLatch" javascript object.
  *
- * Installs a global "CountDownLatch" object with associated methods
+ * Installs a global "CountDownLatch" object with associated methods.
  *
  * Note that there is only one instance of this class and it is used to
- * communicate between different C++ threads
+ * communicate between different C++ threads.
  */
 struct CountDownLatchInfo : public BaseInfo {
     struct Functions {
@@ -49,13 +49,7 @@ struct CountDownLatchInfo : public BaseInfo {
         MONGO_DEFINE_JS_FUNCTION(_getCount);
     };
 
-    const JSFunctionSpec methods[5] = {
-        MONGO_ATTACH_JS_FUNCTION(_new),
-        MONGO_ATTACH_JS_FUNCTION(_await),
-        MONGO_ATTACH_JS_FUNCTION(_countDown),
-        MONGO_ATTACH_JS_FUNCTION(_getCount),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec methods[5];
 
     static const char* const className;
     static const InstallType installType = InstallType::Private;

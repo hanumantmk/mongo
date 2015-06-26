@@ -340,16 +340,16 @@ void MozJSImplScope::newFunction(StringData raw, JS::MutableHandleValue out) {
 BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
     MozJSEntry entry(this);
 
-    JS::RootedValue f(_context);
-    ValueReader(_context, &f).fromBSONElement(args.firstElement(), true);
+    JS::RootedValue function(_context);
+    ValueReader(_context, &function).fromBSONElement(args.firstElement(), true);
 
     int argc = args.nFields() - 1;
 
-    // TODO SERVER-8016: properly allocate handles on the stack
     JS::AutoValueVector argv(_context);
     BSONObjIterator it(args);
     it.next();
     JS::RootedValue value(_context);
+
     for (int i = 0; i < argc; ++i) {
         ValueReader(_context, &value).fromBSONElement(*it, true);
         argv.append(value);
@@ -359,7 +359,7 @@ BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
     JS::RootedValue out(_context);
     JS::RootedObject thisv(_context);
 
-    bool success = JS::Call(_context, thisv, f, argv, &out);
+    bool success = JS::Call(_context, thisv, function, argv, &out);
 
     if (!success) {
         auto status = currentJSExceptionToStatus(

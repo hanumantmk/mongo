@@ -32,6 +32,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+/**
+ * This file was copied out of the firefox 38.0.1esr source tree from
+ * js/src/vm/PosixNSPR.cpp and modified to use the MongoDB threading
+ * primitives.
+ *
+ * The point of this file is to shim the posix emulation of nspr that Mozilla
+ * ships with firefox. We force configuration such that the SpiderMonkey build
+ * looks for these symbols and we provide them from within our object code
+ * rather than attempting to build it in there's so we can take advantage of
+ * the cross platform abstractions that we rely upon.
+ */
+
 #include "mongo/platform/basic.h"
 
 #include <js/Utility.h>
@@ -91,8 +103,6 @@ PRThread* PR_CreateThread(PRThreadType type,
             js_delete<nspr::Thread>);
 
         t->thread() = mongo::stdx::thread(&nspr::Thread::ThreadRoutine, t.get());
-
-        // TODO, do we actually care about setting stack size?
 
         if (state == PR_UNJOINABLE_THREAD) {
             t->thread().detach();
