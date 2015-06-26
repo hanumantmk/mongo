@@ -61,7 +61,7 @@ namespace {
  * manage this by trapping all calls to malloc, free, etc. and keeping track of
  * counts in some thread locals
  */
-const int kMallocMemoryLimit = 1024 * 1024 * 1024;
+const size_t kMallocMemoryLimit = 8024ul * 1024 * 1024;
 
 /**
  * The number of bytes to allocate after which garbage collection is run

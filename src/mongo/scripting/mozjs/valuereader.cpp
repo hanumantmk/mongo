@@ -252,6 +252,8 @@ void ValueReader::fromStringData(StringData sd) {
     auto utf16 = JS::LossyUTF8CharsToNewTwoByteCharsZ(
         _context, JS::UTF8Chars(sd.rawData(), sd.size()), &utf16Len);
 
+    mozilla::UniquePtr<char16_t, JS::FreePolicy> utf16Deleter(utf16.get());
+
     // auto utf16 = JS::UTF8CharsToNewTwoByteCharsZ(
     //    _context, JS::UTF8Chars(sd.rawData(), sd.size()), &utf16Len);
 

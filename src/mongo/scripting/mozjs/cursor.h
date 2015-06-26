@@ -65,10 +65,10 @@ struct CursorInfo : public BaseInfo {
      */
     struct CursorHolder {
         CursorHolder(std::unique_ptr<DBClientCursor> cursor, std::shared_ptr<DBClientBase> client)
-            : cursor(std::move(cursor)), client(std::move(client)) {}
+            : client(std::move(client)), cursor(std::move(cursor)) {}
 
-        std::unique_ptr<DBClientCursor> cursor;
         std::shared_ptr<DBClientBase> client;
+        std::unique_ptr<DBClientCursor> cursor;
     };
 };
 
