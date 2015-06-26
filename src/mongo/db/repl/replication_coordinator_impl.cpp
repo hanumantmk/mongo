@@ -2025,7 +2025,7 @@ void ReplicationCoordinatorImpl::_performPostMemberStateUpdateAction(
             break;
         case kActionWinElection: {
             stdx::unique_lock<stdx::mutex> lk(_mutex);
-            _electionId = OID::gen();
+            _electionId = OID(_topCoord->getTerm());
             _topCoord->processWinElection(_electionId, getNextGlobalTimestamp());
             _isWaitingForDrainToComplete = true;
             const PostMemberStateUpdateAction nextAction =
@@ -2529,14 +2529,27 @@ void ReplicationCoordinatorImpl::_processReplSetDeclareElectionWinner_finish(
     *result = _topCoord->processReplSetDeclareElectionWinner(args, responseTerm);
 }
 
-void ReplicationCoordinatorImpl::prepareCursorResponseInfo(BSONObjBuilder* objBuilder) {
+void ReplicationCoordinatorImpl::prepareReplResponseMetadata(BSONObjBuilder* objBuilder) {
     if (getReplicationMode() == modeReplSet && isV1ElectionProtocol()) {
-        BSONObjBuilder replObj(objBuilder->subobjStart("repl"));
-        _topCoord->prepareCursorResponseInfo(objBuilder, getLastCommittedOpTime());
-        replObj.done();
+        CBHStatus cbh = _replExecutor.scheduleWork(
+            stdx::bind(&ReplicationCoordinatorImpl::_prepareReplResponseMetadata_finish,
+                       this,
+                       stdx::placeholders::_1,
+                       objBuilder));
+        if (cbh.getStatus() == ErrorCodes::ShutdownInProgress) {
+            return;
+        }
+        fassert(28709, cbh.getStatus());
+        _replExecutor.wait(cbh.getValue());
     }
 }
 
+void ReplicationCoordinatorImpl::_prepareReplResponseMetadata_finish(
+    const ReplicationExecutor::CallbackArgs& cbData, BSONObjBuilder* objBuilder) {
+    BSONObjBuilder replObj(objBuilder->subobjStart(rpc::kReplicationMetadataFieldName));
+    _topCoord->prepareReplResponseMetadata(&replObj, getLastCommittedOpTime());
+    replObj.done();
+}
 bool ReplicationCoordinatorImpl::isV1ElectionProtocol() {
     return getConfig().getProtocolVersion() == 1;
 }

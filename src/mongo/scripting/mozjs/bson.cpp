@@ -183,6 +183,13 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
 
         o.defineProperty(id, vp, JSPROP_ENUMERATE);
 
+        if (!holder->_readOnly && (elem.type() == mongo::Object || elem.type() == mongo::Array)) {
+            // if accessing a subobject, we have no way to know if
+            // modifications are being made on writable objects
+
+            holder->_altered = true;
+        }
+
         *resolvedp = true;
     }
 }

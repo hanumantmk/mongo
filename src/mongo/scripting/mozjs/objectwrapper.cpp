@@ -325,6 +325,11 @@ void ObjectWrapper::writeThis(BSONObjBuilder* b) {
         bool altered;
 
         std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, _object);
+
+        if (!altered) {
+            b->appendElements(*originalBSON);
+            return;
+        }
     }
 
     // We special case the _id field in top-level objects and move it to the front.

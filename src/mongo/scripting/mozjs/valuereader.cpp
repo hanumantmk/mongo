@@ -246,8 +246,14 @@ void ValueReader::fromBSON(const BSONObj& obj, bool readOnly) {
  */
 void ValueReader::fromStringData(StringData sd) {
     size_t utf16Len;
-    auto utf16 = JS::UTF8CharsToNewTwoByteCharsZ(
+
+    // TODO: we have tests that involve dropping garbage in. Do we want to
+    //       throw, or to take the lossy conversion?
+    auto utf16 = JS::LossyUTF8CharsToNewTwoByteCharsZ(
         _context, JS::UTF8Chars(sd.rawData(), sd.size()), &utf16Len);
+
+    // auto utf16 = JS::UTF8CharsToNewTwoByteCharsZ(
+    //    _context, JS::UTF8Chars(sd.rawData(), sd.size()), &utf16Len);
 
     uassert(ErrorCodes::JSInterpreterFailure,
             str::stream() << "Failed to encode \"" << sd << "\" as utf16",

@@ -40,7 +40,8 @@ namespace mongo {
 
 namespace executor {
 
-NetworkTestEnv::NetworkTestEnv(NetworkInterfaceMock* network) : _mockNetwork(network) {}
+NetworkTestEnv::NetworkTestEnv(repl::ReplicationExecutor* executor, NetworkInterfaceMock* network)
+    : _executor(executor), _mockNetwork(network) {}
 
 void NetworkTestEnv::onCommand(OnCommandFunction func) {
     _mockNetwork->enterNetwork();
@@ -58,7 +59,7 @@ void NetworkTestEnv::onCommand(OnCommandFunction func) {
 
     Command::appendCommandStatus(result, resultStatus.getStatus());
 
-    const RemoteCommandResponse response(result.obj(), Milliseconds(1));
+    const RemoteCommandResponse response(result.obj(), BSONObj(), Milliseconds(1));
 
     _mockNetwork->scheduleResponse(noi, _mockNetwork->now(), response);
     _mockNetwork->runReadyNetworkOperations();
@@ -87,9 +88,8 @@ void NetworkTestEnv::onFindCommand(OnFindCommandFunction func) {
     });
 }
 
-void NetworkTestEnv::startUp(repl::ReplicationExecutor* executor) {
-    _executorThread = stdx::thread(
-        std::bind([](repl::ReplicationExecutor* executorPtr) { executorPtr->run(); }, executor));
+void NetworkTestEnv::startUp() {
+    _executorThread = stdx::thread([this] { _executor->run(); });
 }
 
 void NetworkTestEnv::shutDown() {

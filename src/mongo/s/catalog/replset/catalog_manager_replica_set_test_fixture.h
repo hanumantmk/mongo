@@ -28,12 +28,9 @@
 
 #pragma once
 
-#include <functional>
-#include <thread>
-#include <vector>
+#include <utility>
 
 #include "mongo/executor/network_test_env.h"
-#include "mongo/stdx/thread.h"
 #include "mongo/unittest/unittest.h"
 
 namespace mongo {
@@ -48,9 +45,7 @@ template <typename T>
 class StatusWith;
 
 namespace executor {
-
 class NetworkInterfaceMock;
-
 }  // namespace executor
 
 /**
@@ -62,6 +57,12 @@ public:
     ~CatalogManagerReplSetTestFixture();
 
 protected:
+    template <typename Lambda>
+    executor::NetworkTestEnv::FutureHandle<typename std::result_of<Lambda()>::type> launchAsync(
+        Lambda&& func) const {
+        return _networkTestEnv->launchAsync(std::forward<Lambda>(func));
+    }
+
     CatalogManagerReplicaSet* catalogManager() const;
 
     ShardRegistry* shardRegistry() const;

@@ -283,7 +283,7 @@ void MozJSImplScope::setElement(const char* field, const BSONElement& e) {
 void MozJSImplScope::setObject(const char* field, const BSONObj& obj, bool readOnly) {
     MozJSEntry entry(this);
 
-    ObjectWrapper(_context, _global).setBSON(field, obj, false);
+    ObjectWrapper(_context, _global).setBSON(field, obj, readOnly);
 }
 
 int MozJSImplScope::type(const char* field) {

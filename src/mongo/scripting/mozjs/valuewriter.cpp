@@ -80,7 +80,20 @@ int ValueWriter::type() {
 }
 
 BSONObj ValueWriter::toBSON() {
+    if (!_value.isObject())
+        return BSONObj();
+
     JS::RootedObject obj(_context, _value.toObjectOrNull());
+
+    if (getScope(_context)->getBsonProto().instanceOf(obj)) {
+        BSONObj* originalBSON;
+        bool altered;
+
+        std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, obj);
+
+        if (!altered)
+            return *originalBSON;
+    }
 
     BSONObjBuilder bob;
     ObjectWrapper(_context, obj, _depth).writeThis(&bob);
