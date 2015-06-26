@@ -40,7 +40,7 @@ namespace mozjs {
  * whenever you call the constructor to make a new one you just get the
  * "singleton" MinKey from the prototype. See the postInstall for details.
  */
-struct MinKeyInfo {
+struct MinKeyInfo : public BaseInfo {
     static void call(JSContext* cx, JS::CallArgs args);
     static void construct(JSContext* cx, JS::CallArgs args);
 
@@ -48,13 +48,11 @@ struct MinKeyInfo {
         MONGO_DEFINE_JS_FUNCTION(tojson);
     };
 
-    const JSFunctionSpec methods[2] = {
-        MONGO_ATTACH_JS_FUNCTION(tojson), JS_FS_END,
-    };
+    static const JSFunctionSpec methods[2];
 
     static void postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto);
 
-    const char* const className = "MinKey";
+    static const char* const className;
 };
 
 }  // namespace mozjs

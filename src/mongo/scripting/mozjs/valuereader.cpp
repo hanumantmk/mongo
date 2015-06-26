@@ -32,6 +32,8 @@
 
 #include "mongo/scripting/mozjs/valuereader.h"
 
+#include <js/CharacterEncoding.h>
+
 #include "mongo/base/error_codes.h"
 #include "mongo/scripting/mozjs/implscope.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
@@ -235,8 +237,23 @@ void ValueReader::fromBSON(const BSONObj& obj, bool readOnly) {
     _value.setObjectOrNull(child);
 }
 
+/**
+ * SpiderMonkey doesn't have a direct entry point to create a jsstring from
+ * utf8, so we have to flow through some slightly less public interfaces.
+ *
+ * Basically, we have to use their routines to convert to utf16, then assign
+ * those bytes with JS_NewUCStringCopyN
+ */
 void ValueReader::fromStringData(StringData sd) {
-    auto jsStr = JS_NewStringCopyN(_context, sd.rawData(), sd.size());
+    size_t utf16Len;
+    auto utf16 = JS::UTF8CharsToNewTwoByteCharsZ(
+        _context, JS::UTF8Chars(sd.rawData(), sd.size()), &utf16Len);
+
+    uassert(ErrorCodes::JSInterpreterFailure,
+            str::stream() << "Failed to encode \"" << sd << "\" as utf16",
+            utf16);
+
+    auto jsStr = JS_NewUCStringCopyN(_context, utf16.get(), utf16Len);
 
     uassert(ErrorCodes::JSInterpreterFailure,
             str::stream() << "Unable to copy \"" << sd << "\" into MozJS",

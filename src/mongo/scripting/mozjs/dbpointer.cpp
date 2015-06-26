@@ -38,6 +38,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const DBPointerInfo::className = "DBPointer";
+
 void DBPointerInfo::construct(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 

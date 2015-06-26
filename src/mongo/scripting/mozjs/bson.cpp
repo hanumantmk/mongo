@@ -41,6 +41,12 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const BSONInfo::className = "BSON";
+
+const JSFunctionSpec BSONInfo::freeFunctions[2] = {
+    MONGO_ATTACH_JS_FUNCTION(bsonWoCompare), JS_FS_END,
+};
+
 namespace {
 
 /**
@@ -174,7 +180,8 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
         JS::RootedValue vp(cx);
 
         ValueReader(cx, &vp).fromBSONElement(elem, holder->_readOnly);
-        o.defineProperty(id, vp, 0);
+
+        o.defineProperty(id, vp, JSPROP_ENUMERATE);
 
         *resolvedp = true;
     }

@@ -38,20 +38,16 @@ namespace mozjs {
  *
  * Holds a private bson OID
  */
-struct OIDInfo {
+struct OIDInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
-    static void finalize(JSFreeOp* fop, JSObject* obj);
 
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(toString);
     };
 
-    const JSFunctionSpec methods[2] = {
-        MONGO_ATTACH_JS_FUNCTION(toString), JS_FS_END,
-    };
+    static const JSFunctionSpec methods[2];
 
-    const char* const className = "ObjectId";
-    static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
+    static const char* const className;
 };
 
 }  // namespace mozjs

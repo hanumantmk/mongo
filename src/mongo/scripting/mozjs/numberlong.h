@@ -47,7 +47,7 @@ namespace mozjs {
  * Where top is the high 32 bits, bottom the low 32 bits and floatApprox a
  * floating point approximation.
  */
-struct NumberLongInfo {
+struct NumberLongInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 
     struct Functions {
@@ -56,14 +56,9 @@ struct NumberLongInfo {
         MONGO_DEFINE_JS_FUNCTION(valueOf);
     };
 
-    const JSFunctionSpec methods[4] = {
-        MONGO_ATTACH_JS_FUNCTION(toNumber),
-        MONGO_ATTACH_JS_FUNCTION(toString),
-        MONGO_ATTACH_JS_FUNCTION(valueOf),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec methods[4];
 
-    const char* const className = "NumberLong";
+    static const char* const className;
 
     static long long ToNumberLong(JSContext* cx, JS::HandleObject object);
     static long long ToNumberLong(JSContext* cx, JS::HandleValue value);

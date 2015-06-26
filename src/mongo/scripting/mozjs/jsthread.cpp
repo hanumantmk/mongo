@@ -34,8 +34,8 @@
 
 #include "mongo/db/jsobj.h"
 #include "mongo/scripting/mozjs/implscope.h"
-#include "mongo/scripting/mozjs/valuewriter.h"
 #include "mongo/scripting/mozjs/valuereader.h"
+#include "mongo/scripting/mozjs/valuewriter.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/mutex.h"
@@ -46,39 +46,63 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec JSThreadInfo::threadMethods[6] = {
+    MONGO_ATTACH_JS_FUNCTION(init),
+    MONGO_ATTACH_JS_FUNCTION(start),
+    MONGO_ATTACH_JS_FUNCTION(join),
+    MONGO_ATTACH_JS_FUNCTION(hasFailed),
+    MONGO_ATTACH_JS_FUNCTION(returnData),
+    JS_FS_END,
+};
+
+const JSFunctionSpec JSThreadInfo::freeFunctions[3] = {
+    MONGO_ATTACH_JS_FUNCTION(_threadInject),
+    MONGO_ATTACH_JS_FUNCTION(_scopedThreadInject),
+    JS_FS_END,
+};
+
+const char* const JSThreadInfo::className = "JSThread";
+
+/**
+ * Holder for JSThreads as exposed by fork() in the shell
+ *
+ * The idea here is that we create a jsthread by taking a js function and its
+ * parameters and encoding them into a single bson object. Then we spawn a
+ * thread, have that thread do the work and join() it before checking it's
+ * result (serialized through bson). We can check errors at any time by
+ * checking a mutex guarded hasError().
+ */
 class JSThreadConfig {
 public:
-    JSThreadConfig(JSContext* cx, JS::CallArgs args) :
-        _started(false),
-        _done(false),
-        _sharedData(new SharedData()) {
+    JSThreadConfig(JSContext* cx, JS::CallArgs args)
+        : _started(false), _done(false), _sharedData(new SharedData()) {
         uassert(ErrorCodes::JSInterpreterFailure, "need at least one argument", args.length() > 0);
         uassert(ErrorCodes::JSInterpreterFailure,
                 "first argument must be a function",
                 args.get(0).isObject() && JS_ObjectIsFunction(cx, args.get(0).toObjectOrNull()));
 
-        // arguments need to be copied into the isolate, go through bson
         BSONObjBuilder b;
-        for(unsigned i = 0; i < args.length(); ++i) {
-            std::string str = str::stream() << "arg" << BSONObjBuilder::numStr(i);
-            ValueWriter(cx, args.get(i)).writeThis(&b, str);
+        for (unsigned i = 0; i < args.length(); ++i) {
+            // 10 decimal digits for a 32 bit unsigned, then 1 for the null
+            char buf[11];
+            std::snprintf(buf, sizeof(buf), "%i", i);
+
+            ValueWriter(cx, args.get(i)).writeThis(&b, buf);
         }
 
         _sharedData->_args = b.obj();
     }
 
-    ~JSThreadConfig() {
-    }
-
     void start() {
         uassert(ErrorCodes::JSInterpreterFailure, "Thread already started", !_started);
-        JSThread jt(*this);
-        _thread.reset(new stdx::thread(jt));
+
+        _thread = stdx::thread(JSThread(*this));
         _started = true;
     }
     void join() {
         uassert(ErrorCodes::JSInterpreterFailure, "Thread not running", _started && !_done);
-        _thread->join();
+
+        _thread.join();
         _done = true;
     }
 
@@ -89,17 +113,21 @@ public:
      */
     bool hasFailed() const {
         uassert(ErrorCodes::JSInterpreterFailure, "Thread not started", _started);
+
         return _sharedData->getErrored();
     }
 
     BSONObj returnData() {
         if (!_done)
             join();
+
         return _sharedData->_returnData;
     }
 
 private:
-    /*
+    /**
+     * SharedData between the calling thread and the callee
+     *
      * JSThreadConfig doesn't always outlive its JSThread (for example, if the parent thread
      * garbage collects the JSThreadConfig before the JSThread has finished running), so any
      * data shared between them has to go in a shared_ptr.
@@ -107,8 +135,7 @@ private:
     class SharedData {
     public:
         SharedData() : _errored(false) {}
-        BSONObj _args;
-        BSONObj _returnData;
+
         void setErrored(bool value) {
             stdx::lock_guard<stdx::mutex> lck(_erroredMutex);
             _errored = value;
@@ -117,24 +144,28 @@ private:
             stdx::lock_guard<stdx::mutex> lck(_erroredMutex);
             return _errored;
         }
+
+        BSONObj _args;
+        BSONObj _returnData;
+
     private:
         stdx::mutex _erroredMutex;
         bool _errored;
     };
 
+    /**
+     * The callable object used by stdx::thread
+     */
     class JSThread {
     public:
         JSThread(JSThreadConfig& config) : _sharedData(config._sharedData) {}
 
         void operator()() {
             try {
-                auto scope = stdx::make_unique<MozJSImplScope>(
-                    static_cast<MozJSScriptEngine*>(globalScriptEngine));
-
-                BSONObj ret = scope->callThreadArgs(_sharedData->_args);
+                MozJSImplScope scope(static_cast<MozJSScriptEngine*>(globalScriptEngine));
 
                 // ret is translated to BSON to switch isolate
-                _sharedData->_returnData = ret;
+                _sharedData->_returnData = scope.callThreadArgs(_sharedData->_args);
             } catch (...) {
                 auto status = exceptionToStatus();
 
@@ -150,7 +181,7 @@ private:
 
     bool _started;
     bool _done;
-    std::unique_ptr<stdx::thread> _thread;
+    stdx::thread _thread;
     std::shared_ptr<SharedData> _sharedData;
 };
 
@@ -160,7 +191,7 @@ JSThreadConfig* getConfig(JSContext* cx, JS::CallArgs args) {
     JS::RootedValue value(cx);
     ObjectWrapper(cx, args.thisv()).getValue("_JSThreadConfig", &value);
 
-    if (! value.isObject())
+    if (!value.isObject())
         uasserted(ErrorCodes::InternalError, "_JSThreadConfig not an object");
 
     return static_cast<JSThreadConfig*>(JS_GetPrivate(value.toObjectOrNull()));
@@ -171,7 +202,8 @@ JSThreadConfig* getConfig(JSContext* cx, JS::CallArgs args) {
 void JSThreadInfo::finalize(JSFreeOp* fop, JSObject* obj) {
     auto config = static_cast<JSThreadConfig*>(JS_GetPrivate(obj));
 
-    if (!config) return;
+    if (!config)
+        return;
 
     delete config;
 }
@@ -206,16 +238,21 @@ void JSThreadInfo::Functions::hasFailed(JSContext* cx, JS::CallArgs args) {
 }
 
 void JSThreadInfo::Functions::returnData(JSContext* cx, JS::CallArgs args) {
-    ValueReader(cx, args.rval()).fromBSONElement(getConfig(cx, args)->returnData().firstElement(), true);
+    ValueReader(cx, args.rval())
+        .fromBSONElement(getConfig(cx, args)->returnData().firstElement(), true);
 }
 
 void JSThreadInfo::Functions::_threadInject(JSContext* cx, JS::CallArgs args) {
-    uassert(ErrorCodes::JSInterpreterFailure, "threadInject takes exactly 1 argument", args.length() == 1);
-    uassert(ErrorCodes::JSInterpreterFailure, "threadInject needs to be passed a prototype", args.get(0).isObject());
+    uassert(ErrorCodes::JSInterpreterFailure,
+            "threadInject takes exactly 1 argument",
+            args.length() == 1);
+    uassert(ErrorCodes::JSInterpreterFailure,
+            "threadInject needs to be passed a prototype",
+            args.get(0).isObject());
 
     JS::RootedObject o(cx, args.get(0).toObjectOrNull());
 
-    if (! JS_DefineFunctions(cx, o, JSThreadInfo().threadMethods))
+    if (!JS_DefineFunctions(cx, o, JSThreadInfo().threadMethods))
         throwCurrentJSException(cx, ErrorCodes::JSInterpreterFailure, "Failed to define functions");
 
     args.rval().setUndefined();

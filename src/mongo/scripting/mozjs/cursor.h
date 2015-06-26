@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include "mongo/client/dbclientcursor.h"
+#include "mongo/client/dbclientinterface.h"
 #include "mongo/scripting/mozjs/wraptype.h"
 
 namespace mongo {
@@ -39,7 +41,7 @@ namespace mozjs {
  * Note that the install is private, so this class should only be constructible
  * from C++. Current callers are all via the Mongo object.
  */
-struct CursorInfo {
+struct CursorInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);
 
@@ -50,17 +52,24 @@ struct CursorInfo {
         MONGO_DEFINE_JS_FUNCTION(readOnly);
     };
 
-    const JSFunctionSpec methods[5] = {
-        MONGO_ATTACH_JS_FUNCTION(hasNext),
-        MONGO_ATTACH_JS_FUNCTION(next),
-        MONGO_ATTACH_JS_FUNCTION(objsLeftInBatch),
-        MONGO_ATTACH_JS_FUNCTION(readOnly),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec methods[5];
 
-    const char* const className = "Cursor";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
     static const InstallType installType = InstallType::Private;
+
+    /**
+     * We need this because the DBClientBase can go out of scope before all of
+     * its children (as in global shutdown). So we have to manage object
+     * lifetimes in C++ land.
+     */
+    struct CursorHolder {
+        CursorHolder(std::unique_ptr<DBClientCursor> cursor, std::shared_ptr<DBClientBase> client)
+            : cursor(std::move(cursor)), client(std::move(client)) {}
+
+        std::unique_ptr<DBClientCursor> cursor;
+        std::shared_ptr<DBClientBase> client;
+    };
 };
 
 }  // namespace mozjs

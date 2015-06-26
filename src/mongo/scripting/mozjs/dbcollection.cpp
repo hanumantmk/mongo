@@ -41,6 +41,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const DBCollectionInfo::className = "DBCollection";
+
 void DBCollectionInfo::getProperty(JSContext* cx,
                                    JS::HandleObject obj,
                                    JS::HandleId id,

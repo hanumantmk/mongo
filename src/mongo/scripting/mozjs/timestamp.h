@@ -43,10 +43,10 @@ namespace mozjs {
  *     i : Double,
  * }
  */
-struct TimestampInfo {
+struct TimestampInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 
-    const char* const className = "Timestamp";
+    static const char* const className;
 };
 
 }  // namespace mozjs

@@ -42,14 +42,14 @@ namespace mozjs {
  * Its major magic is in its getProperty() callback, which threads through to
  * a getCollection method installed in js
  */
-struct DBCollectionInfo {
+struct DBCollectionInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void getProperty(JSContext* cx,
                             JS::HandleObject obj,
                             JS::HandleId id,
                             JS::MutableHandleValue vp);
 
-    const char* const className = "DBCollection";
+    static const char* const className;
 };
 
 }  // namespace mozjs

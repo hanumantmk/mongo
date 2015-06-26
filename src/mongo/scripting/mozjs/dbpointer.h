@@ -42,10 +42,10 @@ namespace mozjs {
  *     ns : String(),
  * }
  */
-struct DBPointerInfo {
+struct DBPointerInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 
-    const char* const className = "DBPointer";
+    static const char* const className;
 };
 
 }  // namespace mozjs

@@ -39,8 +39,8 @@ namespace mozjs {
  * Note that this installs over native.  We only use this to grab the regexp
  * prototype early in case users overwrite it.
  */
-struct RegExpInfo {
-    const char* const className = "RegExp";
+struct RegExpInfo : public BaseInfo {
+    static const char* const className;
 
     static const InstallType installType = InstallType::OverNative;
 };

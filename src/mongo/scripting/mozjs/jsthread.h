@@ -34,12 +34,17 @@ namespace mongo {
 namespace mozjs {
 
 /**
- * The JSThread javascript object
+ * Helper for the JSThread javascript object
  *
- * We do an odd dance where we inject this in via _threadInject, then replace
- * this...
+ * The workflow is strange because we have a thing in javascript called a
+ * JSThread, but we don't actually get to construct it. Instead, we have to
+ * inject methods into that thing (via _threadInject) and hang our C++ thread
+ * separately (via init() on that type).
+ *
+ * To manage lifetime, we just add a field into the injected object that's our
+ * JSThread and add our holder in as our JSThread's private member.
  */
-struct JSThreadInfo {
+struct JSThreadInfo : public BaseInfo {
     static void finalize(JSFreeOp* fop, JSObject* obj);
 
     struct Functions {
@@ -53,22 +58,14 @@ struct JSThreadInfo {
         MONGO_DEFINE_JS_FUNCTION(_scopedThreadInject);
     };
 
-    const JSFunctionSpec threadMethods[6] = {
-        MONGO_ATTACH_JS_FUNCTION(init),
-        MONGO_ATTACH_JS_FUNCTION(start),
-        MONGO_ATTACH_JS_FUNCTION(join),
-        MONGO_ATTACH_JS_FUNCTION(hasFailed),
-        MONGO_ATTACH_JS_FUNCTION(returnData),
-        JS_FS_END,
-    };
+    /**
+     * Note that this isn't meant to supply methods for JSThread, it's just
+     * there to work with _threadInject. So the name isn't a mistake
+     */
+    static const JSFunctionSpec threadMethods[6];
+    static const JSFunctionSpec freeFunctions[3];
 
-    const JSFunctionSpec freeFunctions[3] = {
-        MONGO_ATTACH_JS_FUNCTION(_threadInject),
-        MONGO_ATTACH_JS_FUNCTION(_scopedThreadInject),
-        JS_FS_END,
-    };
-
-    const char* const className = "JSThread";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
     static const InstallType installType = InstallType::Private;
 };

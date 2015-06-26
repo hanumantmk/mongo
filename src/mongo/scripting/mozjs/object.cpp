@@ -38,6 +38,12 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec ObjectInfo::methods[3] = {
+    MONGO_ATTACH_JS_FUNCTION(bsonsize), MONGO_ATTACH_JS_FUNCTION(invalidForStorage), JS_FS_END,
+};
+
+const char* const ObjectInfo::className = "Object";
+
 void ObjectInfo::Functions::bsonsize(JSContext* cx, JS::CallArgs args) {
     if (args.length() != 1)
         uasserted(ErrorCodes::BadValue, "bsonsize needs 1 argument");

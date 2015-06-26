@@ -37,6 +37,12 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec MinKeyInfo::methods[2] = {
+    MONGO_ATTACH_JS_FUNCTION(tojson), JS_FS_END,
+};
+
+const char* const MinKeyInfo::className = "MinKey";
+
 namespace {
 const char* const kSingleton = "singleton";
 }  // namespace

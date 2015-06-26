@@ -40,6 +40,15 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec NumberLongInfo::methods[4] = {
+    MONGO_ATTACH_JS_FUNCTION(toNumber),
+    MONGO_ATTACH_JS_FUNCTION(toString),
+    MONGO_ATTACH_JS_FUNCTION(valueOf),
+    JS_FS_END,
+};
+
+const char* const NumberLongInfo::className = "NumberLong";
+
 namespace {
 const char* const kTop = "top";
 const char* const kBottom = "bottom";

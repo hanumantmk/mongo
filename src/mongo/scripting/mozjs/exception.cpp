@@ -59,14 +59,17 @@ void setJSException(JSContext* cx, ErrorCodes::Error code, StringData sd) {
 
 Status currentJSExceptionToStatus(JSContext* cx, ErrorCodes::Error altCode, StringData altReason) {
     JS::RootedValue vp(cx);
-    if (!JS_GetPendingException(cx, &vp)) return Status(altCode, altReason.rawData()); 
+    if (!JS_GetPendingException(cx, &vp))
+        return Status(altCode, altReason.rawData());
 
     JS::RootedObject obj(cx, vp.toObjectOrNull());
     JSErrorReport* report = JS_ErrorFromException(cx, obj);
-    if (!report) return Status(altCode, altReason.rawData()); 
+    if (!report)
+        return Status(altCode, altReason.rawData());
 
     JSStringWrapper jsstr(cx, js::ErrorReportToString(cx, report));
-    if (!jsstr) return Status(altCode, altReason.rawData()); 
+    if (!jsstr)
+        return Status(altCode, altReason.rawData());
 
     /**
      * errorNumber is only set by library consumers of MozJS, and then only via

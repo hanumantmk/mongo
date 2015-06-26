@@ -39,17 +39,16 @@ namespace mozjs {
  * Note that this installs "overNative", so we don't actually do anything other
  * than layer a couple of our own functions on top of the existing prototype.
  */
-struct ObjectInfo {
+struct ObjectInfo : public BaseInfo {
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(bsonsize);
         MONGO_DEFINE_JS_FUNCTION(invalidForStorage);
     };
 
-    const JSFunctionSpec methods[3] = {
-        MONGO_ATTACH_JS_FUNCTION(bsonsize), MONGO_ATTACH_JS_FUNCTION(invalidForStorage), JS_FS_END,
-    };
+    static const JSFunctionSpec methods[3];
 
-    const char* const className = "Object";
+    static const char* const className;
+
     static const InstallType installType = InstallType::OverNative;
 };
 

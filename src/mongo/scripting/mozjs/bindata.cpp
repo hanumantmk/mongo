@@ -43,6 +43,22 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec BinDataInfo::methods[4] = {
+    MONGO_ATTACH_JS_FUNCTION(base64),
+    MONGO_ATTACH_JS_FUNCTION(hex),
+    MONGO_ATTACH_JS_FUNCTION(toString),
+    JS_FS_END,
+};
+
+const JSFunctionSpec BinDataInfo::freeFunctions[4] = {
+    MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(HexData, JSFUN_CONSTRUCTOR),
+    MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(MD5, JSFUN_CONSTRUCTOR),
+    MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(UUID, JSFUN_CONSTRUCTOR),
+    JS_FS_END,
+};
+
+const char* const BinDataInfo::className = "BinData";
+
 namespace {
 
 void hexToBinData(JSContext* cx, int type, StringData hexstr, JS::MutableHandleValue out) {

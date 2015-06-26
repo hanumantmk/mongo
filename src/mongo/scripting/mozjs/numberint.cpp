@@ -39,6 +39,15 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec NumberIntInfo::methods[4] = {
+    MONGO_ATTACH_JS_FUNCTION(toNumber),
+    MONGO_ATTACH_JS_FUNCTION(toString),
+    MONGO_ATTACH_JS_FUNCTION(valueOf),
+    JS_FS_END,
+};
+
+const char* const NumberIntInfo::className = "NumberInt";
+
 void NumberIntInfo::finalize(JSFreeOp* fop, JSObject* obj) {
     auto x = static_cast<int*>(JS_GetPrivate(obj));
 

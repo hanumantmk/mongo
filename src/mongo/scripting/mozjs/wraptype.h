@@ -32,19 +32,18 @@
 #include <jsapi.h>
 #include <type_traits>
 
+#include "mongo/scripting/mozjs/base.h"
 #include "mongo/scripting/mozjs/exception.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/util/assert_util.h"
 
 #pragma push_macro("HAS_MEMBER_T")
-#pragma push_macro("INSTALL_INSTANCE_POINTER")
 #pragma push_macro("INSTALL_POINTER")
 #pragma push_macro("INSTALL_VALUE")
 #pragma push_macro("INSTALL_WRAPPED_POINTER")
 #pragma push_macro("WRAPPED_NAME_OR_NULLPTR")
 
 #undef HAS_MEMBER_T
-#undef INSTALL_INSTANCE_POINTER
 #undef INSTALL_POINTER
 #undef INSTALL_VALUE
 #undef INSTALL_WRAPPED_POINTER
@@ -116,20 +115,6 @@
         decltype(&T::name) value = &T::name;                                                    \
     };                                                                                          \
     template <typename T, typename = void>                                                      \
-    struct instance_##name##_or_nullptr {                                                       \
-        std::nullptr_t value(T& t) {                                                            \
-            return nullptr;                                                                     \
-        };                                                                                      \
-    };                                                                                          \
-    template <typename T>                                                                       \
-    struct instance_##name##_or_nullptr<                                                        \
-        T,                                                                                      \
-        typename std::enable_if<smUtils::has_##name<T>::value>::type> {                         \
-        typename std::decay<decltype(T().name)>::type value(T& t) {                             \
-            return t.name;                                                                      \
-        };                                                                                      \
-    };                                                                                          \
-    template <typename T, typename = void>                                                      \
     struct name##_or_0 {                                                                        \
         unsigned value = 0;                                                                     \
     };                                                                                          \
@@ -155,11 +140,6 @@
 #define INSTALL_POINTER(name)                                            \
     const decltype(smUtils::name##_or_nullptr<T>().value) addrOf##name = \
         smUtils::name##_or_nullptr<T>().value;
-
-#define INSTALL_INSTANCE_POINTER(name)                                                       \
-    auto addrOf##name(T& t)->decltype(smUtils::instance_##name##_or_nullptr<T>().value(t)) { \
-        return smUtils::instance_##name##_or_nullptr<T>().value(t);                          \
-    }
 
 #define INSTALL_WRAPPED_POINTER(name)                                              \
     const decltype(smUtils::wrapped_##name##_or_nullptr<T>().value) addrOf##name = \
@@ -187,12 +167,9 @@ HAS_MEMBER_T(convert)
 HAS_MEMBER_T(delProperty)
 HAS_MEMBER_T(enumerate)
 HAS_MEMBER_T(finalize)
-HAS_MEMBER_T(freeFunctions)
 HAS_MEMBER_T(getProperty)
 HAS_MEMBER_T(hasInstance)
-HAS_MEMBER_T(inheritFrom)
 HAS_MEMBER_T(installType)
-HAS_MEMBER_T(methods)
 HAS_MEMBER_T(postInstall)
 HAS_MEMBER_T(resolve)
 HAS_MEMBER_T(setProperty)
@@ -334,12 +311,9 @@ class WrapType : public T {
     // Yep, finalize should never throw
     INSTALL_POINTER(finalize)
     INSTALL_POINTER(trace)
+    INSTALL_POINTER(postInstall)
 
     // None of these are directly callbacks
-    INSTALL_INSTANCE_POINTER(freeFunctions)
-    INSTALL_INSTANCE_POINTER(inheritFrom)
-    INSTALL_INSTANCE_POINTER(methods)
-    INSTALL_INSTANCE_POINTER(postInstall)
     INSTALL_VALUE(classFlags)
     INSTALL_VALUE(installType)
 
@@ -359,7 +333,7 @@ public:
     WrapType(JSContext* context)
         : _context(context),
           _proto(),
-          _jsclass({_t.className,
+          _jsclass({T::className,
                     valueOfclassFlags,
                     addrOfaddProperty,
                     addrOfdelProperty,
@@ -387,7 +361,7 @@ public:
                             _context, &_jsclass, nullptr, JS::DontFireOnNewGlobalHook)));
 
             JSAutoCompartment ac(_context, _proto);
-            _installFunctions(_proto, addrOffreeFunctions(_t));
+            _installFunctions(_proto, T::freeFunctions);
         }
     }
 
@@ -484,7 +458,7 @@ private:
      */
     void _installGlobal(JS::HandleObject global) {
         JS::RootedObject parent(_context);
-        _inheritFrom(addrOfinheritFrom(_t), global, &parent);
+        _inheritFrom(T::inheritFrom, global, &parent);
 
         _proto.init(_context,
                     _assertPtr(JS_InitClass(_context,
@@ -494,19 +468,19 @@ private:
                                             addrOfconstruct,
                                             0,
                                             nullptr,
-                                            addrOfmethods(_t),
+                                            T::methods,
                                             nullptr,
                                             nullptr)));
 
-        _installFunctions(global, addrOffreeFunctions(_t));
-        _postInstall(global, addrOfpostInstall(_t));
+        _installFunctions(global, T::freeFunctions);
+        _postInstall(global, addrOfpostInstall);
     }
 
     // Use this if you want your types installed, but not visible in the
     // global scope
     void _installPrivate(JS::HandleObject global) {
         JS::RootedObject parent(_context);
-        _inheritFrom(addrOfinheritFrom(_t), global, &parent);
+        _inheritFrom(T::inheritFrom, global, &parent);
 
         // See newObject() for why we have to do this dance with the explicit
         // SetPrototype
@@ -515,12 +489,12 @@ private:
             throwCurrentJSException(
                 _context, ErrorCodes::JSInterpreterFailure, "Failed to set prototype");
 
-        _installFunctions(_proto, addrOfmethods(_t));
-        _installFunctions(global, addrOffreeFunctions(_t));
+        _installFunctions(_proto, T::methods);
+        _installFunctions(global, T::freeFunctions);
 
         _installConstructor(addrOfconstruct);
 
-        _postInstall(global, addrOfpostInstall(_t));
+        _postInstall(global, addrOfpostInstall);
     }
 
     // Use this to attach things to types that we don't provide like
@@ -536,9 +510,9 @@ private:
 
         _proto.init(_context, value.toObjectOrNull());
 
-        _installFunctions(_proto, addrOfmethods(_t));
-        _installFunctions(global, addrOffreeFunctions(_t));
-        _postInstall(global, addrOfpostInstall(_t));
+        _installFunctions(_proto, T::methods);
+        _installFunctions(global, T::freeFunctions);
+        _postInstall(global, addrOfpostInstall);
     }
 
     void _installFunctions(JS::HandleObject global, const JSFunctionSpec* fs) {
@@ -621,7 +595,6 @@ private:
         return ptr;
     }
 
-    T _t;
     JSContext* _context;
     JS::PersistentRootedObject _proto;
     JSClass _jsclass;
@@ -631,14 +604,12 @@ private:
 }  // namespace mongo
 
 #undef HAS_MEMBER_T
-#undef INSTALL_INSTANCE_POINTER
 #undef INSTALL_POINTER
 #undef INSTALL_VALUE
 #undef INSTALL_WRAPPED_POINTER
 #undef WRAPPED_NAME_OR_NULLPTR
 
 #pragma pop_macro("HAS_MEMBER_T")
-#pragma pop_macro("INSTALL_INSTANCE_POINTER")
 #pragma pop_macro("INSTALL_POINTER")
 #pragma pop_macro("INSTALL_VALUE")
 #pragma pop_macro("INSTALL_WRAPPED_POINTER")

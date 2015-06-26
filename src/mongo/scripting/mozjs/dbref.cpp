@@ -36,6 +36,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const DBRefInfo::className = "DBRef";
+
 void DBRefInfo::construct(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 

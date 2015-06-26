@@ -37,6 +37,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const DBQueryInfo::className = "DBQuery";
+
 void DBQueryInfo::construct(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 

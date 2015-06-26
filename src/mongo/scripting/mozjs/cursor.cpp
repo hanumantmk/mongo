@@ -38,10 +38,20 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec CursorInfo::methods[5] = {
+    MONGO_ATTACH_JS_FUNCTION(hasNext),
+    MONGO_ATTACH_JS_FUNCTION(next),
+    MONGO_ATTACH_JS_FUNCTION(objsLeftInBatch),
+    MONGO_ATTACH_JS_FUNCTION(readOnly),
+    JS_FS_END,
+};
+
+const char* const CursorInfo::className = "Cursor";
+
 namespace {
 
 DBClientCursor* getCursor(JSObject* thisv) {
-    return static_cast<DBClientCursor*>(JS_GetPrivate(thisv));
+    return static_cast<CursorInfo::CursorHolder*>(JS_GetPrivate(thisv))->cursor.get();
 }
 
 DBClientCursor* getCursor(JS::CallArgs& args) {
@@ -51,7 +61,7 @@ DBClientCursor* getCursor(JS::CallArgs& args) {
 }  // namespace
 
 void CursorInfo::finalize(JSFreeOp* fop, JSObject* obj) {
-    auto cursor = getCursor(obj);
+    auto cursor = static_cast<CursorInfo::CursorHolder*>(JS_GetPrivate(obj));
 
     if (cursor) {
         delete cursor;

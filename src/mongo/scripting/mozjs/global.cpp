@@ -42,6 +42,15 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec GlobalInfo::freeFunctions[4] = {
+    MONGO_ATTACH_JS_FUNCTION(gc),
+    MONGO_ATTACH_JS_FUNCTION(print),
+    MONGO_ATTACH_JS_FUNCTION(version),
+    JS_FS_END,
+};
+
+const char* const GlobalInfo::className = "Global";
+
 namespace {
 
 logger::MessageLogDomain* jsPrintLogDomain;

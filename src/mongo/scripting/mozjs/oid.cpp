@@ -40,12 +40,11 @@
 namespace mongo {
 namespace mozjs {
 
-void OIDInfo::finalize(JSFreeOp* fop, JSObject* obj) {
-    auto oid = static_cast<OID*>(JS_GetPrivate(obj));
+const JSFunctionSpec OIDInfo::methods[2] = {
+    MONGO_ATTACH_JS_FUNCTION(toString), JS_FS_END,
+};
 
-    if (oid)
-        delete oid;
-}
+const char* const OIDInfo::className = "ObjectId";
 
 void OIDInfo::Functions::toString(JSContext* cx, JS::CallArgs args) {
     ObjectWrapper o(cx, args.thisv());
@@ -80,8 +79,6 @@ void OIDInfo::construct(JSContext* cx, JS::CallArgs args) {
     ObjectWrapper o(cx, thisv);
 
     o.setString("str", oid->toString());
-
-    JS_SetPrivate(thisv, oid.release());
 
     args.rval().setObjectOrNull(thisv);
 }

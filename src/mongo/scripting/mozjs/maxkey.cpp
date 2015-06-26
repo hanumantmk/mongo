@@ -37,6 +37,12 @@
 namespace mongo {
 namespace mozjs {
 
+const JSFunctionSpec MaxKeyInfo::methods[2] = {
+    MONGO_ATTACH_JS_FUNCTION(tojson), JS_FS_END,
+};
+
+const char* const MaxKeyInfo::className = "MaxKey";
+
 namespace {
 const char* const kSingleton = "singleton";
 }  // namespace

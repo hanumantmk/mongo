@@ -43,10 +43,10 @@ namespace mozjs {
  *     $db : String(),
  * }
  */
-struct DBRefInfo {
+struct DBRefInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
 
-    const char* const className = "DBRef";
+    static const char* const className;
 };
 
 }  // namespace mozjs

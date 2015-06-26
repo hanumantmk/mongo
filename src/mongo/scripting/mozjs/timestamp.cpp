@@ -39,6 +39,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const TimestampInfo::className = "Timestamp";
+
 void TimestampInfo::construct(JSContext* cx, JS::CallArgs args) {
     auto scope = getScope(cx);
 

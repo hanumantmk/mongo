@@ -46,7 +46,7 @@ namespace mozjs {
  * Note that installType is private. So you can only get BSON types in JS via
  * ::make() from C++.
  */
-struct BSONInfo {
+struct BSONInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded);
     static void enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties);
@@ -58,7 +58,7 @@ struct BSONInfo {
                             bool strict,
                             JS::MutableHandleValue vp);
 
-    const char* const className = "BSON";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
     static const InstallType installType = InstallType::Private;
     static void postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto);
@@ -67,9 +67,7 @@ struct BSONInfo {
         MONGO_DEFINE_JS_FUNCTION(bsonWoCompare);
     };
 
-    const JSFunctionSpec freeFunctions[2] = {
-        MONGO_ATTACH_JS_FUNCTION(bsonWoCompare), JS_FS_END,
-    };
+    static const JSFunctionSpec freeFunctions[2];
 
     static std::tuple<BSONObj*, bool> originalBSON(JSContext* cx, JS::HandleObject obj);
     static void make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson, bool ro);

@@ -39,14 +39,14 @@ namespace mozjs {
  * This represents the result of a find() and uses its getProperty() callback
  * to shim operator[]. I.e. db.test.find()[4]
  */
-struct DBQueryInfo {
+struct DBQueryInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void getProperty(JSContext* cx,
                             JS::HandleObject obj,
                             JS::HandleId id,
                             JS::MutableHandleValue vp);
 
-    const char* const className = "DBQuery";
+    static const char* const className;
 };
 
 }  // namespace mozjs

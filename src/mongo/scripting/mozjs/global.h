@@ -39,21 +39,16 @@ namespace mozjs {
  * This function is super special and it's properties are the globally visible
  * symbol for JS execution.
  */
-struct GlobalInfo {
+struct GlobalInfo : public BaseInfo {
     struct Functions {
         MONGO_DEFINE_JS_FUNCTION(gc);
         MONGO_DEFINE_JS_FUNCTION(print);
         MONGO_DEFINE_JS_FUNCTION(version);
     };
 
-    const JSFunctionSpec freeFunctions[4] = {
-        MONGO_ATTACH_JS_FUNCTION(gc),
-        MONGO_ATTACH_JS_FUNCTION(print),
-        MONGO_ATTACH_JS_FUNCTION(version),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec freeFunctions[4];
 
-    const char* const className = "Global";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_GLOBAL_FLAGS;
 };
 

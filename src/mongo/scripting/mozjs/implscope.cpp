@@ -362,7 +362,8 @@ BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
     bool success = JS::Call(_context, thisv, f, argv, &out);
 
     if (!success) {
-        auto status = currentJSExceptionToStatus(_context, ErrorCodes::JSInterpreterFailure, "Unknown callThread failure");
+        auto status = currentJSExceptionToStatus(
+            _context, ErrorCodes::JSInterpreterFailure, "Unknown callThread failure");
 
         log() << "js thread raised js exception: " << status;
 

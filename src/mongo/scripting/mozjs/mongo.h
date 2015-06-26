@@ -40,7 +40,7 @@ namespace mozjs {
  * "Mongo" we see in the shell and the "Mongo" in dbeval.  So we provide one
  * info type with common code and differentiate with varying constructors.
  */
-struct MongoBase {
+struct MongoBase : public BaseInfo {
     static void finalize(JSFreeOp* fop, JSObject* obj);
 
     struct Functions {
@@ -58,23 +58,9 @@ struct MongoBase {
         MONGO_DEFINE_JS_FUNCTION(update);
     };
 
-    const JSFunctionSpec methods[13] = {
-        MONGO_ATTACH_JS_FUNCTION(auth),
-        MONGO_ATTACH_JS_FUNCTION(copyDatabaseWithSCRAM),
-        MONGO_ATTACH_JS_FUNCTION(cursorFromId),
-        MONGO_ATTACH_JS_FUNCTION(find),
-        MONGO_ATTACH_JS_FUNCTION(getClientRPCProtocols),
-        MONGO_ATTACH_JS_FUNCTION(getServerRPCProtocols),
-        MONGO_ATTACH_JS_FUNCTION(insert),
-        MONGO_ATTACH_JS_FUNCTION(logout),
-        MONGO_ATTACH_JS_FUNCTION(remove),
-        MONGO_ATTACH_JS_FUNCTION(runCommand),
-        MONGO_ATTACH_JS_FUNCTION(setClientRPCProtocols),
-        MONGO_ATTACH_JS_FUNCTION(update),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec methods[13];
 
-    const char* const className = "Mongo";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
 };
 
@@ -95,9 +81,7 @@ struct MongoExternalInfo : public MongoBase {
         MONGO_DEFINE_JS_FUNCTION(load);
     };
 
-    const JSFunctionSpec freeFunctions[2] = {
-        MONGO_ATTACH_JS_FUNCTION(load), JS_FS_END,
-    };
+    static const JSFunctionSpec freeFunctions[2];
 };
 
 }  // namespace mozjs

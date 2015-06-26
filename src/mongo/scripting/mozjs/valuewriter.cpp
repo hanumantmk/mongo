@@ -193,8 +193,7 @@ void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObjec
         auto d = Date_t::fromMillisSinceEpoch(ValueWriter(_context, dateval).toNumber());
         b->appendDate(sd, d);
     } else if (scope->getOidProto().instanceOf(obj)) {
-        auto oid = static_cast<OID*>(JS_GetPrivate(obj));
-        b->append(sd, *oid);
+        b->append(sd, OID(o.getString("str")));
     } else if (scope->getNumberLongProto().instanceOf(obj)) {
         long long out = NumberLongInfo::ToNumberLong(_context, obj);
         b->append(sd, out);
@@ -203,9 +202,8 @@ void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObjec
     } else if (scope->getDbPointerProto().instanceOf(obj)) {
         JS::RootedValue id(_context);
         o.getValue("id", &id);
-        auto oid = static_cast<OID*>(JS_GetPrivate(id.toObjectOrNull()));
 
-        b->appendDBRef(sd, o.getString("ns"), *oid);
+        b->appendDBRef(sd, o.getString("ns"), OID(ObjectWrapper(_context, id).getString("str")));
     } else if (scope->getBinDataProto().instanceOf(obj)) {
         auto str = static_cast<std::string*>(JS_GetPrivate(obj));
 

@@ -40,6 +40,8 @@
 namespace mongo {
 namespace mozjs {
 
+const char* const CountDownLatchInfo::className = "CountDownLatch";
+
 class CountDownLatchHolder {
 private:
     struct Latch {
@@ -52,10 +54,12 @@ private:
 
     std::shared_ptr<Latch> get(int32_t desc) {
         stdx::lock_guard<stdx::mutex> lock(_mutex);
-        Map::iterator iter = _latches.find(desc);
+
+        auto iter = _latches.find(desc);
         uassert(ErrorCodes::JSInterpreterFailure,
                 "not a valid CountDownLatch descriptor",
                 iter != _latches.end());
+
         return iter->second;
     }
 
@@ -66,33 +70,41 @@ private:
 
 public:
     CountDownLatchHolder() : _counter(0) {}
+
     int32_t make(int32_t count) {
         uassert(ErrorCodes::JSInterpreterFailure, "argument must be >= 0", count >= 0);
         stdx::lock_guard<stdx::mutex> lock(_mutex);
+
         int32_t desc = ++_counter;
         _latches.insert(std::make_pair(desc, std::make_shared<Latch>(count)));
+
         return desc;
     }
+
     void await(int32_t desc) {
         std::shared_ptr<Latch> latch = get(desc);
         stdx::unique_lock<stdx::mutex> lock(latch->mutex);
+
         while (latch->count != 0) {
             latch->cv.wait(lock);
         }
     }
+
     void countDown(int32_t desc) {
         std::shared_ptr<Latch> latch = get(desc);
         stdx::unique_lock<stdx::mutex> lock(latch->mutex);
-        if (latch->count > 0) {
+
+        if (latch->count > 0)
             latch->count--;
-        }
-        if (latch->count == 0) {
+
+        if (latch->count == 0)
             latch->cv.notify_all();
-        }
     }
+
     int32_t getCount(int32_t desc) {
         std::shared_ptr<Latch> latch = get(desc);
         stdx::unique_lock<stdx::mutex> lock(latch->mutex);
+
         return latch->count;
     }
 };
@@ -133,7 +145,9 @@ void CountDownLatchInfo::Functions::_getCount(JSContext* cx, JS::CallArgs args) 
     args.rval().setInt32(globalCountDownLatchHolder.getCount(args.get(0).toInt32()));
 }
 
-void CountDownLatchInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto) {
+void CountDownLatchInfo::postInstall(JSContext* cx,
+                                     JS::HandleObject global,
+                                     JS::HandleObject proto) {
     auto scope = getScope(cx);
 
     JS::RootedValue val(cx);

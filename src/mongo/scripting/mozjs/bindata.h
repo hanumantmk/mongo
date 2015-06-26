@@ -38,7 +38,7 @@ namespace mozjs {
  *
  * It offers some simple methods and a handful of specialized constructors
  */
-struct BinDataInfo {
+struct BinDataInfo : public BaseInfo {
     static void construct(JSContext* cx, JS::CallArgs args);
     static void finalize(JSFreeOp* fop, JSObject* obj);
 
@@ -52,21 +52,10 @@ struct BinDataInfo {
         MONGO_DEFINE_JS_FUNCTION(UUID);
     };
 
-    const JSFunctionSpec methods[4] = {
-        MONGO_ATTACH_JS_FUNCTION(base64),
-        MONGO_ATTACH_JS_FUNCTION(hex),
-        MONGO_ATTACH_JS_FUNCTION(toString),
-        JS_FS_END,
-    };
+    static const JSFunctionSpec methods[4];
+    static const JSFunctionSpec freeFunctions[4];
 
-    const JSFunctionSpec freeFunctions[4] = {
-        MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(HexData, JSFUN_CONSTRUCTOR),
-        MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(MD5, JSFUN_CONSTRUCTOR),
-        MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(UUID, JSFUN_CONSTRUCTOR),
-        JS_FS_END,
-    };
-
-    const char* const className = "BinData";
+    static const char* const className;
     static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
 };
 
