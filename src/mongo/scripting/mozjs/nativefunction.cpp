@@ -30,6 +30,8 @@
 
 #include "mongo/scripting/mozjs/nativefunction.h"
 
+#include <cstdio>
+
 #include "mongo/scripting/mozjs/implscope.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
@@ -80,7 +82,7 @@ void NativeFunctionInfo::call(JSContext* cx, JS::CallArgs args) {
         // 11 is enough here.  unsigned's are only 32 bits, and 1 << 32 is only
         // 10 decimal digits.  +1 for the null and we're only at 11.
         char buf[11];
-        std::snprintf(buf, sizeof(buf), "%i", i);
+        std::sprintf(buf, "%i", i);
 
         ValueWriter(cx, args.get(i)).writeThis(&bob, buf);
     }

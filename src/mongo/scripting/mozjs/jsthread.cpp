@@ -32,6 +32,8 @@
 
 #include "mongo/scripting/mozjs/jsthread.h"
 
+#include <cstdio>
+
 #include "mongo/db/jsobj.h"
 #include "mongo/scripting/mozjs/implscope.h"
 #include "mongo/scripting/mozjs/valuereader.h"
@@ -85,7 +87,7 @@ public:
         for (unsigned i = 0; i < args.length(); ++i) {
             // 10 decimal digits for a 32 bit unsigned, then 1 for the null
             char buf[11];
-            std::snprintf(buf, sizeof(buf), "%i", i);
+            std::sprintf(buf, "%i", i);
 
             ValueWriter(cx, args.get(i)).writeThis(&b, buf);
         }

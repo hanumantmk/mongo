@@ -38,5 +38,18 @@ const JSFunctionSpec* BaseInfo::methods = nullptr;
 
 const char* const BaseInfo::inheritFrom = nullptr;
 
+void BaseInfo::addProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue v) {}
+void BaseInfo::call(JSContext* cx, JS::CallArgs args) {}
+void BaseInfo::construct(JSContext* cx, JS::CallArgs args) {}
+void BaseInfo::convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp) {}
+void BaseInfo::delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded) {}
+void BaseInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {}
+void BaseInfo::finalize(JSFreeOp* fop, JSObject* obj) {}
+void BaseInfo::getProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue vp) {}
+void BaseInfo::hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp) {}
+void BaseInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto) {}
+void BaseInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp) {}
+void BaseInfo::setProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool strict, JS::MutableHandleValue vp) {}
+
 }  // namespace mozjs
 }  // namespace mongo
