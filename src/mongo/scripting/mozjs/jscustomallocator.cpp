@@ -32,6 +32,7 @@
 
 #include "mongo/config.h"
 #include "mongo/util/concurrency/threadlocal.h"
+#include "mongo/scripting/mozjs/implscope.h"
 
 #ifdef __linux__
 #include <malloc.h>
@@ -62,25 +63,22 @@ namespace {
  * These two variables track the total number of bytes handed out, and the
  * maximum number of bytes we will consider handing out. They are set by
  * MozJSImplScope on start up.
- *
- * TODO: convert these to MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL after
- *       rebasing to make that available
  */
-ThreadLocalValue<size_t> total_bytes;
-ThreadLocalValue<size_t> max_bytes;
+MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t total_bytes;
+MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t max_bytes;
 }  // namespace
 
 size_t get_total_bytes() {
-    return total_bytes.get();
+    return total_bytes;
 }
 
 void reset(size_t bytes) {
-    total_bytes.set(0);
-    max_bytes.set(bytes);
+    total_bytes = 0;
+    max_bytes = bytes;
 }
 
 size_t get_max_bytes() {
-    return max_bytes.get();
+    return max_bytes;
 }
 
 template <typename T>
@@ -89,6 +87,11 @@ void* wrap_alloc(T&& func, size_t bytes) {
     size_t tb = get_total_bytes();
 
     if (mb && (tb + bytes > mb)) {
+        auto scope = mongo::mozjs::MozJSImplScope::getThreadScope();
+        invariant(scope);
+
+        scope->setOOM();
+
         return nullptr;
     }
 
@@ -98,7 +101,7 @@ void* wrap_alloc(T&& func, size_t bytes) {
         return nullptr;
     }
 
-    total_bytes.set(tb + bytes);
+    total_bytes = tb + bytes;
 
     return p;
 }
@@ -135,7 +138,7 @@ void js_free(void* p) {
     size_t tb = mongo::sm::get_total_bytes();
 
     if (tb >= current) {
-        mongo::sm::total_bytes.set(tb - current);
+        mongo::sm::total_bytes = tb - current;
     }
 
     std::free(p);
@@ -157,10 +160,10 @@ void* js_realloc(void* p, size_t bytes) {
         return p;
     }
 
-    size_t tb = mongo::sm::total_bytes.get();
+    size_t tb = mongo::sm::total_bytes;
 
     if (tb >= current) {
-        mongo::sm::total_bytes.set(tb - current);
+        mongo::sm::total_bytes = tb - current;
     }
 
     return mongo::sm::wrap_alloc([p](size_t b) { return std::realloc(p, b); }, bytes);

@@ -40,6 +40,7 @@
 #include "mongo/platform/atomic_word.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
+#include "mongo/stdx/thread.h"
 #include "mongo/util/net/message.h"
 
 namespace mongo {
@@ -53,6 +54,7 @@ class NetworkInterfaceASIO final : public NetworkInterface {
 public:
     NetworkInterfaceASIO();
     std::string getDiagnosticString() override;
+    std::string getHostName() override;
     void startup() override;
     void shutdown() override;
     void waitForWork() override;
@@ -155,7 +157,7 @@ private:
     void _signalWorkAvailable_inlock();
 
     asio::io_service _io_service;
-    std::thread _serviceRunner;
+    stdx::thread _serviceRunner;
 
     std::atomic<State> _state;
 

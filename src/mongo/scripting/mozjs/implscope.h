@@ -229,6 +229,9 @@ public:
     const char* const kExecResult = "__lastres__";
     const char* const kInvokeResult = "__returnValue";
 
+    static MozJSImplScope* getThreadScope();
+    void setOOM();
+
 private:
     void _MozJSCreateFunction(const char* raw,
                               ScriptingFunction functionNumber,
@@ -271,6 +274,8 @@ private:
     void installDBAccess();
     void installBSONTypes();
     void installFork();
+
+    void setCompileOptions(JS::CompileOptions* co);
 
     MozJSScriptEngine* _engine;
     MozRuntime _mr;

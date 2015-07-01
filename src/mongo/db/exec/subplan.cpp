@@ -41,13 +41,15 @@
 #include "mongo/db/query/planner_access.h"
 #include "mongo/db/query/query_planner.h"
 #include "mongo/db/query/stage_builder.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
 
-using std::unique_ptr;
 using std::endl;
+using std::unique_ptr;
 using std::vector;
+using stdx::make_unique;
 
 // static
 const char* SubplanStage::kStageType = "SUBPLAN";
@@ -230,7 +232,7 @@ Status tagOrChildAccordingToCache(PlanCacheIndexTree* compositeCacheData,
 Status SubplanStage::choosePlanForSubqueries(PlanYieldPolicy* yieldPolicy) {
     // This is what we annotate with the index selections and then turn into a solution.
     unique_ptr<OrMatchExpression> orExpr(
-        static_cast<OrMatchExpression*>(_query->root()->shallowClone()));
+        static_cast<OrMatchExpression*>(_query->root()->shallowClone().release()));
 
     // This is the skeleton of index selections that is inserted into the cache.
     unique_ptr<PlanCacheIndexTree> cacheData(new PlanCacheIndexTree());
@@ -505,11 +507,11 @@ vector<PlanStage*> SubplanStage::getChildren() const {
     return children;
 }
 
-PlanStageStats* SubplanStage::getStats() {
+unique_ptr<PlanStageStats> SubplanStage::getStats() {
     _commonStats.isEOF = isEOF();
-    unique_ptr<PlanStageStats> ret(new PlanStageStats(_commonStats, STAGE_SUBPLAN));
-    ret->children.push_back(_child->getStats());
-    return ret.release();
+    unique_ptr<PlanStageStats> ret = make_unique<PlanStageStats>(_commonStats, STAGE_SUBPLAN);
+    ret->children.push_back(_child->getStats().release());
+    return ret;
 }
 
 bool SubplanStage::branchPlannedFromCache(size_t i) const {

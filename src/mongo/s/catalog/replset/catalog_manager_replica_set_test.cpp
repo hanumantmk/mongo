@@ -30,8 +30,6 @@
 
 #include "mongo/platform/basic.h"
 
-#include <chrono>
-
 #include "mongo/client/remote_command_targeter_mock.h"
 #include "mongo/db/commands.h"
 #include "mongo/db/query/lite_parsed_query.h"
@@ -52,6 +50,8 @@
 #include "mongo/s/write_ops/batched_command_response.h"
 #include "mongo/s/write_ops/batched_insert_request.h"
 #include "mongo/s/write_ops/batched_update_request.h"
+#include "mongo/stdx/chrono.h"
+#include "mongo/stdx/future.h"
 #include "mongo/util/log.h"
 
 namespace mongo {
@@ -64,7 +64,7 @@ using std::vector;
 using stdx::chrono::milliseconds;
 using unittest::assertGet;
 
-static const std::chrono::seconds kFutureTimeout{5};
+static const stdx::chrono::seconds kFutureTimeout{5};
 
 TEST_F(CatalogManagerReplSetTestFixture, GetCollectionExisting) {
     RemoteCommandTargeterMock* targeter =
@@ -549,8 +549,8 @@ TEST_F(CatalogManagerReplSetTestFixture, RunUserManagementReadCommand) {
 
     auto future = launchAsync([this] {
         BSONObjBuilder responseBuilder;
-        bool ok = catalogManager()->runUserManagementReadCommand(
-            "test", BSON("usersInfo" << 1), &responseBuilder);
+        bool ok =
+            catalogManager()->runReadCommand("test", BSON("usersInfo" << 1), &responseBuilder);
         ASSERT_TRUE(ok);
 
         BSONObj response = responseBuilder.obj();
@@ -566,7 +566,7 @@ TEST_F(CatalogManagerReplSetTestFixture, RunUserManagementReadCommand) {
         return BSON("ok" << 1 << "users" << BSONArrayBuilder().arr());
     });
 
-    // Now wait for the runUserManagementReadCommand call to return
+    // Now wait for the runReadCommand call to return
     future.wait_for(kFutureTimeout);
 }
 
@@ -577,8 +577,7 @@ TEST_F(CatalogManagerReplSetTestFixture, RunUserManagementReadCommandUnsatisfied
         Status(ErrorCodes::FailedToSatisfyReadPreference, "no nodes up"));
 
     BSONObjBuilder responseBuilder;
-    bool ok = catalogManager()->runUserManagementReadCommand(
-        "test", BSON("usersInfo" << 1), &responseBuilder);
+    bool ok = catalogManager()->runReadCommand("test", BSON("usersInfo" << 1), &responseBuilder);
     ASSERT_FALSE(ok);
 
     Status commandStatus = Command::getStatusFromCommandResult(responseBuilder.obj());
@@ -1372,6 +1371,71 @@ TEST_F(CatalogManagerReplSetTestFixture, UpdateDatabaseHostUnreachable) {
     });
 
     // Now wait for the updateDatabase call to return
+    future.wait_for(kFutureTimeout);
+}
+
+TEST_F(CatalogManagerReplSetTestFixture, ApplyChunkOpsDeprecated) {
+    RemoteCommandTargeterMock* targeter =
+        RemoteCommandTargeterMock::get(shardRegistry()->getShard("config")->getTargeter());
+    targeter->setFindHostReturnValue(HostAndPort("TestHost1"));
+
+    BSONArray updateOps = BSON_ARRAY(BSON("update1"
+                                          << "first update")
+                                     << BSON("update2"
+                                             << "second update"));
+    BSONArray preCondition = BSON_ARRAY(BSON("precondition1"
+                                             << "first precondition")
+                                        << BSON("precondition2"
+                                                << "second precondition"));
+
+    auto future = launchAsync([this, updateOps, preCondition] {
+        auto status = catalogManager()->applyChunkOpsDeprecated(updateOps, preCondition);
+        ASSERT_OK(status);
+    });
+
+    onCommand([updateOps, preCondition](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS("config", request.dbname);
+        ASSERT_EQUALS(updateOps, request.cmdObj["applyOps"].Obj());
+        ASSERT_EQUALS(preCondition, request.cmdObj["preCondition"].Obj());
+
+        return BSON("ok" << 1);
+    });
+
+    // Now wait for the applyChunkOpsDeprecated call to return
+    future.wait_for(kFutureTimeout);
+}
+
+TEST_F(CatalogManagerReplSetTestFixture, ApplyChunkOpsDeprecatedCommandFailed) {
+    RemoteCommandTargeterMock* targeter =
+        RemoteCommandTargeterMock::get(shardRegistry()->getShard("config")->getTargeter());
+    targeter->setFindHostReturnValue(HostAndPort("TestHost1"));
+
+    BSONArray updateOps = BSON_ARRAY(BSON("update1"
+                                          << "first update")
+                                     << BSON("update2"
+                                             << "second update"));
+    BSONArray preCondition = BSON_ARRAY(BSON("precondition1"
+                                             << "first precondition")
+                                        << BSON("precondition2"
+                                                << "second precondition"));
+
+    auto future = launchAsync([this, updateOps, preCondition] {
+        auto status = catalogManager()->applyChunkOpsDeprecated(updateOps, preCondition);
+        ASSERT_EQUALS(ErrorCodes::BadValue, status);
+    });
+
+    onCommand([updateOps, preCondition](const RemoteCommandRequest& request) {
+        ASSERT_EQUALS("config", request.dbname);
+        ASSERT_EQUALS(updateOps, request.cmdObj["applyOps"].Obj());
+        ASSERT_EQUALS(preCondition, request.cmdObj["preCondition"].Obj());
+
+        BSONObjBuilder responseBuilder;
+        Command::appendCommandStatus(responseBuilder,
+                                     Status(ErrorCodes::BadValue, "precondition failed"));
+        return responseBuilder.obj();
+    });
+
+    // Now wait for the applyChunkOpsDeprecated call to return
     future.wait_for(kFutureTimeout);
 }
 

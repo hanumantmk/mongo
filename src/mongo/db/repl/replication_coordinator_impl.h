@@ -48,7 +48,6 @@
 #include "mongo/platform/unordered_set.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
-#include "mongo/stdx/thread.h"
 #include "mongo/util/net/hostandport.h"
 
 namespace mongo {
@@ -185,6 +184,8 @@ public:
     virtual ReplicaSetConfig getConfig() const override;
 
     virtual void processReplSetGetConfig(BSONObjBuilder* result) override;
+
+    virtual void processReplicationMetadata(const ReplicationMetadata& replMetadata) override;
 
     virtual Status setMaintenanceMode(bool activate) override;
 
@@ -403,6 +404,12 @@ private:
      */
     PostMemberStateUpdateAction _setCurrentRSConfig_inlock(const ReplicaSetConfig& newConfig,
                                                            int myIndex);
+
+    /**
+     * Updates the last committed OpTime to be "committedOpTime" if it is more recent than the
+     * current last committed OpTime.
+     */
+    void _setLastCommittedOpTime(const OpTime& committedOpTime);
 
     /**
      * Helper to wake waiters in _replicationWaiterList that are doneWaitingForReplication.
@@ -878,7 +885,19 @@ private:
                             long long term,
                             bool* updated,
                             Handle* cbHandle);
+    /**
+     * Returns true if the term increased.
+     */
     bool _updateTerm_incallback(long long term, Handle* cbHandle);
+
+    /**
+     * Callback that processes the ReplicationMetadata returned from a command run against another
+     * replica set member and updates protocol version 1 information (most recent optime that is
+     * committed, member id of the current PRIMARY, the current config version and the current term)
+     */
+    void _processReplicationMetadata_helper(const ReplicationExecutor::CallbackArgs& cbData,
+                                            const ReplicationMetadata& replMetadata);
+    void _processReplicationMetadata_incallback(const ReplicationMetadata& replMetadata);
 
     //
     // All member variables are labeled with one of the following codes indicating the
@@ -926,10 +945,6 @@ private:
 
     // Pointer to the ReplicationCoordinatorExternalState owned by this ReplicationCoordinator.
     std::unique_ptr<ReplicationCoordinatorExternalState> _externalState;  // (PS)
-
-    // Thread that drives actions in the topology coordinator
-    // Set in startReplication() and thereafter accessed in shutdown.
-    std::unique_ptr<stdx::thread> _topCoordDriverThread;  // (I)
 
     // Our RID, used to identify us to our sync source when sending replication progress
     // updates upstream.  Set once in startReplication() and then never modified again.

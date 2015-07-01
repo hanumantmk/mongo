@@ -1184,6 +1184,9 @@ elif env.TargetOSIs('windows'):
         # without having been initialized (implies /Od: no optimizations)
         env.Append( CCFLAGS=["/RTC1"] )
 
+        # Support large object files since some unit-test sources contain a lot of code
+        env.Append( CCFLAGS=["/bigobj"] )
+
     # This gives 32-bit programs 4 GB of user address space in WOW64, ignored in 64-bit builds
     env.Append( LINKFLAGS=["/LARGEADDRESSAWARE"] )
 
@@ -2025,7 +2028,7 @@ def doConfigure(myenv):
         conf.FindSysLibDep("snappy", ["snappy"])
 
     if use_system_version_of_library("zlib"):
-        conf.FindSysLibDep("zlib", ["zlib" if windows else "z"])
+        conf.FindSysLibDep("zlib", ["zdll" if conf.env.TargetOSIs('windows') else "z"])
 
     if use_system_version_of_library("stemmer"):
         conf.FindSysLibDep("stemmer", ["stemmer"])
@@ -2038,13 +2041,20 @@ def doConfigure(myenv):
             myenv.ConfError("Cannot find wiredtiger headers")
         conf.FindSysLibDep("wiredtiger", ["wiredtiger"])
 
+    conf.env.Append(
+        CPPDEFINES=[
+            ("BOOST_THREAD_VERSION", "4"),
+            # Boost thread v4's variadic thread support doesn't
+            # permit more than four parameters.
+            "BOOST_THREAD_DONT_PROVIDE_VARIADIC_THREAD",
+        ]
+    )
+
     if use_system_version_of_library("boost"):
         if not conf.CheckCXXHeader( "boost/filesystem/operations.hpp" ):
             myenv.ConfError("can't find boost headers")
         if not conf.CheckBoostMinVersion():
             myenv.ConfError("system's version of boost is too old. version 1.49 or better required")
-
-        conf.env.Append(CPPDEFINES=[("BOOST_THREAD_VERSION", "2")])
 
         # Note that on Windows with using-system-boost builds, the following
         # FindSysLibDep calls do nothing useful (but nothing problematic either)
@@ -2302,7 +2312,8 @@ def injectMongoIncludePaths(thisEnv):
     thisEnv.AppendUnique(CPPPATH=['$BUILD_DIR'])
 env.AddMethod(injectMongoIncludePaths, 'InjectMongoIncludePaths')
 
-env.Alias("compiledb", env.CompilationDatabase('compile_commands.json'))
+compileDb = env.Alias("compiledb", env.CompilationDatabase('compile_commands.json'))
+
 env.Alias("distsrc-tar", env.DistSrc("mongodb-src-${MONGO_VERSION}.tar"))
 env.Alias("distsrc-tgz", env.GZip(
     target="mongodb-src-${MONGO_VERSION}.tgz",

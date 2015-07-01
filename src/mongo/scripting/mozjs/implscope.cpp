@@ -40,6 +40,7 @@
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
+#include "mongo/util/concurrency/threadlocal.h"
 #include "mongo/util/log.h"
 
 using namespace mongoutils;
@@ -61,7 +62,7 @@ namespace {
  * manage this by trapping all calls to malloc, free, etc. and keeping track of
  * counts in some thread locals
  */
-const size_t kMallocMemoryLimit = 8024ul * 1024 * 1024;
+const size_t kMallocMemoryLimit = 1024ul * 1024 * 1024 * 1.1;
 
 /**
  * The number of bytes to allocate after which garbage collection is run
@@ -75,6 +76,8 @@ const int kMaxBytesBeforeGC = 8 * 1024 * 1024;
 const int kStackChunkSize = 8192;
 
 }  // namespace
+
+MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL MozJSImplScope* kCurrentScope;
 
 struct MozJSImplScope::MozJSEntry {
     MozJSEntry(MozJSImplScope* scope) : ar(scope->_context), ac(scope->_context, scope->_global) {}
@@ -183,7 +186,7 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
       _opCtx(nullptr),
       _pendingGC(false),
       _connectState(ConnectState::Not),
-      _status(ErrorCodes::InternalError, "Unknown MozJS error"),
+      _status(Status::OK()),
       _binDataProto(_context),
       _bsonProto(_context),
       _countDownLatchProto(_context),
@@ -205,6 +208,8 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
       _oidProto(_context),
       _regExpProto(_context),
       _timestampProto(_context) {
+    kCurrentScope = this;
+
     // The default is quite low and doesn't seem to directly correlate with
     // malloc'd bytes.  Set it to MAX_INT here and catching things in the
     // jscustomallocator.cpp
@@ -334,6 +339,7 @@ void MozJSImplScope::newFunction(StringData raw, JS::MutableHandleValue out) {
     std::string code = str::stream() << "____MongoToSM_newFunction_temp = " << raw;
 
     JS::CompileOptions co(_context);
+    setCompileOptions(&co);
     _checkErrorState(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), out));
 }
 
@@ -401,6 +407,7 @@ void MozJSImplScope::_MozJSCreateFunction(const char* raw,
     code = str::stream() << "_funcs" << functionNumber << " = " << code;
 
     JS::CompileOptions co(_context);
+    setCompileOptions(&co);
 
     _checkErrorState(JS::Evaluate(_context, _global, co, code.c_str(), code.length(), fun));
     uassert(10232,
@@ -507,6 +514,7 @@ bool MozJSImplScope::exec(StringData code,
     MozJSEntry entry(this);
 
     JS::CompileOptions co(_context);
+    setCompileOptions(&co);
     JS::RootedScript script(_context);
 
     bool success = JS::Compile(_context, _global, co, code.rawData(), code.size(), &script);
@@ -602,6 +610,8 @@ void MozJSImplScope::externalSetup() {
     if (_connectState == ConnectState::Local)
         uasserted(12512, "localConnect already called, can't call externalSetup");
 
+    mongo::sm::reset(0);
+
     // install db access functions in the global object
     installDBAccess();
 
@@ -674,6 +684,19 @@ bool MozJSImplScope::_checkErrorState(bool success, bool reportError, bool asser
     }
 
     return true;
+}
+
+
+void MozJSImplScope::setCompileOptions(JS::CompileOptions* co) {
+    co->setUTF8(true);
+}
+
+MozJSImplScope* MozJSImplScope::getThreadScope() {
+    return kCurrentScope;
+}
+
+void MozJSImplScope::setOOM() {
+    _status = Status(ErrorCodes::JSInterpreterFailure, "Out of memory");
 }
 
 }  // namespace mozjs

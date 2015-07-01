@@ -33,6 +33,7 @@
 #include "mongo/db/query/canonical_query.h"
 
 #include "mongo/db/jsobj.h"
+#include "mongo/db/namespace_string.h"
 #include "mongo/db/query/query_planner_common.h"
 #include "mongo/util/log.h"
 
@@ -239,7 +240,7 @@ StatusWith<std::unique_ptr<CanonicalQuery>> CanonicalQuery::canonicalize(
 
     // 0, 0, 0 is 'ntoskip', 'ntoreturn', and 'queryoptions'
     // false, false is 'snapshot' and 'explain'
-    auto lpqStatus = LiteParsedQuery::makeAsOpQuery(baseQuery.ns(),
+    auto lpqStatus = LiteParsedQuery::makeAsOpQuery(baseQuery.nss(),
                                                     0,
                                                     0,
                                                     0,
@@ -258,7 +259,7 @@ StatusWith<std::unique_ptr<CanonicalQuery>> CanonicalQuery::canonicalize(
     // Make the CQ we'll hopefully return.
     std::unique_ptr<CanonicalQuery> cq(new CanonicalQuery());
     Status initStatus =
-        cq->init(lpqStatus.getValue().release(), whereCallback, root->shallowClone());
+        cq->init(lpqStatus.getValue().release(), whereCallback, root->shallowClone().release());
 
     if (!initStatus.isOK()) {
         return initStatus;
@@ -283,8 +284,18 @@ StatusWith<std::unique_ptr<CanonicalQuery>> CanonicalQuery::canonicalize(
     // Pass empty sort and projection.
     BSONObj emptyObj;
 
-    auto lpqStatus = LiteParsedQuery::makeAsOpQuery(
-        ns, skip, limit, 0, query, proj, sort, hint, minObj, maxObj, snapshot, explain);
+    auto lpqStatus = LiteParsedQuery::makeAsOpQuery(NamespaceString(ns),
+                                                    skip,
+                                                    limit,
+                                                    0,
+                                                    query,
+                                                    proj,
+                                                    sort,
+                                                    hint,
+                                                    minObj,
+                                                    maxObj,
+                                                    snapshot,
+                                                    explain);
     if (!lpqStatus.isOK()) {
         return lpqStatus.getStatus();
     }
@@ -596,7 +607,7 @@ MatchExpression* CanonicalQuery::logicalRewrite(MatchExpression* tree) {
     for (size_t i = 0; i < orChildren.size(); ++i) {
         AndMatchExpression* ama = new AndMatchExpression();
         ama->add(orChildren[i]);
-        ama->add(tree->shallowClone());
+        ama->add(tree->shallowClone().release());
         orChildren[i] = ama;
     }
     delete tree;

@@ -40,7 +40,9 @@ env.Library(
         '$BUILD_DIR/mongo/bson/bson',
         '$BUILD_DIR/mongo/db/common',
         '$BUILD_DIR/mongo/s/batch_write_types',
-        '$BUILD_DIR/mongo/s/catalog/catalog_types'
+        '$BUILD_DIR/mongo/s/catalog/catalog_types',
+        '$BUILD_DIR/mongo/s/client/sharding_client',
+        '$BUILD_DIR/mongo/s/shard_util',
     ]
 )
 
@@ -67,7 +69,7 @@ env.CppUnitTest(
         'type_tags_test.cpp',
     ],
     LIBDEPS=[
-        '$BUILD_DIR/mongo/s/catalog/catalog_types'
+        'catalog_types'
     ]
 )
 
@@ -128,7 +130,6 @@ env.CppUnitTest(
     LIBDEPS=[
         'catalog_manager_mock',
         'dist_lock_catalog_impl',
-        '$BUILD_DIR/mongo/client/remote_command_runner_mock',
         '$BUILD_DIR/mongo/client/remote_command_targeter_mock',
         '$BUILD_DIR/mongo/db/auth/authorization_manager_mock_init',
         '$BUILD_DIR/mongo/executor/network_test_env',

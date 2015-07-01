@@ -59,6 +59,7 @@
 #include "mongo/db/repl/repl_settings.h"
 #include "mongo/db/repl/replica_set_config_checks.h"
 #include "mongo/db/repl/replication_executor.h"
+#include "mongo/db/repl/replication_metadata.h"
 #include "mongo/db/repl/rslog.h"
 #include "mongo/db/repl/topology_coordinator.h"
 #include "mongo/db/repl/update_position_args.h"
@@ -66,7 +67,6 @@
 #include "mongo/db/server_options.h"
 #include "mongo/db/write_concern_options.h"
 #include "mongo/stdx/functional.h"
-#include "mongo/stdx/thread.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
@@ -153,7 +153,16 @@ ReplicationCoordinator::Mode getReplicationModeFromSettings(const ReplSettings& 
 DataReplicatorOptions createDataReplicatorOptions(ReplicationCoordinator* replCoord) {
     DataReplicatorOptions options;
     options.applierFn = [](OperationContext*, const BSONObj&) -> Status { return Status::OK(); };
-    options.replicationProgressManager = replCoord;
+    options.rollbackFn =
+        [](OperationContext*, const OpTime&, const HostAndPort&) { return Status::OK(); };
+    options.prepareReplSetUpdatePositionCommandFn = [replCoord]() -> StatusWith<BSONObj> {
+        BSONObjBuilder bob;
+        if (replCoord->prepareReplSetUpdatePositionCommand(&bob)) {
+            return bob.obj();
+        }
+        return Status(ErrorCodes::OperationFailed,
+                      "unable to prepare replSetUpdatePosition command object");
+    };
     options.getMyLastOptime = [replCoord]() { return replCoord->getMyLastOptime(); };
     options.setMyLastOptime =
         [replCoord](const OpTime& opTime) { replCoord->setMyLastOptime(opTime); };
@@ -365,8 +374,7 @@ void ReplicationCoordinatorImpl::startReplication(OperationContext* txn) {
         return;
     }
 
-    _topCoordDriverThread.reset(
-        new stdx::thread(stdx::bind(&ReplicationExecutor::run, &_replExecutor)));
+    _replExecutor.startup();
 
     bool doneLoadingConfig = _startLoadLocalConfig(txn);
     if (doneLoadingConfig) {
@@ -408,8 +416,9 @@ void ReplicationCoordinatorImpl::shutdown() {
         }
     }
 
+    // joining the replication executor is blocking so it must be run outside of the mutex
     _replExecutor.shutdown();
-    _topCoordDriverThread->join();  // must happen outside _mutex
+    _replExecutor.join();
     _externalState->shutdown();
 }
 
@@ -1536,6 +1545,40 @@ void ReplicationCoordinatorImpl::processReplSetGetConfig(BSONObjBuilder* result)
     result->append("config", _rsConfig.toBSON());
 }
 
+void ReplicationCoordinatorImpl::processReplicationMetadata(
+    const ReplicationMetadata& replMetadata) {
+    CBHStatus cbh = _replExecutor.scheduleWork(
+        stdx::bind(&ReplicationCoordinatorImpl::_processReplicationMetadata_helper,
+                   this,
+                   stdx::placeholders::_1,
+                   replMetadata));
+    if (cbh.getStatus() == ErrorCodes::ShutdownInProgress) {
+        return;
+    }
+    fassert(28710, cbh.getStatus());
+    _replExecutor.wait(cbh.getValue());
+}
+
+void ReplicationCoordinatorImpl::_processReplicationMetadata_helper(
+    const ReplicationExecutor::CallbackArgs& cbData, const ReplicationMetadata& replMetadata) {
+    if (cbData.status == ErrorCodes::CallbackCanceled) {
+        return;
+    }
+
+    _processReplicationMetadata_incallback(replMetadata);
+}
+
+void ReplicationCoordinatorImpl::_processReplicationMetadata_incallback(
+    const ReplicationMetadata& replMetadata) {
+    if (replMetadata.getConfigVersion() != _rsConfig.getConfigVersion()) {
+        return;
+    }
+    _setLastCommittedOpTime(replMetadata.getLastOpCommitted());
+    if (_updateTerm_incallback(replMetadata.getTerm(), nullptr)) {
+        _topCoord->setPrimaryByMemberId(replMetadata.getPrimaryId());
+    }
+}
+
 bool ReplicationCoordinatorImpl::getMaintenanceMode() {
     bool maintenanceMode(false);
     CBHStatus cbh = _replExecutor.scheduleWork(
@@ -2004,6 +2047,13 @@ ReplicationCoordinatorImpl::_updateMemberStateFromTopologyCoordinator_inlock() {
         result = kActionWinElection;
     }
 
+    if (newState.readable() && !_memberState.readable()) {
+        // When we transition to a readable state from a non-readable one, force the SnapshotThread
+        // to take a snapshot, if it is running. This is because it never takes snapshots when not
+        // in readable states.
+        _externalState->forceSnapshotCreation();
+    }
+
     _memberState = newState;
     log() << "transition to " << newState.toString() << rsLog;
     return result;
@@ -2434,7 +2484,26 @@ void ReplicationCoordinatorImpl::_updateLastCommittedOpTime_inlock() {
     std::sort(votingNodesOpTimes.begin(), votingNodesOpTimes.end());
 
     // Use the index of the minimum quorum in the vector of nodes.
-    _lastCommittedOpTime = votingNodesOpTimes[(votingNodesOpTimes.size() - 1) / 2];
+    auto newCommittedOpTime = votingNodesOpTimes[(votingNodesOpTimes.size() - 1) / 2];
+    if (newCommittedOpTime != _lastCommittedOpTime) {
+        _lastCommittedOpTime = newCommittedOpTime;
+        // TODO SERVER-19208 Also need to updateCommittedSnapshot on secondaries.
+        if (auto newSnapshotTs = _externalState->updateCommittedSnapshot(newCommittedOpTime)) {
+            // TODO use this Timestamp for the following things:
+            // * SERVER-19206 make w:majority writes block until they are in the committed snapshot.
+            // * SERVER-19211 make readCommitted + afterOptime block until the optime is in the
+            //   committed view.
+            // * SERVER-19212 make new indexes not be used for any queries until the index is in the
+            //   committed view.
+        }
+    }
+}
+
+void ReplicationCoordinatorImpl::_setLastCommittedOpTime(const OpTime& committedOpTime) {
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+    if (committedOpTime > _lastCommittedOpTime) {
+        _lastCommittedOpTime = committedOpTime;
+    }
 }
 
 OpTime ReplicationCoordinatorImpl::getLastCommittedOpTime() const {
@@ -2489,7 +2558,7 @@ void ReplicationCoordinatorImpl::_processReplSetRequestVotes_finish(
     }
 
     stdx::unique_lock<stdx::mutex> lk(_mutex);
-    _topCoord->processReplSetRequestVotes(args, response, getMyLastOptime());
+    _topCoord->processReplSetRequestVotes(args, response, _getMyLastOptime_inlock());
     *result = Status::OK();
 }
 

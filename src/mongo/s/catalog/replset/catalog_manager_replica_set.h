@@ -29,7 +29,6 @@
 #pragma once
 
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
 
@@ -37,6 +36,7 @@
 #include "mongo/client/connection_string.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/s/catalog/catalog_manager.h"
+#include "mongo/stdx/mutex.h"
 
 namespace mongo {
 
@@ -64,13 +64,15 @@ public:
 
     Status enableSharding(const std::string& dbName) override;
 
-    Status shardCollection(const std::string& ns,
+    Status shardCollection(OperationContext* txn,
+                           const std::string& ns,
                            const ShardKeyPattern& fieldsAndOrder,
                            bool unique,
                            std::vector<BSONObj>* initPoints,
                            std::set<ShardId>* initShardsIds = nullptr) override;
 
-    StatusWith<std::string> addShard(const std::string& name,
+    StatusWith<std::string> addShard(OperationContext* txn,
+                                     const std::string& name,
                                      const ConnectionString& shardConnectionString,
                                      const long long maxSize) override;
 
@@ -86,7 +88,7 @@ public:
     Status getCollections(const std::string* dbName,
                           std::vector<CollectionType>* collections) override;
 
-    Status dropCollection(const std::string& collectionNs) override;
+    Status dropCollection(OperationContext* txn, const std::string& collectionNs) override;
 
     Status getDatabasesForShard(const std::string& shardName,
                                 std::vector<std::string>* dbs) override;
@@ -111,16 +113,16 @@ public:
                                        const BSONObj& cmdObj,
                                        BSONObjBuilder* result) override;
 
-    bool runUserManagementReadCommand(const std::string& dbname,
-                                      const BSONObj& cmdObj,
-                                      BSONObjBuilder* result) override;
+    bool runReadCommand(const std::string& dbname,
+                        const BSONObj& cmdObj,
+                        BSONObjBuilder* result) override;
 
     Status applyChunkOpsDeprecated(const BSONArray& updateOps,
                                    const BSONArray& preCondition) override;
 
     void logAction(const ActionLogType& actionLog) override;
 
-    void logChange(OperationContext* txn,
+    void logChange(const std::string& clientAddress,
                    const std::string& what,
                    const std::string& ns,
                    const BSONObj& detail) override;
@@ -156,8 +158,11 @@ private:
     // Whether the logAction call should attempt to create the actionlog collection
     AtomicInt32 _actionLogCollectionCreated;
 
+    // Whether the logChange call should attempt to create the changelog collection
+    AtomicInt32 _changeLogCollectionCreated;
+
     // protects _inShutdown
-    std::mutex _mutex;
+    stdx::mutex _mutex;
 
     // True if shutDown() has been called. False, otherwise.
     bool _inShutdown = false;

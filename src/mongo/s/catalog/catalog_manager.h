@@ -125,7 +125,8 @@ public:
      *          operations are writing to the same output collection, for instance.
      *
      */
-    virtual Status shardCollection(const std::string& ns,
+    virtual Status shardCollection(OperationContext* txn,
+                                   const std::string& ns,
                                    const ShardKeyPattern& fieldsAndOrder,
                                    bool unique,
                                    std::vector<BSONObj>* initPoints,
@@ -143,7 +144,8 @@ public:
      *         no limitation to space usage.
      * @return either an !OK status or the name of the newly added shard.
      */
-    virtual StatusWith<std::string> addShard(const std::string& name,
+    virtual StatusWith<std::string> addShard(OperationContext* txn,
+                                             const std::string& name,
                                              const ConnectionString& shardConnectionString,
                                              const long long maxSize) = 0;
 
@@ -223,7 +225,7 @@ public:
      * some of the known failures:
      *  - NamespaceNotFound - collection does not exist
      */
-    virtual Status dropCollection(const std::string& collectionNs) = 0;
+    virtual Status dropCollection(OperationContext* txn, const std::string& collectionNs) = 0;
 
     /**
      * Retrieves all databases for a shard.
@@ -274,7 +276,9 @@ public:
     virtual bool isShardHost(const ConnectionString& shardConnectionString) = 0;
 
     /**
-     * Runs a user management command on the config servers.
+     * Runs a user management command on the config servers, potentially synchronizing through
+     * a distributed lock. Do not use for general write command execution.
+     *
      * @param commandName: name of command
      * @param dbname: database for which the user management command is invoked
      * @param cmdObj: command obj
@@ -287,11 +291,11 @@ public:
                                                BSONObjBuilder* result) = 0;
 
     /**
-     * Runs a read-only user management command on a single config server.
+     * Runs a read-only command on a single config server.
      */
-    virtual bool runUserManagementReadCommand(const std::string& dbname,
-                                              const BSONObj& cmdObj,
-                                              BSONObjBuilder* result) = 0;
+    virtual bool runReadCommand(const std::string& dbname,
+                                const BSONObj& cmdObj,
+                                BSONObjBuilder* result) = 0;
 
     /**
      * Applies oplog entries to the config servers.
@@ -316,12 +320,12 @@ public:
      *
      * NOTE: This method is best effort so it should never throw.
      *
-     * @param opCtx The operation context of the call doing the logging
+     * @param clientAddress Address of the client that initiated the op that caused this change
      * @param what E.g. "split", "migrate"
      * @param ns To which collection the metadata change is being applied
      * @param detail Additional info about the metadata change (not interpreted)
      */
-    virtual void logChange(OperationContext* opCtx,
+    virtual void logChange(const std::string& clientAddress,
                            const std::string& what,
                            const std::string& ns,
                            const BSONObj& detail) = 0;

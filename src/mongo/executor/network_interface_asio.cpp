@@ -137,7 +137,7 @@ void NetworkInterfaceASIO::AsyncOp::complete(Date_t now) {
     if (canceled()) {
         finish(ResponseStatus(ErrorCodes::CallbackCanceled, "Callback canceled"));
     } else {
-        finish(ResponseStatus(Response(_output, Milliseconds(now - start()))));
+        finish(ResponseStatus(Response(_output, BSONObj(), Milliseconds(now - start()))));
     }
 
     _state = OpState::kCompleted;
@@ -182,6 +182,10 @@ std::string NetworkInterfaceASIO::getDiagnosticString() {
     output << " inShutdown: " << inShutdown();
     output << " _numOps: " << _numOps.loadRelaxed();
     return output;
+}
+
+std::string NetworkInterfaceASIO::getHostName() {
+    return getHostNameCached();
 }
 
 void NetworkInterfaceASIO::_messageFromRequest(const RemoteCommandRequest& request,
@@ -335,7 +339,7 @@ void NetworkInterfaceASIO::_completeOperation(AsyncOp* op) {
 }
 
 void NetworkInterfaceASIO::startup() {
-    _serviceRunner = std::thread([this]() {
+    _serviceRunner = stdx::thread([this]() {
         asio::io_service::work work(_io_service);
         _io_service.run();
     });
@@ -411,7 +415,7 @@ void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHa
     }
 
     // connect in a separate thread to avoid blocking the rest of the system
-    std::thread t([this, op]() {
+    stdx::thread t([this, op]() {
         try {
             // The call to connect() will throw if:
             // - we cannot get a new connection from the pool

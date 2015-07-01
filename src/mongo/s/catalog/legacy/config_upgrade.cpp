@@ -32,18 +32,17 @@
 
 #include "mongo/s/catalog/legacy/config_upgrade.h"
 
-
 #include "mongo/client/connpool.h"
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/client/syncclusterconnection.h"
 #include "mongo/s/catalog/catalog_manager.h"
+#include "mongo/s/catalog/dist_lock_manager.h"
 #include "mongo/s/catalog/legacy/cluster_client_internal.h"
+#include "mongo/s/catalog/legacy/mongo_version_range.h"
 #include "mongo/s/catalog/type_collection.h"
 #include "mongo/s/catalog/type_database.h"
 #include "mongo/s/catalog/type_settings.h"
 #include "mongo/s/catalog/type_shard.h"
-#include "mongo/s/catalog/dist_lock_manager.h"
-#include "mongo/s/mongo_version_range.h"
 #include "mongo/s/type_config_version.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/util/assert_util.h"
@@ -300,7 +299,7 @@ bool _nextUpgrade(CatalogManager* catalogManager,
     log() << "starting next upgrade step from v" << fromVersion << " to v" << toVersion;
 
     // Log begin to config.changelog
-    catalogManager->logChange(NULL,
+    catalogManager->logChange("<upgrade>",
                               "starting upgrade of config database",
                               VersionType::ConfigNS,
                               BSON("from" << fromVersion << "to" << toVersion));
@@ -321,7 +320,7 @@ bool _nextUpgrade(CatalogManager* catalogManager,
         return false;
     }
 
-    catalogManager->logChange(NULL,
+    catalogManager->logChange("<upgrade>",
                               "finished upgrade of config database",
                               VersionType::ConfigNS,
                               BSON("from" << fromVersion << "to" << toVersion));
