@@ -46,6 +46,7 @@
 
 #include "mongo/platform/basic.h"
 
+#include <array>
 #include <js/Utility.h>
 #include <vm/PosixNSPR.h>
 
@@ -98,7 +99,7 @@ PRThread* PR_CreateThread(PRThreadType type,
     MOZ_ASSERT(priority == PR_PRIORITY_NORMAL);
 
     try {
-        std::unique_ptr<nspr::Thread, decltype(&js_delete<nspr::Thread>)> t(
+        std::unique_ptr<nspr::Thread, void (*)(nspr::Thread*)> t(
             js_new<nspr::Thread>(start, arg, state != PR_UNJOINABLE_THREAD),
             js_delete<nspr::Thread>);
 

@@ -22,6 +22,7 @@ env.Prepend(CPPDEFINES=[
         'NO_NSPR_10_SUPPORT',
         'JS_USE_CUSTOM_ALLOCATOR',
         'U_NO_DEFAULT_INCLUDE_UTF_HEADERS=1',
+	'EXPORT_JS_API=1',
         ])
 
 # js-confdefs.h has to get in front on windows or wherever
@@ -57,7 +58,6 @@ env.Prepend(CPPPATH=[
 sources = [
     "extract/js/src/builtin/RegExp.cpp",
     "extract/js/src/frontend/Parser.cpp",
-    "extract/js/src/jit/ExecutableAllocatorPosix.cpp",
     "extract/js/src/jsarray.cpp",
     "extract/js/src/jsatom.cpp",
     "extract/js/src/jsmath.cpp",
@@ -70,6 +70,18 @@ sources = [
     "extract/mfbt/Compression.cpp",
     "extract/mfbt/decimal/Decimal.cpp",
 ]
+
+if env.TargetOSIs('windows'):
+    sources.extend([
+        "extract/js/src/jit/ExecutableAllocatorWin.cpp",
+    ])
+    env.Prepend(CPPDEFINES=[
+        "_CRT_RAND_S=1"
+    ])
+else:
+    sources.extend([
+        "extract/js/src/jit/ExecutableAllocatorPosix.cpp",
+    ])
 
 sources.extend(Glob('platform/' + env["TARGET_ARCH"] + "/" + env["TARGET_OS"] + "/build/*.cpp")),
 

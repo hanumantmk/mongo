@@ -54,7 +54,7 @@
 #define _CRT_NONSTDC_NO_WARNINGS 1
 #define _CRT_SECURE_NO_WARNINGS 1
 #define _WIN32_IE 0x0603
-#define _WIN32_WINNT 0x502
+//#define _WIN32_WINNT 0x502
 #define _WINDOWS 1
 
 #include "js/RequiredDefines.h"
