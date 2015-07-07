@@ -22,7 +22,7 @@
 /* #undef JS_THREADSAFE */
 
 /* Define to 1 if SpiderMonkey should include ctypes support.  */
-#define JS_HAS_CTYPES 1
+/* #undef JS_HAS_CTYPES */
 
 /* Define to 1 if SpiderMonkey should support the ability to perform
    entirely too much GC.  */

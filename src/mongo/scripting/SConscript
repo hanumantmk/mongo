@@ -73,7 +73,12 @@ elif usemozjs:
     scriptingEnv = env.Clone()
     scriptingEnv.InjectThirdPartyIncludePaths(libraries=['mozjs'])
 
-    if not env.TargetOSIs('windows'):
+    if env.TargetOSIs('windows'):
+        scriptingEnv.Prepend(CCFLAGS=[
+            '/FI', 'js-config.h',
+            '/FI', 'js/RequiredDefines.h'
+        ])
+    else:
         scriptingEnv.Prepend(CCFLAGS=[
             '-Wno-non-virtual-dtor',
             '-Wno-invalid-offsetof',
@@ -81,6 +86,7 @@ elif usemozjs:
 
     scriptingEnv.Prepend(CPPDEFINES=[
         'JS_USE_CUSTOM_ALLOCATOR',
+        'STATIC_JS_API=1',
     ])
 
     scriptingEnv.Library(
