@@ -34,7 +34,7 @@ var nullHash = hash( null );
 assert(! friendlyEqual( falseHash , nullHash ) , "false and null should hash to different things");
 
 var dateHash = hash( new Date() );
-sleep(1);
+sleep(2);
 var isodateHash = hash( ISODate() );
 assert(! friendlyEqual( dateHash, isodateHash) , "different dates should hash to different things");
 

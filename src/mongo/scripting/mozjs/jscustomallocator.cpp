@@ -136,6 +136,9 @@ void* js_calloc(size_t nmemb, size_t size) {
 }
 
 void js_free(void* p) {
+    if (!p)
+        return;
+
     size_t current = mongo::sm::get_current(p);
     size_t tb = mongo::sm::get_total_bytes();
 

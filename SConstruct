@@ -1197,6 +1197,7 @@ elif env.TargetOSIs('windows'):
                      'DbgHelp.lib',
                      'shell32.lib',
                      'Iphlpapi.lib',
+                     'winmm.lib',
                      'version.lib'])
 
     # v8 calls timeGetTime()
