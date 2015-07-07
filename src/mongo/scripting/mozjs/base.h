@@ -51,18 +51,34 @@ struct BaseInfo {
     static const JSFunctionSpec* freeFunctions;
     static const JSFunctionSpec* methods;
     static const unsigned classFlags = 0;
-    static void addProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue v);
+    static void addProperty(JSContext* cx,
+                            JS::HandleObject obj,
+                            JS::HandleId id,
+                            JS::MutableHandleValue v);
     static void call(JSContext* cx, JS::CallArgs args);
     static void construct(JSContext* cx, JS::CallArgs args);
-    static void convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp);
+    static void convert(JSContext* cx,
+                        JS::HandleObject obj,
+                        JSType type,
+                        JS::MutableHandleValue vp);
     static void delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded);
     static void enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties);
     static void finalize(JSFreeOp* fop, JSObject* obj);
-    static void getProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue vp);
-    static void hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp);
+    static void getProperty(JSContext* cx,
+                            JS::HandleObject obj,
+                            JS::HandleId id,
+                            JS::MutableHandleValue vp);
+    static void hasInstance(JSContext* cx,
+                            JS::HandleObject obj,
+                            JS::MutableHandleValue vp,
+                            bool* bp);
     static void postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto);
     static void resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp);
-    static void setProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool strict, JS::MutableHandleValue vp);
+    static void setProperty(JSContext* cx,
+                            JS::HandleObject obj,
+                            JS::HandleId id,
+                            bool strict,
+                            JS::MutableHandleValue vp);
 };
 
 }  // namespace mozjs

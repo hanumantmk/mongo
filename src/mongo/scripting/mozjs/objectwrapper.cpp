@@ -50,8 +50,7 @@ void ObjectWrapper::Key::get(JSContext* cx, JS::HandleObject o, JS::MutableHandl
             if (JS_GetElement(cx, o, _idx, value))
                 return;
             break;
-        case Type::Id:
-        {
+        case Type::Id: {
             JS::RootedId id(cx, _id);
 
             if (JS_GetPropertyById(cx, o, id, value))
@@ -73,8 +72,7 @@ void ObjectWrapper::Key::set(JSContext* cx, JS::HandleObject o, JS::HandleValue 
             if (JS_SetElement(cx, o, _idx, value))
                 return;
             break;
-        case Type::Id:
-        {
+        case Type::Id: {
             JS::RootedId id(cx, _id);
 
             if (JS_SetPropertyById(cx, o, id, value))
@@ -99,8 +97,7 @@ void ObjectWrapper::Key::define(JSContext* cx,
             if (JS_DefineElement(cx, o, _idx, value, attrs))
                 return;
             break;
-        case Type::Id:
-        {
+        case Type::Id: {
             JS::RootedId id(cx, _id);
 
             if (JS_DefinePropertyById(cx, o, id, value, attrs))
@@ -124,8 +121,7 @@ bool ObjectWrapper::Key::has(JSContext* cx, JS::HandleObject o) {
             if (JS_HasElement(cx, o, _idx, &has))
                 return has;
             break;
-        case Type::Id:
-        {
+        case Type::Id: {
             JS::RootedId id(cx, _id);
 
             if (JS_HasPropertyById(cx, o, id, &has))
@@ -166,8 +162,7 @@ std::string ObjectWrapper::Key::toString(JSContext* cx) {
             return _field;
         case Type::Index:
             return std::to_string(_idx);
-        case Type::Id:
-        {
+        case Type::Id: {
             JS::RootedId id(cx, _id);
             return IdWrapper(cx, id).toString();
         }
