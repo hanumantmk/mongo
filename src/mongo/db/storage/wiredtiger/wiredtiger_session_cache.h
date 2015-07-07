@@ -105,11 +105,11 @@ private:
     typedef std::list<WiredTigerCachedCursor> CursorCache;
 
     // Used internally by WiredTigerSessionCache
-    int _getEpoch() const {
+    uint64_t _getEpoch() const {
         return _epoch;
     }
 
-    const int _epoch;
+    const uint64_t _epoch;
     WT_SESSION* _session;  // owned
     CursorCache _cursors;  // owned
     uint64_t _cursorGen;
@@ -152,16 +152,10 @@ private:
     AtomicUInt32 _shuttingDown;         // Used as boolean - 0 = false, 1 = true
 
     SpinLock _cacheLock;
-    typedef std::list<WiredTigerSession*> SessionCache;
+    typedef std::vector<WiredTigerSession*> SessionCache;
     SessionCache _sessions;
 
     // Bumped when all open sessions need to be closed
-    int _epoch;
-
-    // How many sessions are in use concurrently
-    AtomicUInt32 _sessionsOut;
-
-    // The most sessions we have ever in use concurrently.
-    AtomicUInt32 _highWaterMark;
+    AtomicUInt64 _epoch;  // atomic so we can check it outside of the lock
 };
 }

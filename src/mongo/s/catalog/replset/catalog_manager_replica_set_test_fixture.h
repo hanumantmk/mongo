@@ -32,6 +32,7 @@
 
 #include "mongo/db/service_context.h"
 #include "mongo/executor/network_test_env.h"
+#include "mongo/util/net/message_port_mock.h"
 #include "mongo/unittest/unittest.h"
 
 namespace mongo {
@@ -40,6 +41,8 @@ class BSONObj;
 class CatalogManagerReplicaSet;
 class DistLockManagerMock;
 struct RemoteCommandRequest;
+class RemoteCommandTargeterFactoryMock;
+class RemoteCommandTargeterMock;
 class ShardRegistry;
 template <typename T>
 class StatusWith;
@@ -67,7 +70,13 @@ protected:
 
     ShardRegistry* shardRegistry() const;
 
+    RemoteCommandTargeterFactoryMock* targeterFactory() const;
+
+    RemoteCommandTargeterMock* configTargeter() const;
+
     executor::NetworkInterfaceMock* network() const;
+
+    MessagingPortMock* getMessagingPort() const;
 
     DistLockManagerMock* distLock() const;
 
@@ -89,6 +98,10 @@ private:
     std::unique_ptr<ServiceContext> _service;
     ServiceContext::UniqueClient _client;
     ServiceContext::UniqueOperationContext _opCtx;
+    std::unique_ptr<MessagingPortMock> _messagePort;
+
+    RemoteCommandTargeterFactoryMock* _targeterFactory;
+    RemoteCommandTargeterMock* _configTargeter;
 
     executor::NetworkInterfaceMock* _mockNetwork;
     std::unique_ptr<executor::NetworkTestEnv> _networkTestEnv;

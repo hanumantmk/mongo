@@ -198,7 +198,6 @@ static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* 
 
 template <typename T>
 class WrapType : public T {
-
 public:
     WrapType(JSContext* context)
         : _context(context),
@@ -331,16 +330,17 @@ private:
         _inheritFrom(T::inheritFrom, global, &parent);
 
         _proto.init(_context,
-                    _assertPtr(JS_InitClass(_context,
-                                            global,
-                                            parent,
-                                            &_jsclass,
-                                            T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr,
-                                            0,
-                                            nullptr,
-                                            T::methods,
-                                            nullptr,
-                                            nullptr)));
+                    _assertPtr(JS_InitClass(
+                        _context,
+                        global,
+                        parent,
+                        &_jsclass,
+                        T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr,
+                        0,
+                        nullptr,
+                        T::methods,
+                        nullptr,
+                        nullptr)));
 
         _installFunctions(global, T::freeFunctions);
         _postInstall(global, T::postInstall);

@@ -34,6 +34,7 @@
 
 #include "mongo/base/status_with.h"
 #include "mongo/client/remote_command_targeter_factory_mock.h"
+#include "mongo/client/remote_command_targeter_mock.h"
 #include "mongo/db/client.h"
 #include "mongo/db/repl/replication_executor.h"
 #include "mongo/db/service_context_noop.h"
@@ -57,11 +58,14 @@ CatalogManagerReplSetTestFixture::~CatalogManagerReplSetTestFixture() = default;
 
 void CatalogManagerReplSetTestFixture::setUp() {
     _service = stdx::make_unique<ServiceContextNoop>();
-    _client = _service->makeClient("CatalogManagerReplSetTestFixture");
+    _messagePort = stdx::make_unique<MessagingPortMock>();
+    _client = _service->makeClient("CatalogManagerReplSetTestFixture", _messagePort.get());
     _opCtx = _client->makeOperationContext();
 
-    auto network(stdx::make_unique<executor::NetworkInterfaceMock>());
+    auto targeterFactory(stdx::make_unique<RemoteCommandTargeterFactoryMock>());
+    _targeterFactory = targeterFactory.get();
 
+    auto network(stdx::make_unique<executor::NetworkInterfaceMock>());
     _mockNetwork = network.get();
 
     std::unique_ptr<repl::ReplicationExecutor> executor(
@@ -76,11 +80,12 @@ void CatalogManagerReplSetTestFixture::setUp() {
                                         {HostAndPort{"TestHost1"}, HostAndPort{"TestHost2"}}),
         stdx::make_unique<DistLockManagerMock>()));
 
-    auto shardRegistry(
-        stdx::make_unique<ShardRegistry>(stdx::make_unique<RemoteCommandTargeterFactoryMock>(),
-                                         std::move(executor),
-                                         _mockNetwork,
-                                         cm.get()));
+    auto configTargeter(stdx::make_unique<RemoteCommandTargeterMock>());
+    _configTargeter = configTargeter.get();
+    _targeterFactory->addTargeterToReturn(cm->connectionString(), std::move(configTargeter));
+
+    auto shardRegistry(stdx::make_unique<ShardRegistry>(
+        std::move(targeterFactory), std::move(executor), _mockNetwork, cm.get()));
     shardRegistry->startup();
 
     // For now initialize the global grid object. All sharding objects will be accessible
@@ -106,11 +111,31 @@ CatalogManagerReplicaSet* CatalogManagerReplSetTestFixture::catalogManager() con
 }
 
 ShardRegistry* CatalogManagerReplSetTestFixture::shardRegistry() const {
+    invariant(grid.shardRegistry());
+
     return grid.shardRegistry();
 }
 
+RemoteCommandTargeterFactoryMock* CatalogManagerReplSetTestFixture::targeterFactory() const {
+    invariant(_targeterFactory);
+
+    return _targeterFactory;
+}
+
+RemoteCommandTargeterMock* CatalogManagerReplSetTestFixture::configTargeter() const {
+    invariant(_configTargeter);
+
+    return _configTargeter;
+}
+
 executor::NetworkInterfaceMock* CatalogManagerReplSetTestFixture::network() const {
+    invariant(_mockNetwork);
+
     return _mockNetwork;
+}
+
+MessagingPortMock* CatalogManagerReplSetTestFixture::getMessagingPort() const {
+    return _messagePort.get();
 }
 
 DistLockManagerMock* CatalogManagerReplSetTestFixture::distLock() const {

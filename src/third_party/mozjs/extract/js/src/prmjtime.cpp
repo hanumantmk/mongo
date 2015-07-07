@@ -133,7 +133,7 @@ PRMJ_NowInit()
     InitializeCriticalSectionAndSpinCount(&calibration.data_lock, DataLockSpinCount);
 
     // Windows 8 has a new API function we can use.
-    if (HMODULE h = GetModuleHandle("kernel32.dll")) {
+    if (HMODULE h = GetModuleHandle(L"kernel32.dll")) {
         pGetSystemTimePreciseAsFileTime =
             (void (WINAPI*)(LPFILETIME))GetProcAddress(h, "GetSystemTimePreciseAsFileTime");
     }

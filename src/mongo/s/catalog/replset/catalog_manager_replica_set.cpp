@@ -38,7 +38,6 @@
 #include "mongo/base/status_with.h"
 #include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/bson/util/bson_extract.h"
-#include "mongo/client/dbclientinterface.h"
 #include "mongo/client/read_preference.h"
 #include "mongo/client/remote_command_targeter.h"
 #include "mongo/db/commands.h"
@@ -60,7 +59,6 @@
 #include "mongo/s/grid.h"
 #include "mongo/s/write_ops/batched_command_request.h"
 #include "mongo/s/write_ops/batched_command_response.h"
-#include "mongo/stdx/memory.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/mongoutils/str.h"
@@ -144,12 +142,8 @@ Status CatalogManagerReplicaSet::shardCollection(OperationContext* txn,
     return notYetImplemented;
 }
 
-Status CatalogManagerReplicaSet::createDatabase(const std::string& dbName) {
-    return notYetImplemented;
-}
-
 StatusWith<string> CatalogManagerReplicaSet::addShard(OperationContext* txn,
-                                                      const string& name,
+                                                      const std::string* shardProposedName,
                                                       const ConnectionString& shardConnectionString,
                                                       const long long maxSize) {
     return notYetImplemented;
@@ -613,7 +607,7 @@ DistLockManager* CatalogManagerReplicaSet::getDistLockManager() const {
 
 void CatalogManagerReplicaSet::writeConfigServerDirect(const BatchedCommandRequest& batchRequest,
                                                        BatchedCommandResponse* batchResponse) {
-    std::string dbname = batchRequest.getNSS().db().toString();
+    std::string dbname = batchRequest.getNS().db().toString();
     invariant(dbname == "config" || dbname == "admin");
     const BSONObj cmdObj = batchRequest.toBSON();
 
@@ -668,6 +662,43 @@ StatusWith<BSONObj> CatalogManagerReplicaSet::_runConfigServerCommandWithNotMast
     }
 
     MONGO_UNREACHABLE;
+}
+
+Status CatalogManagerReplicaSet::_checkDbDoesNotExist(const string& dbName) const {
+    BSONObjBuilder queryBuilder;
+    queryBuilder.appendRegex(
+        DatabaseType::name(), (string) "^" + pcrecpp::RE::QuoteMeta(dbName) + "$", "i");
+
+    const auto configShard = grid.shardRegistry()->getShard("config");
+    const auto readHost = configShard->getTargeter()->findHost(kConfigReadSelector);
+    if (!readHost.isOK()) {
+        return readHost.getStatus();
+    }
+
+    auto findStatus = grid.shardRegistry()->exhaustiveFind(readHost.getValue(),
+                                                           NamespaceString(DatabaseType::ConfigNS),
+                                                           queryBuilder.obj(),
+                                                           BSONObj(),
+                                                           1);
+    if (!findStatus.isOK()) {
+        return findStatus.getStatus();
+    }
+
+    const auto& docs = findStatus.getValue();
+    if (docs.empty()) {
+        return Status::OK();
+    }
+
+    BSONObj dbObj = docs.front();
+    std::string actualDbName = dbObj[DatabaseType::name()].String();
+    if (actualDbName == dbName) {
+        return Status(ErrorCodes::NamespaceExists,
+                      str::stream() << "database " << dbName << " already exists");
+    }
+
+    return Status(ErrorCodes::DatabaseDifferCase,
+                  str::stream() << "can't have 2 databases that just differ on case "
+                                << " have: " << actualDbName << " want to add: " << dbName);
 }
 
 }  // namespace mongo

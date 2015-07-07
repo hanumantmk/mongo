@@ -28,11 +28,6 @@
 
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "mongo/bson/bsonobj.h"
 #include "mongo/client/connection_string.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/s/catalog/catalog_manager.h"
@@ -72,14 +67,12 @@ public:
                            std::set<ShardId>* initShardsIds = nullptr) override;
 
     StatusWith<std::string> addShard(OperationContext* txn,
-                                     const std::string& name,
+                                     const std::string* shardProposedName,
                                      const ConnectionString& shardConnectionString,
                                      const long long maxSize) override;
 
     StatusWith<ShardDrainingStatus> removeShard(OperationContext* txn,
                                                 const std::string& name) override;
-
-    Status createDatabase(const std::string& dbName) override;
 
     StatusWith<DatabaseType> getDatabase(const std::string& dbName) override;
 
@@ -135,6 +128,8 @@ public:
     DistLockManager* getDistLockManager() const override;
 
 private:
+    Status _checkDbDoesNotExist(const std::string& dbName) const override;
+
     /**
      * Helper for running commands against the config server with logic for retargeting and
      * retrying the command in the event of a NotMaster response.

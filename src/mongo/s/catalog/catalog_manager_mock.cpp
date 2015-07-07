@@ -26,13 +26,14 @@
  *    it in the license file.
  */
 
+#include "mongo/platform/basic.h"
+
 #include "mongo/s/catalog/catalog_manager_mock.h"
 
 #include "mongo/base/status.h"
 #include "mongo/s/catalog/type_collection.h"
 #include "mongo/s/catalog/type_database.h"
 #include "mongo/s/catalog/type_settings.h"
-#include "mongo/stdx/memory.h"
 
 namespace mongo {
 
@@ -72,7 +73,7 @@ Status CatalogManagerMock::shardCollection(OperationContext* txn,
 }
 
 StatusWith<string> CatalogManagerMock::addShard(OperationContext* txn,
-                                                const string& name,
+                                                const std::string* shardProposedName,
                                                 const ConnectionString& shardConnectionString,
                                                 const long long maxSize) {
     return Status::OK();
@@ -81,10 +82,6 @@ StatusWith<string> CatalogManagerMock::addShard(OperationContext* txn,
 StatusWith<ShardDrainingStatus> CatalogManagerMock::removeShard(OperationContext* txn,
                                                                 const string& name) {
     return ShardDrainingStatus::COMPLETED;
-}
-
-Status CatalogManagerMock::createDatabase(const string& dbName) {
-    return Status::OK();
 }
 
 Status CatalogManagerMock::updateDatabase(const string& dbName, const DatabaseType& db) {
@@ -175,6 +172,10 @@ void CatalogManagerMock::writeConfigServerDirect(const BatchedCommandRequest& re
 
 DistLockManager* CatalogManagerMock::getDistLockManager() const {
     return _mockDistLockMgr.get();
+}
+
+Status CatalogManagerMock::_checkDbDoesNotExist(const std::string& dbName) const {
+    return Status::OK();
 }
 
 }  // namespace mongo

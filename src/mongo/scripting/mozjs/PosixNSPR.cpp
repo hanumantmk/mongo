@@ -74,14 +74,13 @@ public:
     }
 };
 
-namespace mongo {
-TSP_DECLARE(nspr::Thread, kCurrentThread)
-TSP_DEFINE(nspr::Thread, kCurrentThread)
-}
+namespace {
+MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL nspr::Thread* kCurrentThread;
+}  // namespace
 
 void* nspr::Thread::ThreadRoutine(void* arg) {
     Thread* self = static_cast<Thread*>(arg);
-    mongo::kCurrentThread.reset(self);
+    kCurrentThread = self;
     self->start(self->arg);
     if (!self->joinable)
         js_delete(self);
@@ -128,7 +127,7 @@ PRStatus PR_JoinThread(PRThread* thread) {
 }
 
 PRThread* PR_GetCurrentThread() {
-    return mongo::kCurrentThread.get();
+    return kCurrentThread;
 }
 
 PRStatus PR_SetCurrentThreadName(const char* name) {
@@ -139,12 +138,10 @@ PRStatus PR_SetCurrentThreadName(const char* name) {
 
 static const size_t MaxTLSKeyCount = 32;
 static size_t gTLSKeyCount;
-namespace mongo {
-using TLSArray = std::array<void*, MaxTLSKeyCount>;
+namespace {
+MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL std::array<void*, MaxTLSKeyCount> gTLSArray;
 
-TSP_DECLARE(TLSArray, gTLSArray)
-TSP_DEFINE(TLSArray, gTLSArray)
-}
+}  // namespace
 
 PRStatus PR_NewThreadPrivateIndex(unsigned* newIndex, PRThreadPrivateDTOR destructor) {
     /*
@@ -163,7 +160,7 @@ PRStatus PR_SetThreadPrivate(unsigned index, void* priv) {
     if (index >= gTLSKeyCount)
         return PR_FAILURE;
 
-    (*(mongo::gTLSArray.get()))[index] = priv;
+    gTLSArray[index] = priv;
 
     return PR_SUCCESS;
 }
@@ -172,7 +169,7 @@ void* PR_GetThreadPrivate(unsigned index) {
     if (index >= gTLSKeyCount)
         return nullptr;
 
-    return (*(mongo::gTLSArray.get()))[index];
+    return gTLSArray[index];
 }
 
 PRStatus PR_CallOnce(PRCallOnceType* once, PRCallOnceFN func) {

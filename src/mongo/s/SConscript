@@ -7,22 +7,8 @@ env.SConscript(
         'catalog',
         'client',
         'commands',
+        'query',
     ],
-)
-
-env.Library(
-    target='base',
-    source=[
-        'type_locks.cpp',
-        'type_lockpings.cpp',
-        'type_config_version.cpp',
-        'type_mongos.cpp',
-    ],
-    LIBDEPS=[
-        '$BUILD_DIR/mongo/base/base',
-        '$BUILD_DIR/mongo/bson/bson',
-        '$BUILD_DIR/mongo/db/common',
-    ]
 )
 
 env.Library(
@@ -36,24 +22,7 @@ env.Library(
 )
 
 env.CppUnitTest('chunk_version_test', 'chunk_version_test.cpp',
-                LIBDEPS=['base',
-                         '$BUILD_DIR/mongo/db/common'])
-
-env.CppUnitTest('type_config_version_test', 'type_config_version_test.cpp',
-                LIBDEPS=['base',
-                         '$BUILD_DIR/mongo/db/common'])
-
-env.CppUnitTest('type_locks_test', 'type_locks_test.cpp',
-                LIBDEPS=['base',
-                         '$BUILD_DIR/mongo/db/common'])
-
-env.CppUnitTest('type_lockpings_test', 'type_lockpings_test.cpp',
-                LIBDEPS=['base',
-                         '$BUILD_DIR/mongo/db/common'])
-
-env.CppUnitTest('type_mongos_test', 'type_mongos_test.cpp',
-                LIBDEPS=['base',
-                         '$BUILD_DIR/mongo/db/common'])
+                LIBDEPS=['$BUILD_DIR/mongo/db/common'])
 
 #
 # Support for maintaining persistent sharding state and data.
@@ -66,7 +35,6 @@ env.Library(
         'metadata_loader.cpp',
     ],
     LIBDEPS=[
-        'base',
         'catalog/catalog_types',
         '$BUILD_DIR/mongo/bson/bson',
         '$BUILD_DIR/mongo/base/base',
@@ -123,6 +91,7 @@ env.Library(
 env.CppUnitTest(
     target='batch_write_types_test',
     source=[
+        'write_ops/batched_command_request_test.cpp',
         'write_ops/batched_command_response_test.cpp',
         'write_ops/batched_delete_request_test.cpp',
         'write_ops/batched_insert_request_test.cpp',
@@ -250,8 +219,8 @@ env.Library(
         'version_manager.cpp',
     ],
     LIBDEPS=[
-        'base',
         'catalog/catalog_manager',
+        'catalog/catalog_types',
         'client/sharding_client',
         'cluster_ops_impl',
         'shard_util',

@@ -28,15 +28,12 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-
-#include "mongo/bson/bsonobj.h"
 #include "mongo/client/connection_string.h"
+#include "mongo/platform/atomic_word.h"
 #include "mongo/s/catalog/catalog_manager.h"
 #include "mongo/stdx/condition_variable.h"
+#include "mongo/stdx/mutex.h"
 #include "mongo/stdx/thread.h"
-#include "mongo/platform/atomic_word.h"
 
 namespace mongo {
 
@@ -70,14 +67,12 @@ public:
                            std::set<ShardId>* initShardIds) override;
 
     StatusWith<std::string> addShard(OperationContext* txn,
-                                     const std::string& name,
+                                     const std::string* shardProposedName,
                                      const ConnectionString& shardConnectionString,
                                      const long long maxSize) override;
 
     StatusWith<ShardDrainingStatus> removeShard(OperationContext* txn,
                                                 const std::string& name) override;
-
-    Status createDatabase(const std::string& dbName) override;
 
     StatusWith<DatabaseType> getDatabase(const std::string& dbName) override;
 
@@ -135,6 +130,8 @@ public:
     DistLockManager* getDistLockManager() const override;
 
 private:
+    Status _checkDbDoesNotExist(const std::string& dbName) const override;
+
     /**
      * Updates the config server's metadata to the current version.
      */
@@ -147,12 +144,6 @@ private:
     Status _startConfigServerChecker();
 
     /**
-     * Direct network check to see if a particular database does not already exist with the
-     * same name or different case.
-     */
-    Status _checkDbDoesNotExist(const std::string& dbName) const;
-
-    /**
      * Generates a new shard name "shard<xxxx>"
      * where <xxxx> is an autoincrementing value and <xxxx> < 10000
      */
@@ -163,7 +154,7 @@ private:
      * in this sharded cluster.
      * Optional: use query parameter to filter shard count.
      */
-    size_t _getShardCount(const BSONObj& query = {}) const;
+    size_t _getShardCount(const BSONObj& query) const;
 
     /**
      * Returns true if all config servers have the same state.

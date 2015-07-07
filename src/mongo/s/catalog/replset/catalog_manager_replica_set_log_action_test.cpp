@@ -72,14 +72,15 @@ public:
 
             BatchedInsertRequest actualBatchedInsert;
             std::string errmsg;
-            ASSERT_TRUE(actualBatchedInsert.parseBSON(request.cmdObj, &errmsg));
-            ASSERT_EQUALS(ActionLogType::ConfigNS, actualBatchedInsert.getCollName());
+            ASSERT_TRUE(actualBatchedInsert.parseBSON(request.dbname, request.cmdObj, &errmsg));
+            ASSERT_EQUALS(ActionLogType::ConfigNS, actualBatchedInsert.getNS().ns());
             auto inserts = actualBatchedInsert.getDocuments();
             ASSERT_EQUALS(1U, inserts.size());
             BSONObj insert = inserts.front();
 
-            ActionLogType actualActionLog;
-            ASSERT_TRUE(actualActionLog.parseBSON(insert, &errmsg));
+            auto actualActionLogRes = ActionLogType::fromBSON(insert);
+            ASSERT_OK(actualActionLogRes.getStatus());
+            const ActionLogType& actualActionLog = actualActionLogRes.getValue();
 
             ASSERT_EQUALS(expectedActionLog.toBSON(), actualActionLog.toBSON());
 
@@ -92,14 +93,13 @@ public:
 };
 
 TEST_F(LogActionTest, LogActionNoRetryAfterSuccessfulCreate) {
-    RemoteCommandTargeterMock* targeter =
-        RemoteCommandTargeterMock::get(shardRegistry()->getShard("config")->getTargeter());
-    targeter->setFindHostReturnValue(HostAndPort("TestHost1"));
+    configTargeter()->setFindHostReturnValue(HostAndPort("TestHost1"));
 
     ActionLogType expectedActionLog;
     expectedActionLog.setServer("server1");
     expectedActionLog.setTime(network()->now());
     expectedActionLog.setWhat("moved a chunk");
+    expectedActionLog.setDetails(boost::none, 0, 1, 1);
 
     auto future =
         launchAsync([this, &expectedActionLog] { catalogManager()->logAction(expectedActionLog); });
@@ -108,7 +108,7 @@ TEST_F(LogActionTest, LogActionNoRetryAfterSuccessfulCreate) {
     expectActionLogInsert(expectedActionLog);
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 
     // Now log another action and confirm that we don't re-attempt to create the collection
     future =
@@ -117,18 +117,17 @@ TEST_F(LogActionTest, LogActionNoRetryAfterSuccessfulCreate) {
     expectActionLogInsert(expectedActionLog);
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 }
 
 TEST_F(LogActionTest, LogActionNoRetryCreateIfAlreadyExists) {
-    RemoteCommandTargeterMock* targeter =
-        RemoteCommandTargeterMock::get(shardRegistry()->getShard("config")->getTargeter());
-    targeter->setFindHostReturnValue(HostAndPort("TestHost1"));
+    configTargeter()->setFindHostReturnValue(HostAndPort("TestHost1"));
 
     ActionLogType expectedActionLog;
     expectedActionLog.setServer("server1");
     expectedActionLog.setTime(network()->now());
     expectedActionLog.setWhat("moved a chunk");
+    expectedActionLog.setDetails(boost::none, 0, 1, 1);
 
     auto future =
         launchAsync([this, &expectedActionLog] { catalogManager()->logAction(expectedActionLog); });
@@ -140,7 +139,7 @@ TEST_F(LogActionTest, LogActionNoRetryCreateIfAlreadyExists) {
     expectActionLogInsert(expectedActionLog);
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 
     // Now log another action and confirm that we don't re-attempt to create the collection
     future =
@@ -149,18 +148,17 @@ TEST_F(LogActionTest, LogActionNoRetryCreateIfAlreadyExists) {
     expectActionLogInsert(expectedActionLog);
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 }
 
 TEST_F(LogActionTest, LogActionCreateFailure) {
-    RemoteCommandTargeterMock* targeter =
-        RemoteCommandTargeterMock::get(shardRegistry()->getShard("config")->getTargeter());
-    targeter->setFindHostReturnValue(HostAndPort("TestHost1"));
+    configTargeter()->setFindHostReturnValue(HostAndPort("TestHost1"));
 
     ActionLogType expectedActionLog;
     expectedActionLog.setServer("server1");
     expectedActionLog.setTime(network()->now());
     expectedActionLog.setWhat("moved a chunk");
+    expectedActionLog.setDetails(boost::none, 0, 1, 1);
 
     auto future =
         launchAsync([this, &expectedActionLog] { catalogManager()->logAction(expectedActionLog); });
@@ -172,7 +170,7 @@ TEST_F(LogActionTest, LogActionCreateFailure) {
     // If creating the collection fails we won't perform the insert
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 
     // Now log another action and confirm that we *do* attempt to re-create the collection
     future =
@@ -182,7 +180,7 @@ TEST_F(LogActionTest, LogActionCreateFailure) {
     expectActionLogInsert(expectedActionLog);
 
     // Now wait for the logAction call to return
-    future.wait_for(kFutureTimeout);
+    future.timed_get(kFutureTimeout);
 }
 
 }  // namespace

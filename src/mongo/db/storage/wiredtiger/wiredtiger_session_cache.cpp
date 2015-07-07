@@ -111,7 +111,6 @@ void WiredTigerSession::closeAllCursors() {
 
 namespace {
 AtomicUInt64 nextCursorId(1);
-AtomicUInt64 sessionsInCache(0);
 }
 // static
 uint64_t WiredTigerSession::genCursorId() {
@@ -121,29 +120,18 @@ uint64_t WiredTigerSession::genCursorId() {
 // -----------------------
 
 WiredTigerSessionCache::WiredTigerSessionCache(WiredTigerKVEngine* engine)
-    : _engine(engine),
-      _conn(engine->getConnection()),
-      _snapshotManager(_conn),
-      _shuttingDown(0),
-      _sessionsOut(0),
-      _highWaterMark(1) {}
+    : _engine(engine), _conn(engine->getConnection()), _snapshotManager(_conn), _shuttingDown(0) {}
 
 WiredTigerSessionCache::WiredTigerSessionCache(WT_CONNECTION* conn)
-    : _engine(NULL),
-      _conn(conn),
-      _snapshotManager(_conn),
-      _shuttingDown(0),
-      _sessionsOut(0),
-      _highWaterMark(1) {}
+    : _engine(NULL), _conn(conn), _snapshotManager(_conn), _shuttingDown(0) {}
 
 WiredTigerSessionCache::~WiredTigerSessionCache() {
     shuttingDown();
 }
 
 void WiredTigerSessionCache::shuttingDown() {
-    if (_shuttingDown.load())
+    if (_shuttingDown.compareAndSwap(0, 1))
         return;
-    _shuttingDown.store(1);
 
     {
         // This ensures that any calls, which are currently inside of getSession/releaseSession
@@ -162,7 +150,7 @@ void WiredTigerSessionCache::closeAll() {
 
     {
         stdx::lock_guard<SpinLock> lock(_cacheLock);
-        _epoch++;
+        _epoch.fetchAndAdd(1);
         _sessions.swap(swap);
     }
 
@@ -178,25 +166,19 @@ WiredTigerSession* WiredTigerSessionCache::getSession() {
     // operations should be allowed to start.
     invariant(!_shuttingDown.loadRelaxed());
 
-    // Set the high water mark if we need to
-    if (_sessionsOut.fetchAndAdd(1) > _highWaterMark.load()) {
-        _highWaterMark.store(_sessionsOut.load());
-    }
-
-    if (!_sessions.empty()) {
+    {
         stdx::lock_guard<SpinLock> lock(_cacheLock);
         if (!_sessions.empty()) {
             // Get the most recently used session so that if we discard sessions, we're
             // discarding older ones
             WiredTigerSession* cachedSession = _sessions.back();
             _sessions.pop_back();
-            sessionsInCache.fetchAndSubtract(1);
             return cachedSession;
         }
     }
 
     // Outside of the cache partition lock, but on release will be put back on the cache
-    return new WiredTigerSession(_conn, _epoch);
+    return new WiredTigerSession(_conn, _epoch.load());
 }
 
 void WiredTigerSessionCache::releaseSession(WiredTigerSession* session) {
@@ -221,32 +203,22 @@ void WiredTigerSessionCache::releaseSession(WiredTigerSession* session) {
         invariant(range == 0);
     }
 
-    _sessionsOut.fetchAndSubtract(1);
-
     bool returnedToCache = false;
-    invariant(session->_getEpoch() <= _epoch);
+    uint64_t currentEpoch = _epoch.load();
 
-    // Only return sessions until we hit the maximum number of sessions we have ever seen demand
-    // for concurrently. We also want to immediately delete any session that is from a
-    // non-current epoch.
-    if (session->_getEpoch() == _epoch && sessionsInCache.load() < _highWaterMark.load()) {
-        returnedToCache = true;
+    if (session->_getEpoch() == currentEpoch) {  // check outside of lock to reduce contention
         stdx::lock_guard<SpinLock> lock(_cacheLock);
-        _sessions.push_back(session);
-    }
+        if (session->_getEpoch() == _epoch.load()) {  // recheck inside the lock for correctness
+            returnedToCache = true;
+            _sessions.push_back(session);
+        }
+    } else
+        invariant(session->_getEpoch() < currentEpoch);
 
-    if (returnedToCache) {
-        sessionsInCache.fetchAndAdd(1);
-    } else {
+    if (!returnedToCache)
         delete session;
-    }
 
-    if (_engine && _engine->haveDropsQueued()) {
+    if (_engine && _engine->haveDropsQueued())
         _engine->dropAllQueued();
-    }
-
-    if (_engine && _engine->haveDropsQueued()) {
-        _engine->dropAllQueued();
-    }
 }
 }

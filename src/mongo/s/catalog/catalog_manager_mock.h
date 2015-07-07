@@ -28,14 +28,10 @@
 
 #pragma once
 
-#include <memory>
-
 #include "mongo/s/catalog/catalog_manager.h"
 #include "mongo/s/catalog/dist_lock_manager_mock.h"
 
 namespace mongo {
-
-class Query;
 
 /**
  * A dummy implementation of CatalogManager for testing purposes.
@@ -61,14 +57,12 @@ public:
                            std::set<ShardId>* initShardIds = nullptr) override;
 
     StatusWith<std::string> addShard(OperationContext* txn,
-                                     const std::string& name,
+                                     const std::string* shardProposedName,
                                      const ConnectionString& shardConnectionString,
                                      const long long maxSize) override;
 
     StatusWith<ShardDrainingStatus> removeShard(OperationContext* txn,
                                                 const std::string& name) override;
-
-    Status createDatabase(const std::string& dbName) override;
 
     Status updateDatabase(const std::string& dbName, const DatabaseType& db) override;
 
@@ -128,6 +122,8 @@ public:
     DistLockManager* getDistLockManager() const override;
 
 private:
+    Status _checkDbDoesNotExist(const std::string& dbName) const override;
+
     std::unique_ptr<DistLockManagerMock> _mockDistLockMgr;
 };
 
