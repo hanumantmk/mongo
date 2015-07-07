@@ -223,7 +223,7 @@ void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObjec
         auto binData = base64::decode(*str);
 
         b->appendBinData(
-            sd, binData.size(), mongo::BinDataType(o.getNumber("type")), binData.c_str());
+            sd, binData.size(), static_cast<mongo::BinDataType>(static_cast<int>(o.getNumber("type"))), binData.c_str());
     } else if (scope->getTimestampProto().instanceOf(obj)) {
         Timestamp ot(o.getNumber("t"), o.getNumber("i"));
         b->append(sd, ot);

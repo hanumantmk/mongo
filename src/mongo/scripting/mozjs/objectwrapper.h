@@ -80,7 +80,7 @@ public:
         union {
             const char* _field;
             uint32_t _idx;
-            JS::HandleId _id;
+            jsid _id;
         };
         Type _type;
     };

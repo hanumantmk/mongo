@@ -37,18 +37,6 @@
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/util/assert_util.h"
 
-#pragma push_macro("HAS_MEMBER_T")
-#pragma push_macro("INSTALL_POINTER")
-#pragma push_macro("INSTALL_VALUE")
-#pragma push_macro("INSTALL_WRAPPED_POINTER")
-#pragma push_macro("WRAPPED_NAME_OR_NULLPTR")
-
-#undef HAS_MEMBER_T
-#undef INSTALL_POINTER
-#undef INSTALL_VALUE
-#undef INSTALL_WRAPPED_POINTER
-#undef WRAPPED_NAME_OR_NULLPTR
-
 // The purpose of this class is to take in specially crafted types and generate
 // a wrapper which installs the type, along with any useful life cycle methods
 // and free functions that might be associated with it. The template magic in
@@ -83,97 +71,10 @@
 
 #define MONGO_ATTACH_JS_FUNCTION(name) MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(name, 0)
 
-
-// HAS_MEMBER_T installs a has_NAME type trait along with NAME_or_nullptr and
-// NAME_or_0 specializations that allow for compile time type introspection for
-// members.  The basic idea here is that absence of an implementation should be
-// handled gracefully, so that users of WrapType can define just what they
-// need.
-#define HAS_MEMBER_T(name)                                                                      \
-    template <typename T>                                                                       \
-    class has_##name {                                                                          \
-    private:                                                                                    \
-        struct fatChar {                                                                        \
-            char x[2];                                                                          \
-        };                                                                                      \
-        template <typename U>                                                                   \
-        class check {};                                                                         \
-        template <typename C>                                                                   \
-        static char f(check<decltype(&C::name)>*);                                              \
-        template <typename C>                                                                   \
-        static fatChar f(...);                                                                  \
-                                                                                                \
-    public:                                                                                     \
-        static const bool value = (sizeof(f<T>(nullptr)) == sizeof(char));                      \
-    };                                                                                          \
-    template <typename T, typename = void>                                                      \
-    struct name##_or_nullptr {                                                                  \
-        std::nullptr_t value;                                                                   \
-    };                                                                                          \
-    template <typename T>                                                                       \
-    struct name##_or_nullptr<T, typename std::enable_if<smUtils::has_##name<T>::value>::type> { \
-        decltype(&T::name) value = &T::name;                                                    \
-    };                                                                                          \
-    template <typename T, typename = void>                                                      \
-    struct name##_or_0 {                                                                        \
-        unsigned value = 0;                                                                     \
-    };                                                                                          \
-    template <typename T>                                                                       \
-    struct name##_or_0<T, typename std::enable_if<smUtils::has_##name<T>::value>::type> {       \
-        decltype(T::name) value = T::name;                                                      \
-    };
-
-// WRAPPED_NAME_OR_NULLPTR needs to see the wrapped implementations on smUtils
-#define WRAPPED_NAME_OR_NULLPTR(name)                                   \
-    template <typename T, typename = void>                              \
-    struct wrapped_##name##_or_nullptr {                                \
-        std::nullptr_t value;                                           \
-    };                                                                  \
-    template <typename T>                                               \
-    struct wrapped_##name##_or_nullptr<                                 \
-        T,                                                              \
-        typename std::enable_if<smUtils::has_##name<T>::value>::type> { \
-        decltype(&name<T>) value = &name<T>;                            \
-    };
-
-// These install values on the wrapped type that we can use in C++
-#define INSTALL_POINTER(name)                                            \
-    const decltype(smUtils::name##_or_nullptr<T>().value) addrOf##name = \
-        smUtils::name##_or_nullptr<T>().value;
-
-#define INSTALL_WRAPPED_POINTER(name)                                              \
-    const decltype(smUtils::wrapped_##name##_or_nullptr<T>().value) addrOf##name = \
-        smUtils::wrapped_##name##_or_nullptr<T>().value;
-
-#define INSTALL_VALUE(name) \
-    const decltype(smUtils::name##_or_0<T>().value) valueOf##name = smUtils::name##_or_0<T>().value;
-
 namespace mongo {
 namespace mozjs {
 
-enum class InstallType : char {
-    Global = 0,
-    Private,
-    OverNative,
-};
-
 namespace smUtils {
-// First we install all the basic type introspection facilities
-HAS_MEMBER_T(addProperty)
-HAS_MEMBER_T(call)
-HAS_MEMBER_T(classFlags)
-HAS_MEMBER_T(construct)
-HAS_MEMBER_T(convert)
-HAS_MEMBER_T(delProperty)
-HAS_MEMBER_T(enumerate)
-HAS_MEMBER_T(finalize)
-HAS_MEMBER_T(getProperty)
-HAS_MEMBER_T(hasInstance)
-HAS_MEMBER_T(installType)
-HAS_MEMBER_T(postInstall)
-HAS_MEMBER_T(resolve)
-HAS_MEMBER_T(setProperty)
-HAS_MEMBER_T(trace)
 
 // Now all the spidermonkey type methods
 template <typename T>
@@ -293,67 +194,36 @@ static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* 
     }
 };
 
-// Now all the wrappers for the life cycle methods that need them
-WRAPPED_NAME_OR_NULLPTR(addProperty)
-WRAPPED_NAME_OR_NULLPTR(call)
-WRAPPED_NAME_OR_NULLPTR(construct)
-WRAPPED_NAME_OR_NULLPTR(convert)
-WRAPPED_NAME_OR_NULLPTR(delProperty)
-WRAPPED_NAME_OR_NULLPTR(enumerate)
-WRAPPED_NAME_OR_NULLPTR(getProperty)
-WRAPPED_NAME_OR_NULLPTR(hasInstance)
-WRAPPED_NAME_OR_NULLPTR(resolve)
-WRAPPED_NAME_OR_NULLPTR(setProperty)
 }  // namespace smUtils
 
 template <typename T>
 class WrapType : public T {
-    // Yep, finalize should never throw
-    INSTALL_POINTER(finalize)
-    INSTALL_POINTER(trace)
-    INSTALL_POINTER(postInstall)
-
-    // None of these are directly callbacks
-    INSTALL_VALUE(classFlags)
-    INSTALL_VALUE(installType)
-
-    // All of these types can throw
-    INSTALL_WRAPPED_POINTER(addProperty)
-    INSTALL_WRAPPED_POINTER(call)
-    INSTALL_WRAPPED_POINTER(construct)
-    INSTALL_WRAPPED_POINTER(convert)
-    INSTALL_WRAPPED_POINTER(delProperty)
-    INSTALL_WRAPPED_POINTER(enumerate)
-    INSTALL_WRAPPED_POINTER(getProperty)
-    INSTALL_WRAPPED_POINTER(hasInstance)
-    INSTALL_WRAPPED_POINTER(resolve)
-    INSTALL_WRAPPED_POINTER(setProperty)
 
 public:
     WrapType(JSContext* context)
         : _context(context),
           _proto(),
           _jsclass({T::className,
-                    valueOfclassFlags,
-                    addrOfaddProperty,
-                    addrOfdelProperty,
-                    addrOfgetProperty,
-                    addrOfsetProperty,
+                    T::classFlags,
+                    T::addProperty != BaseInfo::addProperty ? smUtils::addProperty<T> : nullptr,
+                    T::delProperty != BaseInfo::delProperty ? smUtils::delProperty<T> : nullptr,
+                    T::getProperty != BaseInfo::getProperty ? smUtils::getProperty<T> : nullptr,
+                    T::setProperty != BaseInfo::setProperty ? smUtils::setProperty<T> : nullptr,
                     // We don't use the regular enumerate because we want the fancy new one
                     nullptr,
-                    addrOfresolve,
-                    addrOfconvert,
-                    addrOffinalize,
-                    addrOfcall,
-                    addrOfhasInstance,
-                    addrOfconstruct,
-                    addrOftrace}) {
-        _installEnumerate(addrOfenumerate);
+                    T::resolve != BaseInfo::resolve ? smUtils::resolve<T> : nullptr,
+                    T::convert != BaseInfo::convert ? smUtils::convert<T> : nullptr,
+                    T::finalize,
+                    T::call != BaseInfo::call ? smUtils::call<T> : nullptr,
+                    T::hasInstance != BaseInfo::hasInstance ? smUtils::hasInstance<T> : nullptr,
+                    T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr,
+                    nullptr}) {
+        _installEnumerate(T::enumerate != BaseInfo::enumerate ? smUtils::enumerate<T> : nullptr);
 
         // The global object is different.  We need it for basic setup
         // before the other types are installed.  Might as well just do it
         // in the constructor.
-        if (valueOfclassFlags & JSCLASS_GLOBAL_FLAGS) {
+        if (T::classFlags & JSCLASS_GLOBAL_FLAGS) {
             JS::RootedObject proto(_context);
 
             _proto.init(_context,
@@ -371,7 +241,7 @@ public:
     }
 
     void install(JS::HandleObject global) {
-        switch (static_cast<InstallType>(valueOfinstallType)) {
+        switch (static_cast<InstallType>(T::installType)) {
             case InstallType::Global:
                 _installGlobal(global);
                 break;
@@ -465,7 +335,7 @@ private:
                                             global,
                                             parent,
                                             &_jsclass,
-                                            addrOfconstruct,
+                                            T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr,
                                             0,
                                             nullptr,
                                             T::methods,
@@ -473,7 +343,7 @@ private:
                                             nullptr)));
 
         _installFunctions(global, T::freeFunctions);
-        _postInstall(global, addrOfpostInstall);
+        _postInstall(global, T::postInstall);
     }
 
     // Use this if you want your types installed, but not visible in the
@@ -492,9 +362,9 @@ private:
         _installFunctions(_proto, T::methods);
         _installFunctions(global, T::freeFunctions);
 
-        _installConstructor(addrOfconstruct);
+        _installConstructor(T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr);
 
-        _postInstall(global, addrOfpostInstall);
+        _postInstall(global, T::postInstall);
     }
 
     // Use this to attach things to types that we don't provide like
@@ -512,7 +382,7 @@ private:
 
         _installFunctions(_proto, T::methods);
         _installFunctions(global, T::freeFunctions);
-        _postInstall(global, addrOfpostInstall);
+        _postInstall(global, T::postInstall);
     }
 
     void _installFunctions(JS::HandleObject global, const JSFunctionSpec* fs) {
@@ -602,15 +472,3 @@ private:
 
 }  // namespace mozjs
 }  // namespace mongo
-
-#undef HAS_MEMBER_T
-#undef INSTALL_POINTER
-#undef INSTALL_VALUE
-#undef INSTALL_WRAPPED_POINTER
-#undef WRAPPED_NAME_OR_NULLPTR
-
-#pragma pop_macro("HAS_MEMBER_T")
-#pragma pop_macro("INSTALL_POINTER")
-#pragma pop_macro("INSTALL_VALUE")
-#pragma pop_macro("INSTALL_WRAPPED_POINTER")
-#pragma pop_macro("WRAPPED_NAME_OR_NULLPTR")

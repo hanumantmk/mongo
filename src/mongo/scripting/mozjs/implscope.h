@@ -284,11 +284,11 @@ private:
     WrapType<GlobalInfo> _globalProto;
     JS::HandleObject _global;
     std::vector<JS::PersistentRootedValue> _funcs;
-    std::atomic_bool _pendingKill;
+    std::atomic<bool> _pendingKill;
     std::string _error;
     unsigned int _opId;        // op id for this scope
     OperationContext* _opCtx;  // Op context for DbEval
-    std::atomic_bool _pendingGC;
+    std::atomic<bool> _pendingGC;
     ConnectState _connectState;
     Status _status;
 

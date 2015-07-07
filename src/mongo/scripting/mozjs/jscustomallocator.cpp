@@ -38,6 +38,8 @@
 #include <malloc.h>
 #elif defined(__APPLE__)
 #include <malloc/malloc.h>
+#elif defined(_WIN32)
+#include <malloc.h>
 #else
 #error "need some kind of malloc usable size"
 #endif

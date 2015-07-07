@@ -32,6 +32,7 @@
 
 #include "mongo/scripting/mozjs/valuereader.h"
 
+#include <cstdio>
 #include <js/CharacterEncoding.h>
 
 #include "mongo/base/error_codes.h"
@@ -87,7 +88,7 @@ void ValueReader::fromBSONElement(const BSONElement& elem, bool readOnly) {
                 // We use an unsigned 32 bit integer, so 10 base 10 digits and
                 // 1 null byte
                 char str[11];
-                snprintf(str, sizeof(str), "%i", i++);
+                sprintf(str, "%i", i++);
                 JS::RootedValue member(_context);
 
                 ValueReader(_context, &member, _depth + 1).fromBSONElement(subElem, readOnly);
