@@ -2,7 +2,7 @@
 
 if [ $# -ne 2 ]
 then
-    echo "Please supply an arch: x86_64, i386, etc and a platform: osx, linux, windows, etc"
+    echo "Please supply an arch: x86_64, x86, etc and a platform: osx, linux, windows, etc"
     exit 0;
 fi
 
@@ -12,7 +12,7 @@ fi
 
 cd mozilla-release/js/src
 
-PYTHON=python ./configure --without-intl-api --enable-posix-nspr-emulation
+PYTHON=python CCFLAGS="-m32" CFLAGS="-m32" LINKFLAGS="-m32" ./configure --without-intl-api --enable-posix-nspr-emulation --target=i686
 
 cd ../../..
 
