@@ -78,7 +78,7 @@ MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t max_bytes;
  * We know kMaxAlign is enough (generally 8 or 16 bytes), because that's
  * literally the contract between malloc and std::max_align_t.
  */
-//const size_t kMaxAlign = std::alignment_of<std::max_align_t>::value;
+// const size_t kMaxAlign = std::alignment_of<std::max_align_t>::value;
 const size_t kMaxAlign = 16;
 }  // namespace
 
