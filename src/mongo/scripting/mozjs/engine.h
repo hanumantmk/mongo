@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <jsapi.h>
 #include <unordered_map>
 
 #include "mongo/scripting/deadline_monitor.h"
@@ -75,6 +76,14 @@ public:
 
 private:
     std::string printKnownOps_inlock();
+
+    /**
+     * We need to make one at engine creation because there are some function
+     * statics that race on first runtime creation. We keep a handle because
+     * none of that was documented and having a root runtime matches what
+     * firefox does internally a bit better.
+     */
+    JSRuntime* _runtime;
 
     /**
      * This mutex protects _opToScopeMap

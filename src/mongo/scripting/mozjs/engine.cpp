@@ -26,10 +26,6 @@
  * then also delete it in the license file.
  */
 
-#include "mongo/platform/basic.h"
-
-#include "mongo/scripting/mozjs/engine.h"
-
 #define MONGO_LOG_DEFAULT_COMPONENT ::mongo::logger::LogComponent::kQuery
 
 #include "mongo/platform/basic.h"
@@ -61,9 +57,12 @@ namespace mozjs {
 
 MozJSScriptEngine::MozJSScriptEngine() {
     uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_Init()", JS_Init());
+    _runtime = JS_NewRuntime(8 * 1024 * 1024);
+    uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_NewRuntime()", _runtime);
 }
 
 MozJSScriptEngine::~MozJSScriptEngine() {
+    JS_DestroyRuntime(_runtime);
     JS_ShutDown();
 }
 
