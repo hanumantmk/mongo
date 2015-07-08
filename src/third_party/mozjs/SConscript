@@ -31,6 +31,11 @@ if env.TargetOSIs('windows'):
             '/FI', 'js-confdefs.h'
             ])
 else:
+    if env.TargetOSIs('solaris'):
+        env.Prepend(CCFLAGS=[
+            '-include', 'solaris_hacks.h'
+        ])
+
     env.Prepend(CCFLAGS=[
             '-include', 'js-confdefs.h',
             '-Wno-non-virtual-dtor',

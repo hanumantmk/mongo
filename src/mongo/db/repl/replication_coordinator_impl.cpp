@@ -347,7 +347,7 @@ void ReplicationCoordinatorImpl::_finishLoadLocalConfig(
         lk.unlock();
     }
     _performPostMemberStateUpdateAction(action);
-    _externalState->startThreads();
+    _externalState->startThreads(&_replExecutor);
 }
 
 void ReplicationCoordinatorImpl::startReplication(OperationContext* txn) {
@@ -1983,7 +1983,7 @@ Status ReplicationCoordinatorImpl::processReplSetInitiate(OperationContext* txn,
     if (status.isOK()) {
         // Create the oplog with the first entry, and start repl threads.
         _externalState->initiateOplog(txn);
-        _externalState->startThreads();
+        _externalState->startThreads(&_replExecutor);
     }
     return status;
 }
@@ -2029,7 +2029,6 @@ ReplicationCoordinatorImpl::_updateMemberStateFromTopologyCoordinator_inlock() {
             info->master = false;
             info->condVar->notify_all();
         }
-        _isWaitingForDrainToComplete = false;
         _canAcceptNonLocalWrites = false;
         result = kActionCloseAllConnections;
     } else {

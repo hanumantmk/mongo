@@ -115,14 +115,6 @@ void toBatchError(const Status& status, BatchedCommandResponse* response) {
     dassert(response->isValid(NULL));
 }
 
-BSONObj buildRemoveLogEntry(const string& shardName, bool isDraining) {
-    BSONObjBuilder details;
-    details.append("shard", shardName);
-    details.append("isDraining", isDraining);
-
-    return details.obj();
-}
-
 }  // namespace
 
 
@@ -284,52 +276,19 @@ void CatalogManagerLegacy::shutDown() {
     _distLockManager->shutDown();
 }
 
-Status CatalogManagerLegacy::enableSharding(const std::string& dbName) {
-    invariant(nsIsDbOnly(dbName));
-
-    DatabaseType db;
-
-    // Check for case sensitivity violations
-    Status status = _checkDbDoesNotExist(dbName);
-    if (status.isOK()) {
-        // Database does not exist, create a new entry
-        auto newShardIdStatus = selectShardForNewDatabase(grid.shardRegistry());
-        if (!newShardIdStatus.isOK()) {
-            return newShardIdStatus.getStatus();
-        }
-
-        const ShardId& newShardId = newShardIdStatus.getValue();
-
-        log() << "Placing [" << dbName << "] on: " << newShardId;
-
-        db.setName(dbName);
-        db.setPrimary(newShardId);
-        db.setSharded(true);
-    } else if (status.code() == ErrorCodes::NamespaceExists) {
-        // Database exists, so just update it
-        StatusWith<DatabaseType> dbStatus = getDatabase(dbName);
-        if (!dbStatus.isOK()) {
-            return dbStatus.getStatus();
-        }
-
-        db = dbStatus.getValue();
-        db.setSharded(true);
-    } else {
-        // Some fatal error
-        return status;
-    }
-
-    log() << "Enabling sharding for database [" << dbName << "] in config db";
-
-    return updateDatabase(dbName, db);
-}
-
 Status CatalogManagerLegacy::shardCollection(OperationContext* txn,
                                              const string& ns,
                                              const ShardKeyPattern& fieldsAndOrder,
                                              bool unique,
                                              vector<BSONObj>* initPoints,
                                              set<ShardId>* initShardIds) {
+    // Lock the collection globally so that no other mongos can try to shard or drop the collection
+    // at the same time.
+    auto scopedDistLock = getDistLockManager()->lock(ns, "shardCollection");
+    if (!scopedDistLock.isOK()) {
+        return scopedDistLock.getStatus();
+    }
+
     StatusWith<DatabaseType> status = getDatabase(nsToDatabase(ns));
     if (!status.isOK()) {
         return status.getStatus();
@@ -554,27 +513,12 @@ StatusWith<ShardDrainingStatus> CatalogManagerLegacy::removeShard(OperationConte
             return status;
         }
 
-        BSONObj primaryLocalDoc = BSON(DatabaseType::name("local") << DatabaseType::primary(name));
-        log() << "primaryLocalDoc: " << primaryLocalDoc;
-        if (conn->count(DatabaseType::ConfigNS, primaryLocalDoc)) {
-            log() << "This shard is listed as primary of local db. Removing entry.";
-
-            Status status =
-                remove(DatabaseType::ConfigNS, BSON(DatabaseType::name("local")), 0, NULL);
-            if (!status.isOK()) {
-                log() << "error removing local db: " << status.reason();
-                return status;
-            }
-        }
-
         Shard::reloadShardInfo();
         conn.done();
 
         // Record start in changelog
-        logChange(txn->getClient()->clientAddress(true),
-                  "removeShard.start",
-                  "",
-                  buildRemoveLogEntry(name, true));
+        logChange(
+            txn->getClient()->clientAddress(true), "removeShard.start", "", BSON("shard" << name));
         return ShardDrainingStatus::STARTED;
     }
 
@@ -586,7 +530,7 @@ StatusWith<ShardDrainingStatus> CatalogManagerLegacy::removeShard(OperationConte
                     BSON(DatabaseType::name.ne("local") << DatabaseType::primary(name)));
     if (chunkCount == 0 && dbCount == 0) {
         log() << "going to remove shard: " << name;
-        audit::logRemoveShard(ClientBasic::getCurrent(), name);
+        audit::logRemoveShard(txn->getClient(), name);
 
         Status status = remove(ShardType::ConfigNS, searchDoc, 0, NULL);
         if (!status.isOK()) {
@@ -596,18 +540,11 @@ StatusWith<ShardDrainingStatus> CatalogManagerLegacy::removeShard(OperationConte
         }
 
         grid.shardRegistry()->remove(name);
-
-        shardConnectionPool.removeHost(name);
-        ReplicaSetMonitor::remove(name);
-
         Shard::reloadShardInfo();
         conn.done();
 
         // Record finish in changelog
-        logChange(txn->getClient()->clientAddress(true),
-                  "removeShard",
-                  "",
-                  buildRemoveLogEntry(name, false));
+        logChange(txn->getClient()->clientAddress(true), "removeShard", "", BSON("shard" << name));
         return ShardDrainingStatus::COMPLETED;
     }
 
@@ -826,7 +763,7 @@ void CatalogManagerLegacy::logChange(const string& clientAddress,
     if (_changeLogCollectionCreated.load() == 0) {
         try {
             ScopedDbConnection conn(_configServerConnectionString, 30.0);
-            conn->createCollection(ChangelogType::ConfigNS, 1024 * 1024 * 10, true);
+            conn->createCollection(ChangeLogType::ConfigNS, 1024 * 1024 * 10, true);
             conn.done();
 
             _changeLogCollectionCreated.store(1);
@@ -842,26 +779,30 @@ void CatalogManagerLegacy::logChange(const string& clientAddress,
         }
     }
 
-    // Store this entry's ID so we can use on the exception code path too
-    StringBuilder changeIdBuilder;
-    changeIdBuilder << getHostNameCached() << "-" << Date_t::now().toString() << "-" << OID::gen();
+    ChangeLogType changeLog;
+    {
+        // Store this entry's ID so we can use on the exception code path too
+        StringBuilder changeIdBuilder;
+        changeIdBuilder << getHostNameCached() << "-" << Date_t::now().toString() << "-"
+                        << OID::gen();
+        changeLog.setChangeId(changeIdBuilder.str());
+    }
+    changeLog.setServer(getHostNameCached());
+    changeLog.setClientAddr(clientAddress);
+    changeLog.setTime(Date_t::now());
+    changeLog.setWhat(what);
+    changeLog.setNS(ns);
+    changeLog.setDetails(detail);
 
-    const string changeID = changeIdBuilder.str();
-
+    BSONObj changeLogBSON = changeLog.toBSON();
     // Send a copy of the message to the local log in case it doesn't manage to reach
     // config.changelog
-    BSONObj msg = BSON(ChangelogType::changeID(changeID)
-                       << ChangelogType::server(getHostNameCached())
-                       << ChangelogType::clientAddr(clientAddress)
-                       << ChangelogType::time(Date_t::now()) << ChangelogType::what(what)
-                       << ChangelogType::ns(ns) << ChangelogType::details(detail));
+    log() << "about to log metadata event: " << changeLogBSON;
 
-    log() << "about to log metadata event: " << msg;
-
-    Status result = insert(ChangelogType::ConfigNS, msg, NULL);
+    Status result = insert(ChangeLogType::ConfigNS, changeLogBSON, NULL);
     if (!result.isOK()) {
-        warning() << "Error encountered while logging config change with ID " << changeID << ": "
-                  << result;
+        warning() << "Error encountered while logging config change with ID "
+                  << changeLog.getChangeId() << ": " << result;
     }
 }
 
@@ -1232,7 +1173,8 @@ void CatalogManagerLegacy::writeConfigServerDirect(const BatchedCommandRequest& 
     exec.executeBatch(request, response);
 }
 
-Status CatalogManagerLegacy::_checkDbDoesNotExist(const std::string& dbName) const {
+Status CatalogManagerLegacy::_checkDbDoesNotExist(const std::string& dbName,
+                                                  DatabaseType* db) const {
     ScopedDbConnection conn(_configServerConnectionString, 30);
 
     BSONObjBuilder b;
@@ -1244,6 +1186,15 @@ Status CatalogManagerLegacy::_checkDbDoesNotExist(const std::string& dbName) con
     // If our name is exactly the same as the name we want, try loading
     // the database again.
     if (!dbObj.isEmpty() && dbObj[DatabaseType::name()].String() == dbName) {
+        if (db) {
+            auto parseDBStatus = DatabaseType::fromBSON(dbObj);
+            if (!parseDBStatus.isOK()) {
+                return parseDBStatus.getStatus();
+            }
+
+            *db = parseDBStatus.getValue();
+        }
+
         return Status(ErrorCodes::NamespaceExists,
                       str::stream() << "database " << dbName << " already exists");
     }

@@ -35,6 +35,8 @@
 
 namespace mongo {
 
+class NamespaceString;
+
 /**
  * Implements the catalog manager for talking to replica set config servers.
  */
@@ -56,8 +58,6 @@ public:
     ConnectionString connectionString() const override;
 
     void shutDown() override;
-
-    Status enableSharding(const std::string& dbName) override;
 
     Status shardCollection(OperationContext* txn,
                            const std::string& ns,
@@ -128,7 +128,7 @@ public:
     DistLockManager* getDistLockManager() const override;
 
 private:
-    Status _checkDbDoesNotExist(const std::string& dbName) const override;
+    Status _checkDbDoesNotExist(const std::string& dbName, DatabaseType* db) const override;
 
     /**
      * Helper for running commands against the config server with logic for retargeting and
@@ -143,6 +143,14 @@ private:
      */
     StatusWith<BSONObj> _runConfigServerCommandWithNotMasterRetries(const std::string& dbName,
                                                                     const BSONObj& cmdObj);
+
+    /**
+     * Helper method for running a count command against a given target server with appropriate
+     * error handling.
+     */
+    StatusWith<long long> _runCountCommand(const HostAndPort& target,
+                                           const NamespaceString& ns,
+                                           BSONObj query);
 
     // Config server connection string
     ConnectionString _configServerConnectionString;

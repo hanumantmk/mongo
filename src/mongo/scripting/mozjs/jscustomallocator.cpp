@@ -28,6 +28,8 @@
 
 #include "mongo/platform/basic.h"
 
+#include <cstddef>
+#include <type_traits>
 #include <jscustomallocator.h>
 
 #include "mongo/config.h"
@@ -41,7 +43,7 @@
 #elif defined(_WIN32)
 #include <malloc.h>
 #else
-#error "need some kind of malloc usable size"
+#define MONGO_NO_MALLOC_USABLE_SIZE
 #endif
 
 /**
@@ -68,6 +70,16 @@ namespace {
  */
 MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t total_bytes;
 MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t max_bytes;
+
+/**
+ * When we don't have malloc_usable_size, we manage by adjusting our pointer by
+ * kMaxAlign bytes and storing the size of the allocation kMaxAlign bytes
+ * behind the pointer we hand back. That let's us get to the value at runtime.
+ * We know kMaxAlign is enough (generally 8 or 16 bytes), because that's
+ * literally the contract between malloc and std::max_align_t.
+ */
+//const size_t kMaxAlign = std::alignment_of<std::max_align_t>::value;
+const size_t kMaxAlign = 16;
 }  // namespace
 
 size_t get_total_bytes() {
@@ -83,8 +95,16 @@ size_t get_max_bytes() {
     return max_bytes;
 }
 
+/**
+ * Wraps std::Xalloc functions
+ *
+ * The idea here is to abstract soft limits on allocations, as well as possibly
+ * necessary pointer adjustment (if we don't have a malloc_usable_size
+ * replacement).
+ *
+ */
 template <typename T>
-void* wrap_alloc(T&& func, size_t bytes) {
+void* wrap_alloc(T&& func, void* ptr, size_t bytes) {
     size_t mb = get_max_bytes();
     size_t tb = get_total_bytes();
 
@@ -97,11 +117,20 @@ void* wrap_alloc(T&& func, size_t bytes) {
         return nullptr;
     }
 
-    void* p = func(bytes);
+#ifdef MONGO_NO_MALLOC_USABLE_SIZE
+    void* p = func(ptr ? static_cast<char*>(ptr) - kMaxAlign : nullptr, bytes + kMaxAlign);
+#else
+    void* p = func(ptr, bytes);
+#endif
 
     if (!p) {
         return nullptr;
     }
+
+#ifdef MONGO_NO_MALLOC_USABLE_SIZE
+    *reinterpret_cast<size_t*>(p) = bytes;
+    p = static_cast<char*>(p) + kMaxAlign;
+#endif
 
     total_bytes = tb + bytes;
 
@@ -109,14 +138,19 @@ void* wrap_alloc(T&& func, size_t bytes) {
 }
 
 size_t get_current(void* ptr) {
-#if defined(__linux__)
+#ifdef MONGO_NO_MALLOC_USABLE_SIZE
+    if (!ptr)
+        return 0;
+
+    return *reinterpret_cast<size_t*>(static_cast<char*>(ptr) - kMaxAlign);
+#elif defined(__linux__)
     return malloc_usable_size(ptr);
 #elif defined(__APPLE__)
     return malloc_size(ptr);
 #elif defined(_WIN32)
     return _msize(ptr);
 #else
-#error "Must have something like malloc_usable_size"
+#error "Should be unreachable"
 #endif
 }
 
@@ -124,15 +158,18 @@ size_t get_current(void* ptr) {
 }  // namespace mongo
 
 void* js_malloc(size_t bytes) {
-    return mongo::sm::wrap_alloc(std::malloc, bytes);
+    return mongo::sm::wrap_alloc(
+        [](void* ptr, size_t b) { return std::malloc(b); }, nullptr, bytes);
 }
 
 void* js_calloc(size_t bytes) {
-    return mongo::sm::wrap_alloc([](size_t b) { return std::calloc(b, 1); }, bytes);
+    return mongo::sm::wrap_alloc(
+        [](void* ptr, size_t b) { return std::calloc(b, 1); }, nullptr, bytes);
 }
 
 void* js_calloc(size_t nmemb, size_t size) {
-    return mongo::sm::wrap_alloc([](size_t b) { return std::calloc(b, 1); }, nmemb * size);
+    return mongo::sm::wrap_alloc(
+        [](void* ptr, size_t b) { return std::calloc(b, 1); }, nullptr, nmemb * size);
 }
 
 void js_free(void* p) {
@@ -146,7 +183,10 @@ void js_free(void* p) {
         mongo::sm::total_bytes = tb - current;
     }
 
-    std::free(p);
+    mongo::sm::wrap_alloc([](void* ptr, size_t b) {
+        std::free(ptr);
+        return nullptr;
+    }, p, 0);
 }
 
 void* js_realloc(void* p, size_t bytes) {
@@ -171,7 +211,8 @@ void* js_realloc(void* p, size_t bytes) {
         mongo::sm::total_bytes = tb - current;
     }
 
-    return mongo::sm::wrap_alloc([p](size_t b) { return std::realloc(p, b); }, bytes);
+    return mongo::sm::wrap_alloc(
+        [](void* ptr, size_t b) { return std::realloc(ptr, b); }, p, bytes);
 }
 
 char* js_strdup(const char* s) {

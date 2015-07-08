@@ -2,7 +2,7 @@
 
 if [ $# -ne 2 ]
 then
-    echo "Please supply an arch: x86_64, x86, etc and a platform: osx, linux, windows, etc"
+    echo "Please supply an arch: x86_64, i386, etc and a platform: osx, linux, windows, etc"
     exit 0;
 fi
 

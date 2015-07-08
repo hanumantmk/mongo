@@ -875,6 +875,38 @@ tasks:
       resmoke_args: --suites=concurrency --storageEngine=wiredTiger
 
 - <<: *task_template
+  name: concurrency_replication
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency_replication --storageEngine=mmapv1
+
+- <<: *task_template
+  name: concurrency_replication_WT
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency_replication --storageEngine=wiredTiger
+
+- <<: *task_template
+  name: concurrency_sharded
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency_sharded --storageEngine=mmapv1
+
+- <<: *task_template
+  name: concurrency_sharded_WT
+  commands:
+  - func: "do setup"
+  - func: "run tests"
+    vars:
+      resmoke_args: --suites=concurrency_sharded --storageEngine=wiredTiger
+
+- <<: *task_template
   name: rlp
   commands:
   - func: "do setup"
@@ -1514,6 +1546,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -1588,6 +1624,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -1650,6 +1690,8 @@ buildvariants:
   - name: parallel
   - name: parallel_compatibility
   - name: concurrency
+  - name: concurrency_replication
+  - name: concurrency_sharded
   - name: replicasets
   - name: replicasets_auth
   - name: replication
@@ -1697,6 +1739,8 @@ buildvariants:
   - name: parallel_WT
   - name: parallel_compatibility_WT
   - name: concurrency_WT
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded_WT
   - name: replicasets_WT
   - name: replication_WT
   - name: sharding_WT
@@ -1772,6 +1816,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -1860,6 +1908,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -1998,6 +2050,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -2157,6 +2213,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2225,6 +2285,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2292,6 +2356,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2395,6 +2463,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2513,6 +2585,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2588,6 +2664,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replication
@@ -2827,6 +2907,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -2915,6 +2999,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -3003,6 +3091,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -3204,6 +3296,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -3252,6 +3348,10 @@ buildvariants:
   - name: bulk_gle_passthrough_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: dbtest
   - name: dbtest_WT
   - name: disk
@@ -3397,6 +3497,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -3464,6 +3568,8 @@ buildvariants:
   - name: parallel
   - name: parallel_compatibility
   - name: concurrency
+  - name: concurrency_replication
+  - name: concurrency_sharded
   - name: replicasets
   - name: replicasets_auth
   - name: replication
@@ -3541,6 +3647,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
@@ -3628,6 +3738,10 @@ buildvariants:
   - name: parallel_compatibility_WT
   - name: concurrency
   - name: concurrency_WT
+  - name: concurrency_replication
+  - name: concurrency_replication_WT
+  - name: concurrency_sharded
+  - name: concurrency_sharded_WT
   - name: replicasets
   - name: replicasets_WT
   - name: replicasets_auth
