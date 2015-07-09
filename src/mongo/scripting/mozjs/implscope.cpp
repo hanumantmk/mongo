@@ -40,6 +40,7 @@
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
+#include "mongo/stdx/mutex.h"
 #include "mongo/util/concurrency/threadlocal.h"
 #include "mongo/util/log.h"
 
@@ -74,6 +75,13 @@ const int kMaxBytesBeforeGC = 8 * 1024 * 1024;
  * from mozilla
  */
 const int kStackChunkSize = 8192;
+
+/**
+ * Runtime's can race on first creation (on some function statics), so we just
+ * serialize the initial Runtime creation.
+ */
+stdx::mutex gRuntimeCreationMutex;
+bool gFirstRuntimeCreated = false;
 
 }  // namespace
 
@@ -161,7 +169,21 @@ void MozJSImplScope::_gcCallback(JSRuntime* rt, JSGCStatus status, void* data) {
 MozJSImplScope::MozRuntime::MozRuntime() {
     mongo::sm::reset(kMallocMemoryLimit);
 
-    _runtime = JS_NewRuntime(kMaxBytesBeforeGC);
+    {
+        stdx::unique_lock<stdx::mutex> lk(gRuntimeCreationMutex);
+
+        if (gFirstRuntimeCreated) {
+            // If we've already made a runtime, just proceed
+            lk.unlock();
+        } else {
+            // If this is the first one, hold the lock until after the first
+            // one's done
+            gFirstRuntimeCreated = true;
+        }
+
+        _runtime = JS_NewRuntime(kMaxBytesBeforeGC);
+    }
+
     uassert(ErrorCodes::JSInterpreterFailure, "Failed to initialize JSRuntime", _runtime);
 
     _context = JS_NewContext(_runtime, kStackChunkSize);

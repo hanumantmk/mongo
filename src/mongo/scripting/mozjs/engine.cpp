@@ -57,12 +57,9 @@ namespace mozjs {
 
 MozJSScriptEngine::MozJSScriptEngine() {
     uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_Init()", JS_Init());
-    _runtime = JS_NewRuntime(8 * 1024 * 1024);
-    uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_NewRuntime()", _runtime);
 }
 
 MozJSScriptEngine::~MozJSScriptEngine() {
-    JS_DestroyRuntime(_runtime);
     JS_ShutDown();
 }
 
