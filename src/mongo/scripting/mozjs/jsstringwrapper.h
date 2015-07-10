@@ -52,9 +52,9 @@ public:
     explicit operator bool() const;
 
 private:
-    JSContext* _context;
+    JSContext* _context = nullptr;
     std::unique_ptr<char[]> _str;
-    size_t _length;
+    size_t _length = 0;
 };
 
 }  // namespace mozjs

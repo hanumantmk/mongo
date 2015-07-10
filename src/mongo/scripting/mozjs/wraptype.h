@@ -212,7 +212,7 @@ public:
                     nullptr,
                     T::resolve != BaseInfo::resolve ? smUtils::resolve<T> : nullptr,
                     T::convert != BaseInfo::convert ? smUtils::convert<T> : nullptr,
-                    T::finalize,
+                    T::finalize != BaseInfo::finalize ? T::finalize : nullptr,
                     T::call != BaseInfo::call ? smUtils::call<T> : nullptr,
                     T::hasInstance != BaseInfo::hasInstance ? smUtils::hasInstance<T> : nullptr,
                     T::construct != BaseInfo::construct ? smUtils::construct<T> : nullptr,

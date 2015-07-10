@@ -208,8 +208,14 @@ public:
 
         // An error is logged for an invalid statement when reportError == true.
         ASSERT(!scope->exec("notAFunction()", "foo", false, true, false));
-        // Commenting out because we run MozJS in a child thread
-        // ASSERT(_logger.logged());
+
+        // Don't check if we're using SpiderMonkey. Our threading model breaks
+        // this test
+        // TODO: figure out a way to check for SpiderMonkey
+        auto ivs = globalScriptEngine->getInterpreterVersionString();
+        if (ivs.compare(0, ivs.length(), "MozJS") != 0) {
+            ASSERT(_logger.logged());
+        }
     }
 
 private:
@@ -232,8 +238,14 @@ public:
         } catch (const DBException&) {
             // ignore the exception; just test that we logged something
         }
-        // Commenting out because we run MozJS in a child thread
-        // ASSERT(_logger.logged());
+
+        // Don't check if we're using SpiderMonkey. Our threading model breaks
+        // this test
+        // TODO: figure out a way to check for SpiderMonkey
+        auto ivs = globalScriptEngine->getInterpreterVersionString();
+        if (ivs.compare(0, ivs.length(), "MozJS") != 0) {
+            ASSERT(_logger.logged());
+        }
     }
 
 private:
@@ -394,46 +406,39 @@ public:
         BSONObj out;
 
         /**
-         * TODO
+         * TODO remove the v8 tests after we switch over
          *
-         * All of these throw uasserts under spidermonkey because we're
-         * switching from silently failing (and logging to stdout) to throwing
-         * a js exception that is uncaught and turned into a user assertion.
-         * After the switch to SpiderMonkey we should verify that these assert.
+         * Note that we've changed behavior so that uncaught js exceptions that
+         * bubble up actually convert into user exceptions, instead of just
+         * logging to stdout and silently failing otherwise.
          */
-        try {
+        auto ivs = globalScriptEngine->getInterpreterVersionString();
+        if (ivs.compare(0, ivs.length(), "MozJS") == 0) {
+            ASSERT_THROWS(s->invoke("blah.y = 'e'", 0, 0), mongo::UserException);
+            ASSERT_THROWS(s->invoke("blah.a = 19;", 0, 0), mongo::UserException);
+            ASSERT_THROWS(s->invoke("blah.zz.a = 19;", 0, 0), mongo::UserException);
+            ASSERT_THROWS(s->setObject("blah.zz", BSON("a" << 19)), mongo::UserException);
+            ASSERT_THROWS(s->invoke("delete blah['x']", 0, 0), mongo::UserException);
+        } else {
             s->invoke("blah.y = 'e'", 0, 0);
             out = s->getObject("blah");
             ASSERT(strlen(out["y"].valuestr()) > 1);
-        } catch (...) {
-        }
 
-        try {
             s->invoke("blah.a = 19;", 0, 0);
             out = s->getObject("blah");
             ASSERT(out["a"].eoo());
-        } catch (...) {
-        }
 
-        try {
             s->invoke("blah.zz.a = 19;", 0, 0);
             out = s->getObject("blah");
             ASSERT(out["zz"].embeddedObject()["a"].eoo());
-        } catch (...) {
-        }
 
-        try {
             s->setObject("blah.zz", BSON("a" << 19));
             out = s->getObject("blah");
             ASSERT(out["zz"].embeddedObject()["a"].eoo());
-        } catch (...) {
-        }
 
-        try {
             s->invoke("delete blah['x']", 0, 0);
             out = s->getObject("blah");
             ASSERT(!out["x"].eoo());
-        } catch (...) {
         }
 
         // read-only object itself can be overwritten

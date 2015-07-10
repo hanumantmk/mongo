@@ -56,7 +56,6 @@ namespace {
  * the appearance of mutable state on the read/write versions.
  */
 struct BSONHolder {
-public:
     BSONHolder(const BSONObj& obj, bool ro)
         : _obj(obj.getOwned()), _resolved(false), _readOnly(ro), _altered(false) {}
 

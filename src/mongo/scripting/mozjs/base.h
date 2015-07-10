@@ -33,6 +33,13 @@
 namespace mongo {
 namespace mozjs {
 
+/**
+ * InstallType represents how we want this type overlayed in the JS world.
+ *
+ * Global is for regular types that get installed into the global scope
+ * Private gives us the type, but doesn't make the prototype publicly available
+ * OverNative is used to attach functionality to prototypes that are already there.
+ */
 enum class InstallType : char {
     Global = 0,
     Private,

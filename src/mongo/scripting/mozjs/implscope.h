@@ -226,8 +226,8 @@ public:
         return _timestampProto;
     }
 
-    const char* const kExecResult = "__lastres__";
-    const char* const kInvokeResult = "__returnValue";
+    static const char* const kExecResult;
+    static const char* const kInvokeResult;
 
     static MozJSImplScope* getThreadScope();
     void setOOM();

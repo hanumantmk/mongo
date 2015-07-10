@@ -77,6 +77,10 @@ MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL size_t max_bytes;
  * behind the pointer we hand back. That let's us get to the value at runtime.
  * We know kMaxAlign is enough (generally 8 or 16 bytes), because that's
  * literally the contract between malloc and std::max_align_t.
+ *
+ * This is commented out right now because std::max_align_t didn't seem to be
+ * available on our solaris builder. TODO: revisit in the future to see if that
+ * still holds.
  */
 // const size_t kMaxAlign = std::alignment_of<std::max_align_t>::value;
 const size_t kMaxAlign = 16;

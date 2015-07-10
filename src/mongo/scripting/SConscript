@@ -73,18 +73,24 @@ elif usemozjs:
     scriptingEnv = env.Clone()
     scriptingEnv.InjectThirdPartyIncludePaths(libraries=['mozjs'])
 
+    # TODO: get rid of all of this /FI and -include stuff and migrate to a shim
+    # header we include in all of our files.
     if env.TargetOSIs('windows'):
-        scriptingEnv.Prepend(CCFLAGS=[
+        scriptingEnv.Append(CCFLAGS=[
             '/FI', 'js-config.h',
             '/FI', 'js/RequiredDefines.h',
         ])
     else:
-        scriptingEnv.Prepend(CCFLAGS=[
-            '-include', 'js-config.h',
-            '-include', 'js/RequiredDefines.h',
-            '-Wno-non-virtual-dtor',
-            '-Wno-invalid-offsetof',
-        ])
+        scriptingEnv.Append(
+            CCFLAGS=[
+                '-include', 'js-config.h',
+                '-include', 'js/RequiredDefines.h',
+                '-Wno-invalid-offsetof',
+            ],
+            CXXFLAGS=[
+                '-Wno-non-virtual-dtor',
+            ],
+        )
 
     scriptingEnv.Prepend(CPPDEFINES=[
         'JS_USE_CUSTOM_ALLOCATOR',

@@ -203,13 +203,9 @@ void PR_Lock(PRLock* lock) {
 }
 
 PRStatus PR_Unlock(PRLock* lock) {
-    try {
-        lock->mutex().unlock();
+    lock->mutex().unlock();
 
-        return PR_SUCCESS;
-    } catch (...) {
-        return PR_FAILURE;
-    }
+    return PR_SUCCESS;
 }
 
 class nspr::CondVar {

@@ -1202,10 +1202,6 @@ elif env.TargetOSIs('windows'):
                      'winmm.lib',
                      'version.lib'])
 
-    # v8 calls timeGetTime()
-    if usev8:
-        env.Append(LIBS=['winmm.lib'])
-
 # When building on visual studio, this sets the name of the debug symbols file
 if env.ToolchainIs('msvc'):
     env['PDB'] = '${TARGET.base}.pdb'

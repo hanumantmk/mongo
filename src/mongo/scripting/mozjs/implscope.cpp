@@ -56,6 +56,9 @@ extern const JSFile assert;
 
 namespace mozjs {
 
+const char* const MozJSImplScope::kExecResult = "__lastres__";
+const char* const MozJSImplScope::kInvokeResult = "__returnValue";
+
 namespace {
 
 /**

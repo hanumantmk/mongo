@@ -61,11 +61,14 @@ int ValueWriter::type() {
         return Array;
     if (_value.isBoolean())
         return Bool;
-    // needs to be explicit NumberInt to use integer
-    //        if (v->IsInt32())
-    //            return NumberInt;
+
+    // We could do something more sophisticated here by checking to see if we
+    // round trip through int32_t, int64_t and double and picking a type that
+    // way, for now just always come back as double for numbers though (it's
+    // what we did for v8)
     if (_value.isNumber())
         return NumberDouble;
+
     if (_value.isObject()) {
         JS::RootedObject obj(_context, _value.toObjectOrNull());
         if (JS_ObjectIsDate(_context, obj))

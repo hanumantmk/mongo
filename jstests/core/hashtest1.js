@@ -34,6 +34,7 @@ var nullHash = hash( null );
 assert(! friendlyEqual( falseHash , nullHash ) , "false and null should hash to different things");
 
 var dateHash = hash( new Date() );
+// Sleep so we get a new date. Sleeping for 1 sometimes returns the same date, so 2
 sleep(2);
 var isodateHash = hash( ISODate() );
 assert(! friendlyEqual( dateHash, isodateHash) , "different dates should hash to different things");
