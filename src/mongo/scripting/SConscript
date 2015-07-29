@@ -104,6 +104,15 @@ elif usemozjs:
     scriptingEnv.Library(
         target='scripting',
         source=[
+            'mozjs/ast/ast.cpp',
+            'mozjs/ast/ast_binary_expression.cpp',
+            'mozjs/ast/ast_expression_statement.cpp',
+            'mozjs/ast/ast_identifier.cpp',
+            'mozjs/ast/ast_member_expression.cpp',
+            'mozjs/ast/ast_program.cpp',
+            'mozjs/ast/ast_this_expression.cpp',
+            'mozjs/ast/ast_type.cpp',
+            'mozjs/ast/compute_scope.cpp',
             'mozjs/base.cpp',
             'mozjs/bindata.cpp',
             'mozjs/bson.cpp',

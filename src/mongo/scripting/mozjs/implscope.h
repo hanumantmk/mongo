@@ -31,6 +31,7 @@
 #include <jsapi.h>
 
 #include "mongo/client/dbclientcursor.h"
+#include "mongo/scripting/mozjs/ast/ast.h"
 #include "mongo/scripting/mozjs/bindata.h"
 #include "mongo/scripting/mozjs/bson.h"
 #include "mongo/scripting/mozjs/countdownlatch.h"
@@ -236,6 +237,8 @@ public:
     void setOOM();
 
 private:
+    std::unique_ptr<AST> astParse(StringData code);
+
     void _MozJSCreateFunction(const char* raw,
                               ScriptingFunction functionNumber,
                               JS::MutableHandleValue fun);
@@ -287,6 +290,7 @@ private:
     WrapType<GlobalInfo> _globalProto;
     JS::HandleObject _global;
     std::vector<JS::PersistentRootedValue> _funcs;
+    std::unordered_map<size_t, std::unique_ptr<AST>> _astFuncs;
     std::atomic<bool> _pendingKill;
     std::string _error;
     unsigned int _opId;        // op id for this scope

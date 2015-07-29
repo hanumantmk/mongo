@@ -37,9 +37,11 @@
 
 #include "mongo/base/error_codes.h"
 #include "mongo/db/operation_context.h"
+#include "mongo/scripting/mozjs/ast/compute_scope.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/concurrency/threadlocal.h"
 #include "mongo/util/log.h"
@@ -267,6 +269,8 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
 
     _checkErrorState(JS_InitStandardClasses(_context, _global));
 
+    _checkErrorState(JS_InitReflect(_context, _global));
+
     installBSONTypes();
     execSetup(JSFiles::assert);
     execSetup(JSFiles::types);
@@ -436,6 +440,13 @@ bool hasFunctionIdentifier(StringData code) {
 void MozJSImplScope::_MozJSCreateFunction(const char* raw,
                                           ScriptingFunction functionNumber,
                                           JS::MutableHandleValue fun) {
+    auto ast = astParse(raw);
+
+    if (ast.get()) {
+        _astFuncs[functionNumber] = std::move(ast);
+        return;
+    }
+
     std::string code = jsSkipWhiteSpace(raw);
     if (!hasFunctionIdentifier(code)) {
         if (code.find('\n') == std::string::npos && !hasJSReturn(code) &&
@@ -491,6 +502,17 @@ int MozJSImplScope::invoke(ScriptingFunction func,
                            bool readOnlyArgs,
                            bool readOnlyRecv) {
     MozJSEntry entry(this);
+
+    auto astIter = _astFuncs.find(func);
+    if (astIter != _astFuncs.end()) {
+        std::cerr << "taking the ast func route... \n";
+        auto scope = stdx::make_unique<ComputeScope>();
+        (*scope)["this"] = ASTType(*recv);
+        ASTType out = astIter->second->compute(scope.get());
+
+        ObjectWrapper(_context, _global).setBoolean(kInvokeResult, out.getBool());
+        return 0;
+    }
 
     auto funcValue = _funcs[func - 1];
     JS::RootedValue result(_context);
@@ -755,6 +777,23 @@ bool MozJSImplScope::getQuickExit(int* exitCode) {
 
 void MozJSImplScope::setOOM() {
     _status = Status(ErrorCodes::JSInterpreterFailure, "Out of memory");
+}
+
+std::unique_ptr<AST> MozJSImplScope::astParse(StringData code) {
+    JS::RootedValue reflect(_context);
+    ObjectWrapper(_context, _global).getValue("Reflect", &reflect);
+
+    JS::RootedValue tree(_context);
+
+    JS::AutoValueArray<1> args(_context);
+    ValueReader(_context, args[0]).fromStringData(code);
+    ObjectWrapper(_context, reflect).callMethod("parse", args, &tree);
+
+    try {
+        return AST::parse(_context, tree);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 }  // namespace mozjs
