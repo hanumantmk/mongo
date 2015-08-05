@@ -35,6 +35,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "mongo/executor/connection_pool_asio.h"
+#include "mongo/executor/async_stream_interface.h"
 #include "mongo/db/dbmessage.h"
 #include "mongo/db/jsobj.h"
 #include "mongo/executor/async_stream_interface.h"
@@ -188,6 +190,12 @@ void NetworkInterfaceASIO::_startCommand(AsyncOp* op) {
 }
 
 void NetworkInterfaceASIO::_beginCommunication(AsyncOp* op) {
+    if (op->_inSetup) {
+        op->_inSetup = false;
+        op->finish(op->command().response(rpc::Protocol::kOpQuery, now()));
+        return;
+    }
+
     auto& cmd = op->beginCommand(op->request(), op->operationProtocol(), now());
 
     _asyncRunCommand(&cmd,
@@ -218,12 +226,26 @@ void NetworkInterfaceASIO::_networkErrorCallback(AsyncOp* op, const std::error_c
 void NetworkInterfaceASIO::_completeOperation(AsyncOp* op, const ResponseStatus& resp) {
     op->finish(resp);
 
+    std::unique_ptr<AsyncOp> ownedOp;
+
     {
-        // NOTE: op will be deleted in the call to erase() below.
-        // It is invalid to reference op after this point.
         stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
-        _inProgress.erase(op);
+
+        auto iter = _inProgress.find(op);
+
+        // We're in connection start
+        if (iter == _inProgress.end()) {
+            return;
+        }
+
+        ownedOp.reset(iter->second.release());
+        _inProgress.erase(iter);
     }
+
+    auto conn = op->_connectionPoolHandle;
+    conn->bindAsyncOp(std::move(ownedOp));
+    conn->indicateUsed();
+    _connectionPool.returnConnection(conn);
 
     signalWorkAvailable();
 }

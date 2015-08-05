@@ -114,6 +114,13 @@ void AsyncMockStreamFactory::MockStream::write(asio::const_buffer buf,
     _io_service->post([writeHandler, size] { writeHandler(std::error_code(), size); });
 }
 
+void AsyncMockStreamFactory::MockStream::cancel() {
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+    log() << "cancel() for: " << _target;
+
+    _io_service->post([this] { cancel(); });
+}
+
 void AsyncMockStreamFactory::MockStream::read(asio::mutable_buffer buf,
                                               StreamHandler&& readHandler) {
     stdx::unique_lock<stdx::mutex> lk(_mutex);

@@ -36,6 +36,7 @@
 
 #include "mongo/executor/async_stream_interface.h"
 #include "mongo/executor/async_stream_factory.h"
+#include "mongo/executor/connection_pool_asio.h"
 #include "mongo/stdx/chrono.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/util/log.h"
@@ -58,7 +59,9 @@ NetworkInterfaceASIO::NetworkInterfaceASIO(
       _resolver(_io_service),
       _state(State::kReady),
       _streamFactory(std::move(streamFactory)),
-      _isExecutorRunnable(false) {}
+      _isExecutorRunnable(false),
+      _connectionPool(
+          std::unique_ptr<ConnectionPoolImplInterface>(new connection_pool_asio::ASIOImpl(this))) {}
 
 std::string NetworkInterfaceASIO::getDiagnosticString() {
     str::stream output;
@@ -126,16 +129,50 @@ Date_t NetworkInterfaceASIO::now() {
 void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                         const RemoteCommandRequest& request,
                                         const RemoteCommandCompletionFn& onFinish) {
-    auto ownedOp = stdx::make_unique<AsyncOp>(cbHandle, request, onFinish, now());
-
-    AsyncOp* op = ownedOp.get();
-
     {
         stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
-        _inProgress.emplace(op, std::move(ownedOp));
+        _inGetConnection.push_back(cbHandle);
     }
 
-    asio::post(_io_service, [this, op]() { _startCommand(op); });
+    auto startTime = now();
+
+    auto nextStep = [this, startTime, cbHandle, request, onFinish](
+        StatusWith<ConnectionPoolConnectionInterface*> swConn) {
+        if (!swConn.isOK()) {
+            onFinish(std::move(swConn.getStatus()));
+            return;
+        }
+
+        auto conn = static_cast<connection_pool_asio::ASIOConnection*>(swConn.getValue());
+
+        auto ownedOp = conn->releaseAsyncOp();
+
+        AsyncOp* op = ownedOp.get();
+        op->_cbHandle = cbHandle;
+        op->_request = request;
+        op->_onFinish = onFinish;
+        op->_connectionPoolHandle = conn;
+        op->_start = startTime;
+
+        bool keepGoing = false;
+
+        {
+            stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
+
+            auto iter = std::find(_inGetConnection.begin(), _inGetConnection.end(), cbHandle);
+
+            if (iter != _inGetConnection.end()) {
+                _inGetConnection.erase(iter);
+                _inProgress.emplace(op, std::move(ownedOp));
+                keepGoing = true;
+            }
+        }
+
+        if (keepGoing)
+            asio::post(_io_service, [this, op]() { _beginCommunication(op); });
+    };
+
+    _connectionPool.getConnection(request.target, stdx::chrono::seconds(10), nextStep);
 }
 
 void NetworkInterfaceASIO::cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) {

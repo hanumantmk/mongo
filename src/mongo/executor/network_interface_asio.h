@@ -35,9 +35,11 @@
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <vector>
 
 #include "mongo/base/status.h"
 #include "mongo/base/system_error.h"
+#include "mongo/executor/connection_pool.h"
 #include "mongo/executor/network_connection_hook.h"
 #include "mongo/executor/network_interface.h"
 #include "mongo/executor/remote_command_request.h"
@@ -53,6 +55,12 @@
 namespace mongo {
 namespace executor {
 
+namespace connection_pool_asio {
+class ASIOConnection;
+class ASIOTimer;
+class ASIOImpl;
+}
+
 class AsyncStreamFactoryInterface;
 class AsyncStreamInterface;
 
@@ -61,6 +69,10 @@ class AsyncStreamInterface;
  * Kohlhoff's ASIO library instead of existing MongoDB networking primitives.
  */
 class NetworkInterfaceASIO final : public NetworkInterface {
+    friend class connection_pool_asio::ASIOConnection;
+    friend class connection_pool_asio::ASIOTimer;
+    friend class connection_pool_asio::ASIOImpl;
+
 public:
     NetworkInterfaceASIO(std::unique_ptr<AsyncStreamFactoryInterface> streamFactory,
                          std::unique_ptr<NetworkConnectionHook> networkConnectionHook);
@@ -148,6 +160,8 @@ private:
      * Helper object to manage individual network operations.
      */
     class AsyncOp {
+        friend class NetworkInterfaceASIO;
+
     public:
         AsyncOp(const TaskExecutor::CallbackHandle& cbHandle,
                 const RemoteCommandRequest& request,
@@ -189,6 +203,10 @@ private:
         RemoteCommandRequest _request;
         RemoteCommandCompletionFn _onFinish;
 
+        // AsyncOp's have a handle to their connection pool handle. They are
+        // also owned by it when they're in the pool
+        connection_pool_asio::ASIOConnection* _connectionPoolHandle;
+
         /**
          * The connection state used to service this request. We wrap it in an optional
          * as it is instantiated at some point after the AsyncOp is created.
@@ -201,7 +219,7 @@ private:
          */
         boost::optional<rpc::Protocol> _operationProtocol;
 
-        const Date_t _start;
+        Date_t _start;
 
         AtomicUInt64 _canceled;
 
@@ -211,6 +229,7 @@ private:
          * representing its current running or next-to-be-run command, if there is one.
          */
         boost::optional<AsyncCommand> _command;
+        bool _inSetup;
     };
 
     void _startCommand(AsyncOp* op);
@@ -267,10 +286,13 @@ private:
 
     stdx::mutex _inProgressMutex;
     std::unordered_map<AsyncOp*, std::unique_ptr<AsyncOp>> _inProgress;
+    std::vector<TaskExecutor::CallbackHandle> _inGetConnection;
 
     stdx::mutex _executorMutex;
     bool _isExecutorRunnable;
     stdx::condition_variable _isExecutorRunnableCondition;
+
+    ConnectionPool _connectionPool;
 };
 
 }  // namespace executor
