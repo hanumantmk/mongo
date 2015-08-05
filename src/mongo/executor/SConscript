@@ -51,6 +51,25 @@ env.Library('network_interface_mock',
                 'task_executor_interface',
             ])
 
+env.Library(target='connection_pool',
+            source=[
+                'connection_pool.cpp',
+            ],
+            LIBDEPS=[
+                '$BUILD_DIR/mongo/base',
+                '$BUILD_DIR/mongo/util/net/hostandport',
+            ])
+
+env.CppUnitTest(
+    target='connection_pool_test',
+    source=[
+        'connection_pool_test.cpp'
+    ],
+    LIBDEPS=[
+        'connection_pool',
+    ],
+)
+
 env.CppUnitTest(
     target='network_interface_mock_test',
     source=[
