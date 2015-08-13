@@ -27,7 +27,6 @@
 
 #pragma once
 
-#include <deque>
 #include <map>
 #include <memory>
 #include <set>
@@ -42,33 +41,30 @@ namespace mongo {
 namespace executor {
 
 class ConnectionPool;
-class AbstractConnectionPoolConnection;
+class ConnectionPoolConnectionInterface;
 class ConnectionPoolTimerInterface;
 
-using ConnectionHandle = std::unique_ptr<AbstractConnectionPoolConnection>;
-using TimerHandle = std::unique_ptr<ConnectionPoolTimerInterface>;
-
-class AbstractConnectionPoolConnection {
+class ConnectionPoolConnectionInterface {
     friend class ConnectionPool;
 
 public:
-    virtual ~AbstractConnectionPoolConnection() = default;
+    virtual ~ConnectionPoolConnectionInterface() = default;
 
-    void indicateUsed();
-    const HostAndPort& getHostAndPort() const;
+    virtual void indicateUsed() = 0;
+    virtual const HostAndPort& getHostAndPort() const = 0;
 
 protected:
-    using setupCallback = stdx::function<void(AbstractConnectionPoolConnection*, Status)>;
+    virtual stdx::chrono::time_point<stdx::chrono::steady_clock> getLastUsed() const = 0;
+
+    using timeoutCallback = stdx::function<void()>;
+    virtual void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) = 0;
+    virtual void cancelTimeout() = 0;
+
+    using setupCallback = stdx::function<void(ConnectionPoolConnectionInterface*, Status)>;
     virtual void setup(setupCallback cb, stdx::chrono::milliseconds timeout) = 0;
 
-    using refreshCallback = stdx::function<void(AbstractConnectionPoolConnection*, Status)>;
+    using refreshCallback = stdx::function<void(ConnectionPoolConnectionInterface*, Status)>;
     virtual void refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) = 0;
-
-    HostAndPort _hostAndPort;
-    TimerHandle _timer;
-
-private:
-    stdx::chrono::time_point<stdx::chrono::steady_clock> _lastUsed;
 };
 
 class ConnectionPoolTimerInterface {
@@ -84,8 +80,11 @@ class ConnectionPoolImplInterface {
 public:
     virtual ~ConnectionPoolImplInterface() = default;
 
-    virtual ConnectionHandle makeConnection(const HostAndPort& hostAndPort) = 0;
-    virtual TimerHandle makeTimer() = 0;
+    virtual std::unique_ptr<ConnectionPoolConnectionInterface> makeConnection(
+        const HostAndPort& hostAndPort) = 0;
+    virtual std::unique_ptr<ConnectionPoolTimerInterface> makeTimer() = 0;
+
+    virtual stdx::chrono::time_point<stdx::chrono::steady_clock> now() = 0;
 };
 
 class ConnectionPool {
@@ -103,36 +102,47 @@ public:
     };
     ConnectionPool(std::unique_ptr<ConnectionPoolImplInterface> impl, Options options = Options{});
 
-    using getConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
+    using getConnectionCallback =
+        stdx::function<void(StatusWith<ConnectionPoolConnectionInterface*>)>;
     void getConnection(const HostAndPort& hostAndPort,
                        stdx::chrono::milliseconds timeout,
                        getConnectionCallback cb);
 
-    void returnConnection(ConnectionHandle conn);
+    void returnConnection(ConnectionPoolConnectionInterface* connPtr);
 
 private:
     class SpecificPool {
     public:
         SpecificPool(ConnectionPool* global);
+        ~SpecificPool() {
+            std::cerr << "Have " << _readyPool.size() << " connections at dtor\n";
+        }
 
         void getConnection(const HostAndPort& hostAndPort,
                            stdx::chrono::milliseconds timeout,
                            getConnectionCallback cb);
-        void returnConnection(ConnectionHandle conn);
+        void returnConnection(ConnectionPoolConnectionInterface* connPtr);
 
     private:
+        using ConnectionHandle = std::unique_ptr<ConnectionPoolConnectionInterface>;
+
         void addToReady(stdx::unique_lock<stdx::mutex>& spLk, ConnectionHandle conn);
         void fulfillRequests(stdx::unique_lock<stdx::mutex>& spLk);
         void sortRequests();
+        void spawnConnections(stdx::unique_lock<stdx::mutex>& spLk, const HostAndPort& hostAndPort);
+        ConnectionHandle takeFromPool(
+            std::map<ConnectionPoolConnectionInterface*, ConnectionHandle>& pool,
+            ConnectionPoolConnectionInterface* connPtr);
 
         ConnectionPool* _global;
         stdx::mutex _mutex;
-        std::map<AbstractConnectionPoolConnection*, ConnectionHandle> _readyPool;
-        std::map<AbstractConnectionPoolConnection*, ConnectionHandle> _processingPool;
+
+        std::map<ConnectionPoolConnectionInterface*, ConnectionHandle> _readyPool;
+        std::map<ConnectionPoolConnectionInterface*, ConnectionHandle> _processingPool;
+        std::map<ConnectionPoolConnectionInterface*, ConnectionHandle> _checkedOutPool;
         std::vector<std::pair<stdx::chrono::time_point<stdx::chrono::steady_clock>,
                               getConnectionCallback>> _requests;
-        TimerHandle _requestTimer;
-        size_t _numberCheckedOut = 0;
+        std::unique_ptr<ConnectionPoolTimerInterface> _requestTimer;
     };
 
     stdx::mutex _mutex;

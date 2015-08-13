@@ -64,6 +64,13 @@ void NetworkInterfaceASIO::_runIsMaster(AsyncOp* op) {
 
             op->connection().setServerProtocols(protocolSet.getValue());
 
+            if (op->_inSetup) {
+                op->finish(RemoteCommandResponse(commandReply->getCommandReply().getOwned(),
+                                                 commandReply->getMetadata().getOwned(),
+                                                 now() - op->start()));
+                return;
+            }
+
             // Advance the state machine
             _beginCommunication(op);
 
