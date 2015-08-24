@@ -43,11 +43,11 @@ class ASIOTimer : public ConnectionPool::TimerInterface {
 public:
     ASIOTimer(asio::io_service* service);
 
-    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
+    void setTimeout(Milliseconds timeout, TimeoutCallback cb) override;
     void cancelTimeout() override;
 
 private:
-    timeoutCallback _cb;
+    TimeoutCallback _cb;
     asio::io_service* _io_service;
     asio::steady_timer _impl;
 };
@@ -62,6 +62,7 @@ public:
     ASIOConnection(const HostAndPort& hostAndPort, ASIOImpl* global);
 
     void indicateUsed() override;
+    void indicateFailed() override;
     const HostAndPort& getHostAndPort() const override;
 
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> releaseAsyncOp();
@@ -69,19 +70,21 @@ public:
 
 protected:
     Date_t getLastUsed() const override;
+    bool isFailed() const override;
 
-    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
+    void setTimeout(Milliseconds timeout, TimeoutCallback cb) override;
     void cancelTimeout() override;
 
-    void setup(Milliseconds timeout, setupCallback cb) override;
-    void refresh(Milliseconds timeout, refreshCallback cb) override;
+    void setup(Milliseconds timeout, SetupCallback cb) override;
+    void refresh(Milliseconds timeout, RefreshCallback cb) override;
 
 private:
-    setupCallback _setupCallback;
-    refreshCallback _refreshCallback;
+    SetupCallback _setupCallback;
+    RefreshCallback _refreshCallback;
     ASIOImpl* _global;
     ASIOTimer _timer;
     Date_t _lastUsed;
+    bool _isFailed = false;
     HostAndPort _hostAndPort;
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> _impl;
 };

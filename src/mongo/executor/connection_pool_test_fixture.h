@@ -46,7 +46,7 @@ public:
     TimerImpl(PoolImpl* global);
     ~TimerImpl() override;
 
-    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
+    void setTimeout(Milliseconds timeout, TimeoutCallback cb) override;
 
     void cancelTimeout() override;
 
@@ -59,7 +59,7 @@ public:
 private:
     static std::set<TimerImpl*> _timers;
 
-    timeoutCallback _cb;
+    TimeoutCallback _cb;
     PoolImpl* _global;
     Date_t _expiration;
 };
@@ -73,9 +73,14 @@ private:
  */
 class ConnectionImpl : public ConnectionPool::ConnectionInterface {
 public:
+    using PushSetupCallback = stdx::function<Status()>;
+    using PushRefreshCallback = stdx::function<Status()>;
+
     ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global);
 
     void indicateUsed() override;
+
+    void indicateFailed() override;
 
     const HostAndPort& getHostAndPort() const override;
 
@@ -83,36 +88,37 @@ public:
     static void clear();
 
     // Push either a callback that returns the status for a setup, or just the Status
-    using pushSetupCallback = stdx::function<Status()>;
-    static void pushSetup(pushSetupCallback status);
+    static void pushSetup(PushSetupCallback status);
     static void pushSetup(Status status);
 
     // Push either a callback that returns the status for a refresh, or just the Status
-    using pushRefreshCallback = stdx::function<Status()>;
-    static void pushRefresh(pushRefreshCallback status);
+    static void pushRefresh(PushRefreshCallback status);
     static void pushRefresh(Status status);
 
 private:
     Date_t getLastUsed() const override;
 
-    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
+    bool isFailed() const override;
+
+    void setTimeout(Milliseconds timeout, TimeoutCallback cb) override;
 
     void cancelTimeout() override;
 
-    void setup(Milliseconds timeout, setupCallback cb) override;
+    void setup(Milliseconds timeout, SetupCallback cb) override;
 
-    void refresh(Milliseconds timeout, refreshCallback cb) override;
+    void refresh(Milliseconds timeout, RefreshCallback cb) override;
 
     HostAndPort _hostAndPort;
     Date_t _lastUsed;
-    setupCallback _setupCallback;
-    refreshCallback _refreshCallback;
+    bool _isFailed = false;
+    SetupCallback _setupCallback;
+    RefreshCallback _refreshCallback;
     TimerImpl _timer;
     PoolImpl* _global;
 
     // Answer queues
-    static std::deque<pushSetupCallback> _pushSetupQueue;
-    static std::deque<pushRefreshCallback> _pushRefreshQueue;
+    static std::deque<PushSetupCallback> _pushSetupQueue;
+    static std::deque<PushRefreshCallback> _pushRefreshQueue;
 
     // Question queues
     static std::deque<ConnectionImpl*> _setupQueue;

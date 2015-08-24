@@ -41,7 +41,7 @@ TimerImpl::~TimerImpl() {
     cancelTimeout();
 }
 
-void TimerImpl::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+void TimerImpl::setTimeout(Milliseconds timeout, TimeoutCallback cb) {
     _cb = std::move(cb);
     _expiration = _global->now() + timeout;
 
@@ -79,6 +79,10 @@ void ConnectionImpl::indicateUsed() {
     _lastUsed = _global->now();
 }
 
+void ConnectionImpl::indicateFailed() {
+    _isFailed = true;
+}
+
 const HostAndPort& ConnectionImpl::getHostAndPort() const {
     return _hostAndPort;
 }
@@ -90,7 +94,7 @@ void ConnectionImpl::clear() {
     _pushRefreshQueue.clear();
 }
 
-void ConnectionImpl::pushSetup(pushSetupCallback status) {
+void ConnectionImpl::pushSetup(PushSetupCallback status) {
     _pushSetupQueue.push_back(status);
 
     if (_setupQueue.size()) {
@@ -104,7 +108,7 @@ void ConnectionImpl::pushSetup(Status status) {
     pushSetup([status]() { return status; });
 }
 
-void ConnectionImpl::pushRefresh(pushRefreshCallback status) {
+void ConnectionImpl::pushRefresh(PushRefreshCallback status) {
     _pushRefreshQueue.push_back(status);
 
     if (_refreshQueue.size()) {
@@ -122,7 +126,11 @@ Date_t ConnectionImpl::getLastUsed() const {
     return _lastUsed;
 }
 
-void ConnectionImpl::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+bool ConnectionImpl::isFailed() const {
+    return _isFailed;
+}
+
+void ConnectionImpl::setTimeout(Milliseconds timeout, TimeoutCallback cb) {
     _timer.setTimeout(timeout, cb);
 }
 
@@ -130,7 +138,7 @@ void ConnectionImpl::cancelTimeout() {
     _timer.cancelTimeout();
 }
 
-void ConnectionImpl::setup(Milliseconds timeout, setupCallback cb) {
+void ConnectionImpl::setup(Milliseconds timeout, SetupCallback cb) {
     _setupCallback = std::move(cb);
 
     _timer.setTimeout(
@@ -146,7 +154,7 @@ void ConnectionImpl::setup(Milliseconds timeout, setupCallback cb) {
     }
 }
 
-void ConnectionImpl::refresh(Milliseconds timeout, refreshCallback cb) {
+void ConnectionImpl::refresh(Milliseconds timeout, RefreshCallback cb) {
     _refreshCallback = std::move(cb);
 
     _timer.setTimeout(
@@ -162,8 +170,8 @@ void ConnectionImpl::refresh(Milliseconds timeout, refreshCallback cb) {
     }
 }
 
-std::deque<ConnectionImpl::pushSetupCallback> ConnectionImpl::_pushSetupQueue;
-std::deque<ConnectionImpl::pushRefreshCallback> ConnectionImpl::_pushRefreshQueue;
+std::deque<ConnectionImpl::PushSetupCallback> ConnectionImpl::_pushSetupQueue;
+std::deque<ConnectionImpl::PushRefreshCallback> ConnectionImpl::_pushRefreshQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_setupQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_refreshQueue;
 

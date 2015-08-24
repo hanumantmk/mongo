@@ -75,6 +75,31 @@ TEST_F(ConnectionPoolTest, SameConn) {
     ASSERT_EQ(conn1, conn2);
 }
 
+TEST_F(ConnectionPoolTest, FailedConnDifferentConn) {
+    ConnectionPool pool(stdx::make_unique<PoolImpl>());
+
+    ConnectionPool::ConnectionInterface* conn1 = nullptr;
+    ConnectionImpl::pushSetup(Status::OK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn1 = swConn.getValue().get();
+                 conn1->indicateFailed();
+             });
+
+    ConnectionPool::ConnectionInterface* conn2 = nullptr;
+    ConnectionImpl::pushSetup(Status::OK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn2 = swConn.getValue().get();
+             });
+
+    ASSERT_NE(conn1, conn2);
+}
+
 TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 

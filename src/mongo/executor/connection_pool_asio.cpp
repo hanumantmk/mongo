@@ -57,6 +57,10 @@ void ASIOConnection::indicateUsed() {
     _lastUsed = _global->now();
 }
 
+void ASIOConnection::indicateFailed() {
+    _isFailed = true;
+}
+
 const HostAndPort& ASIOConnection::getHostAndPort() const {
     return _hostAndPort;
 }
@@ -65,7 +69,11 @@ Date_t ASIOConnection::getLastUsed() const {
     return _lastUsed;
 }
 
-void ASIOConnection::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+bool ASIOConnection::isFailed() const {
+    return _isFailed;
+}
+
+void ASIOConnection::setTimeout(Milliseconds timeout, TimeoutCallback cb) {
     _timer.setTimeout(timeout, std::move(cb));
 }
 
@@ -73,13 +81,13 @@ void ASIOConnection::cancelTimeout() {
     _timer.cancelTimeout();
 }
 
-void ASIOConnection::setup(Milliseconds timeout, setupCallback cb) {
+void ASIOConnection::setup(Milliseconds timeout, SetupCallback cb) {
     _setupCallback = std::move(cb);
 
     _global->_impl->_connect(_impl.get());
 }
 
-void ASIOConnection::refresh(Milliseconds timeout, refreshCallback cb) {
+void ASIOConnection::refresh(Milliseconds timeout, RefreshCallback cb) {
     auto op = _impl.get();
 
     _refreshCallback = std::move(cb);
@@ -128,7 +136,7 @@ void ASIOConnection::bindAsyncOp(std::unique_ptr<NetworkInterfaceASIO::AsyncOp> 
 
 ASIOTimer::ASIOTimer(asio::io_service* io_service) : _io_service(io_service), _impl(*io_service) {}
 
-void ASIOTimer::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+void ASIOTimer::setTimeout(Milliseconds timeout, TimeoutCallback cb) {
     _cb = std::move(cb);
 
     _impl.expires_after(timeout);

@@ -27,9 +27,8 @@
 
 #pragma once
 
-#include <map>
 #include <memory>
-#include <set>
+#include <unordered_map>
 
 #include "mongo/stdx/chrono.h"
 #include "mongo/stdx/functional.h"
@@ -59,7 +58,7 @@ public:
 
     using ConnectionHandle = std::unique_ptr<ConnectionInterface, ConnectionHandleDeleter>;
 
-    using getConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
+    using GetConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
 
     static const Milliseconds kDefaultRefreshTimeout;
     static const Milliseconds kDefaultRefreshRequirement;
@@ -103,16 +102,16 @@ public:
     explicit ConnectionPool(std::unique_ptr<DependentTypeFactoryInterface> impl,
                             Options options = Options{});
 
-    void get(const HostAndPort& hostAndPort, Milliseconds timeout, getConnectionCallback cb);
+    void get(const HostAndPort& hostAndPort, Milliseconds timeout, GetConnectionCallback cb);
 
     /**
      * TODO add a function returning connection pool stats
      */
 
 private:
-    void returnConnection(ConnectionInterface* connPtr);
+    void returnConnection(ConnectionInterface* connection);
 
-    // options are set at startup and never changed at run time, so these are
+    // Options are set at startup and never changed at run time, so these are
     // accessed outside the lock
     const Options _options;
 
@@ -128,9 +127,9 @@ public:
     ConnectionHandleDeleter() {}
     ConnectionHandleDeleter(ConnectionPool* pool) : _pool(pool) {}
 
-    void operator()(ConnectionInterface* ptr) {
-        if (_pool && ptr)
-            _pool->returnConnection(ptr);
+    void operator()(ConnectionInterface* connection) {
+        if (_pool && connection)
+            _pool->returnConnection(connection);
     }
 
 private:
@@ -144,15 +143,15 @@ private:
  */
 class ConnectionPool::TimerInterface {
 public:
-    using timeoutCallback = stdx::function<void()>;
+    using TimeoutCallback = stdx::function<void()>;
 
     virtual ~TimerInterface() = default;
 
     /**
-     * Sets the timeout for the timer. Setting a set timer should override the
-     * previous timer.
+     * Sets the timeout for the timer. Setting an already set timer should
+     * override the previous timer.
      */
-    virtual void setTimeout(Milliseconds timeout, timeoutCallback cb) = 0;
+    virtual void setTimeout(Milliseconds timeout, TimeoutCallback cb) = 0;
 
     /**
      * It should be safe to cancel a previously canceled, or never set, timer.
@@ -179,6 +178,8 @@ public:
      */
     virtual void indicateUsed() = 0;
 
+    virtual void indicateFailed() = 0;
+
     /**
      * The HostAndPort for the connection. This should be the same as the
      * HostAndPort passed to DependentTypeFactoryInterface::makeConnection.
@@ -188,25 +189,34 @@ public:
 protected:
     /**
      * Making these protected makes the definitions available to override in
-     * children
+     * children.
      */
-    using setupCallback = stdx::function<void(ConnectionInterface*, Status)>;
-    using refreshCallback = stdx::function<void(ConnectionInterface*, Status)>;
+    using SetupCallback = stdx::function<void(ConnectionInterface*, Status)>;
+    using RefreshCallback = stdx::function<void(ConnectionInterface*, Status)>;
 
 private:
+    /**
+     * Returns the last used time point for the connection
+     */
     virtual Date_t getLastUsed() const = 0;
+
+    /**
+     * Returns true if the connection is failed. This implies that it should
+     * not be returned to the pool.
+     */
+    virtual bool isFailed() const = 0;
 
     /**
      * Sets up the connection. This should include connection + auth + any
      * other associated hooks.
      */
-    virtual void setup(Milliseconds timeout, setupCallback cb) = 0;
+    virtual void setup(Milliseconds timeout, SetupCallback cb) = 0;
 
     /**
      * Refreshes the connection. This should involve a network round trip and
      * should strongly imply an active connection
      */
-    virtual void refresh(Milliseconds timeout, refreshCallback cb) = 0;
+    virtual void refresh(Milliseconds timeout, RefreshCallback cb) = 0;
 };
 
 /**
@@ -254,13 +264,13 @@ public:
     void getConnection(const HostAndPort& hostAndPort,
                        Milliseconds timeout,
                        stdx::unique_lock<stdx::mutex> lk,
-                       getConnectionCallback cb);
+                       GetConnectionCallback cb);
 
     /**
      * Returns a connection to a specific pool. Sinks a unique_lock from the
      * parent to preserve the lock on _mutex
      */
-    void returnConnection(ConnectionInterface* connPtr, stdx::unique_lock<stdx::mutex> lk);
+    void returnConnection(ConnectionInterface* connection, stdx::unique_lock<stdx::mutex> lk);
 
 private:
     using OwnedConnection = std::unique_ptr<ConnectionInterface>;
@@ -276,7 +286,7 @@ private:
 
     void sortRequests();
 
-    OwnedConnection takeFromPool(OwnershipPool& pool, ConnectionInterface* connPtr);
+    OwnedConnection takeFromPool(OwnershipPool& pool, ConnectionInterface* connection);
 
     void updateState();
 
@@ -288,7 +298,7 @@ private:
     OwnershipPool _readyPool;
     OwnershipPool _processingPool;
     OwnershipPool _checkedOutPool;
-    std::vector<std::pair<Date_t, getConnectionCallback>> _requests;
+    std::vector<std::pair<Date_t, GetConnectionCallback>> _requests;
     std::unique_ptr<TimerInterface> _requestTimer;
     Date_t _requestTimerExpiration;
 
@@ -303,7 +313,7 @@ private:
      * At any point a new request sets the state back to running and
      * restarts all timers.
      */
-    enum class State : uint8_t {
+    enum class State {
         // The pool is active
         running,
 

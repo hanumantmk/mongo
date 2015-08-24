@@ -53,7 +53,7 @@ ConnectionPool::ConnectionPool(std::unique_ptr<DependentTypeFactoryInterface> im
 
 void ConnectionPool::get(const HostAndPort& hostAndPort,
                          Milliseconds timeout,
-                         getConnectionCallback cb) {
+                         GetConnectionCallback cb) {
     SpecificPool* pool;
 
     stdx::unique_lock<stdx::mutex> lk(_mutex);
@@ -94,7 +94,7 @@ ConnectionPool::SpecificPool::~SpecificPool() {
 void ConnectionPool::SpecificPool::getConnection(const HostAndPort& hostAndPort,
                                                  Milliseconds timeout,
                                                  stdx::unique_lock<stdx::mutex> lk,
-                                                 getConnectionCallback cb) {
+                                                 GetConnectionCallback cb) {
     auto expiration = _parent->_factory->now() + timeout;
 
     _requests.push_back(make_pair(expiration, std::move(cb)));
@@ -114,8 +114,13 @@ void ConnectionPool::SpecificPool::returnConnection(ConnectionInterface* connPtr
 
     auto conn = takeFromPool(_checkedOutPool, connPtr);
 
-    // If we need to refresh this connection
-    if (needsRefreshTP <= now) {
+    if (conn->isFailed()) {
+        // If the connection failed, simply let it lapse
+        //
+        // TODO: alert via some callback that the host is bad
+    } else if (needsRefreshTP <= now) {
+        // If we need to refresh this connection
+
         if (_readyPool.size() + _processingPool.size() + _checkedOutPool.size() >
             _parent->_options.minConnections) {
             // If we already have minConnections, just let the connection lapse
