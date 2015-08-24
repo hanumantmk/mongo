@@ -74,9 +74,15 @@ class NetworkInterfaceASIO final : public NetworkInterface {
     friend class connection_pool_asio::ASIOImpl;
 
 public:
+    struct Options {
+        ConnectionPool::Options connectionPoolOptions;
+    };
+
     NetworkInterfaceASIO(std::unique_ptr<AsyncStreamFactoryInterface> streamFactory,
-                         std::unique_ptr<NetworkConnectionHook> networkConnectionHook);
-    NetworkInterfaceASIO(std::unique_ptr<AsyncStreamFactoryInterface> streamFactory);
+                         std::unique_ptr<NetworkConnectionHook> networkConnectionHook,
+                         Options = Options());
+    NetworkInterfaceASIO(std::unique_ptr<AsyncStreamFactoryInterface> streamFactory,
+                         Options = Options());
     std::string getDiagnosticString() override;
     std::string getHostName() override;
     void startup() override;
@@ -205,7 +211,7 @@ private:
 
         // AsyncOp's have a handle to their connection pool handle. They are
         // also owned by it when they're in the pool
-        connection_pool_asio::ASIOConnection* _connectionPoolHandle;
+        ConnectionPool::ConnectionHandle _connectionPoolHandle;
 
         /**
          * The connection state used to service this request. We wrap it in an optional
@@ -272,6 +278,8 @@ private:
     void _signalWorkAvailable_inlock();
 
     void _asyncRunCommand(AsyncCommand* cmd, NetworkOpHandler handler);
+
+    Options _options;
 
     asio::io_service _io_service;
     stdx::thread _serviceRunner;

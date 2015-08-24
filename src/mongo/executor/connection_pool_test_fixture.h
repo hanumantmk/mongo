@@ -41,12 +41,12 @@ class PoolImpl;
 /**
  * Mock interface for the timer
  */
-class TimerImpl : public ConnectionPoolTimerInterface {
+class TimerImpl : public ConnectionPool::TimerInterface {
 public:
     TimerImpl(PoolImpl* global);
     ~TimerImpl() override;
 
-    void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
 
     void cancelTimeout() override;
 
@@ -61,7 +61,7 @@ private:
 
     timeoutCallback _cb;
     PoolImpl* _global;
-    stdx::chrono::time_point<stdx::chrono::steady_clock> _expiration;
+    Date_t _expiration;
 };
 
 /**
@@ -71,7 +71,7 @@ private:
  * case callbacks immediately fire), or calls queue up and pushSetup() and
  * pushRefresh() fire as they're called.
  */
-class ConnectionImpl : public ConnectionPoolConnectionInterface {
+class ConnectionImpl : public ConnectionPool::ConnectionInterface {
 public:
     ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global);
 
@@ -92,20 +92,19 @@ public:
     static void pushRefresh(pushRefreshCallback status);
     static void pushRefresh(Status status);
 
-protected:
-    stdx::chrono::time_point<stdx::chrono::steady_clock> getLastUsed() const override;
+private:
+    Date_t getLastUsed() const override;
 
-    void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
 
     void cancelTimeout() override;
 
-    void setup(setupCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setup(Milliseconds timeout, setupCallback cb) override;
 
-    void refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) override;
+    void refresh(Milliseconds timeout, refreshCallback cb) override;
 
-private:
     HostAndPort _hostAndPort;
-    stdx::chrono::time_point<stdx::chrono::steady_clock> _lastUsed;
+    Date_t _lastUsed;
     setupCallback _setupCallback;
     refreshCallback _refreshCallback;
     TimerImpl _timer;
@@ -123,22 +122,26 @@ private:
 /**
  * Mock for the pool implementation
  */
-class PoolImpl : public ConnectionPoolImplInterface {
+class PoolImpl : public ConnectionPool::DependentTypeFactoryInterface {
+    friend class ConnectionImpl;
+
 public:
-    std::unique_ptr<ConnectionPoolConnectionInterface> makeConnection(
+    std::unique_ptr<ConnectionPool::ConnectionInterface> makeConnection(
         const HostAndPort& hostAndPort) override;
 
-    std::unique_ptr<ConnectionPoolTimerInterface> makeTimer() override;
+    std::unique_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 
-    stdx::chrono::time_point<stdx::chrono::steady_clock> now() override;
+    Date_t now() override;
 
     /**
      * setNow() can be used to fire all timers that have passed a point in time
      */
-    static void setNow(stdx::chrono::time_point<stdx::chrono::steady_clock> now);
+    static void setNow(Date_t now);
 
 private:
-    static boost::optional<stdx::chrono::time_point<stdx::chrono::steady_clock>> _now;
+    ConnectionPool* _pool = nullptr;
+
+    static boost::optional<Date_t> _now;
 };
 
 }  // namespace connection_pool_test_details

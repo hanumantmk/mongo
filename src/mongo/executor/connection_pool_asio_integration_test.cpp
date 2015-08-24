@@ -81,8 +81,12 @@ int MyNetworkConnectionHook::_count = 0;
 TEST(ConnectionPoolASIO, TestPing) {
     auto fixture = unittest::getFixtureConnectionString();
 
+    NetworkInterfaceASIO::Options options;
+    options.connectionPoolOptions.maxConnections = 10;
+
     NetworkInterfaceASIO net{stdx::make_unique<AsyncStreamFactory>(),
-                             stdx::make_unique<MyNetworkConnectionHook>()};
+                             stdx::make_unique<MyNetworkConnectionHook>(),
+                             options};
 
     net.startup();
     auto guard = MakeGuard([&] { net.shutdown(); });

@@ -39,11 +39,11 @@ namespace connection_pool_asio {
 /**
  * Implements connection pool timers on top of asio
  */
-class ASIOTimer : public ConnectionPoolTimerInterface {
+class ASIOTimer : public ConnectionPool::TimerInterface {
 public:
     ASIOTimer(asio::io_service* service);
 
-    void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
     void cancelTimeout() override;
 
 private:
@@ -57,7 +57,7 @@ private:
  *
  * Owns an async op when it's out of the pool
  */
-class ASIOConnection : public ConnectionPoolConnectionInterface {
+class ASIOConnection : public ConnectionPool::ConnectionInterface {
 public:
     ASIOConnection(const HostAndPort& hostAndPort, ASIOImpl* global);
 
@@ -68,20 +68,20 @@ public:
     void bindAsyncOp(std::unique_ptr<NetworkInterfaceASIO::AsyncOp> op);
 
 protected:
-    stdx::chrono::time_point<stdx::chrono::steady_clock> getLastUsed() const override;
+    Date_t getLastUsed() const override;
 
-    void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setTimeout(Milliseconds timeout, timeoutCallback cb) override;
     void cancelTimeout() override;
 
-    void setup(setupCallback cb, stdx::chrono::milliseconds timeout) override;
-    void refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) override;
+    void setup(Milliseconds timeout, setupCallback cb) override;
+    void refresh(Milliseconds timeout, refreshCallback cb) override;
 
 private:
     setupCallback _setupCallback;
     refreshCallback _refreshCallback;
     ASIOImpl* _global;
     ASIOTimer _timer;
-    stdx::chrono::time_point<stdx::chrono::steady_clock> _lastUsed;
+    Date_t _lastUsed;
     HostAndPort _hostAndPort;
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> _impl;
 };
@@ -89,17 +89,17 @@ private:
 /**
  * Implementions connection pool implementation for asio
  */
-class ASIOImpl : public ConnectionPoolImplInterface {
+class ASIOImpl : public ConnectionPool::DependentTypeFactoryInterface {
     friend class ASIOConnection;
 
 public:
     ASIOImpl(NetworkInterfaceASIO* impl);
 
-    std::unique_ptr<ConnectionPoolConnectionInterface> makeConnection(
+    std::unique_ptr<ConnectionPool::ConnectionInterface> makeConnection(
         const HostAndPort& hostAndPort) override;
-    std::unique_ptr<ConnectionPoolTimerInterface> makeTimer() override;
+    std::unique_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 
-    stdx::chrono::time_point<stdx::chrono::steady_clock> now() override;
+    Date_t now() override;
 
 private:
     NetworkInterfaceASIO* _impl;

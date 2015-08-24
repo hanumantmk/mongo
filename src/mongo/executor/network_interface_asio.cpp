@@ -48,20 +48,22 @@ namespace mongo {
 namespace executor {
 
 NetworkInterfaceASIO::NetworkInterfaceASIO(
-    std::unique_ptr<AsyncStreamFactoryInterface> streamFactory)
-    : NetworkInterfaceASIO(std::move(streamFactory), nullptr) {}
+    std::unique_ptr<AsyncStreamFactoryInterface> streamFactory, Options options)
+    : NetworkInterfaceASIO(std::move(streamFactory), nullptr, std::move(options)) {}
 
 NetworkInterfaceASIO::NetworkInterfaceASIO(
     std::unique_ptr<AsyncStreamFactoryInterface> streamFactory,
-    std::unique_ptr<NetworkConnectionHook> networkConnectionHook)
-    : _io_service(),
+    std::unique_ptr<NetworkConnectionHook> networkConnectionHook,
+    Options options)
+    : _options(std::move(options)),
+      _io_service(),
       _hook(std::move(networkConnectionHook)),
       _resolver(_io_service),
       _state(State::kReady),
       _streamFactory(std::move(streamFactory)),
       _isExecutorRunnable(false),
-      _connectionPool(
-          std::unique_ptr<ConnectionPoolImplInterface>(new connection_pool_asio::ASIOImpl(this))) {}
+      _connectionPool(stdx::make_unique<connection_pool_asio::ASIOImpl>(this),
+                      _options.connectionPoolOptions) {}
 
 std::string NetworkInterfaceASIO::getDiagnosticString() {
     str::stream output;
@@ -137,13 +139,13 @@ void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHa
     auto startTime = now();
 
     auto nextStep = [this, startTime, cbHandle, request, onFinish](
-        StatusWith<ConnectionPoolConnectionInterface*> swConn) {
+        StatusWith<ConnectionPool::ConnectionHandle> swConn) {
         if (!swConn.isOK()) {
             onFinish(std::move(swConn.getStatus()));
             return;
         }
 
-        auto conn = static_cast<connection_pool_asio::ASIOConnection*>(swConn.getValue());
+        auto conn = static_cast<connection_pool_asio::ASIOConnection*>(swConn.getValue().get());
 
         auto ownedOp = conn->releaseAsyncOp();
 
@@ -151,7 +153,7 @@ void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHa
         op->_cbHandle = cbHandle;
         op->_request = request;
         op->_onFinish = onFinish;
-        op->_connectionPoolHandle = conn;
+        op->_connectionPoolHandle = std::move(swConn.getValue());
         op->_start = startTime;
 
         bool keepGoing = false;
@@ -172,7 +174,7 @@ void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHa
             asio::post(_io_service, [this, op]() { _beginCommunication(op); });
     };
 
-    _connectionPool.getConnection(request.target, stdx::chrono::seconds(10), nextStep);
+    _connectionPool.get(request.target, stdx::chrono::seconds(10), nextStep);
 }
 
 void NetworkInterfaceASIO::cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) {

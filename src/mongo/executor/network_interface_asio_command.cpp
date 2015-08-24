@@ -242,10 +242,11 @@ void NetworkInterfaceASIO::_completeOperation(AsyncOp* op, const ResponseStatus&
         _inProgress.erase(iter);
     }
 
-    auto conn = op->_connectionPoolHandle;
-    conn->bindAsyncOp(std::move(ownedOp));
-    conn->indicateUsed();
-    _connectionPool.returnConnection(conn);
+    auto conn = std::move(op->_connectionPoolHandle);
+    auto asioConn = static_cast<connection_pool_asio::ASIOConnection*>(conn.get());
+
+    asioConn->bindAsyncOp(std::move(ownedOp));
+    asioConn->indicateUsed();
 
     signalWorkAvailable();
 }

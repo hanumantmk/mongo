@@ -39,43 +39,102 @@
 namespace mongo {
 namespace executor {
 
-class ConnectionPool;
-class ConnectionPoolConnectionInterface;
-class ConnectionPoolTimerInterface;
-
 /**
- * Interface for connection pool connections
+ * The actual user visible connection pool.
  *
- * Provides a minimal interface to manipulate connections within the pool,
- * specifically callbacks to set them up (connect + auth + whatever else),
- * refresh them (issue some kind of ping) and manage a timer.
+ * This pool is constructed with a DependentTypeFactoryInterface which provides the tools it
+ * needs to generate connections and manage them over time.
+ *
+ * The overall workflow here is to manage separate pools for each unique
+ * HostAndPort. See comments on the various Options for how the pool operates.
  */
-class ConnectionPoolConnectionInterface {
-    friend class ConnectionPool;
+class ConnectionPool {
+    class ConnectionHandleDeleter;
+    class SpecificPool;
 
 public:
-    virtual ~ConnectionPoolConnectionInterface() = default;
+    class ConnectionInterface;
+    class DependentTypeFactoryInterface;
+    class TimerInterface;
+
+    using ConnectionHandle = std::unique_ptr<ConnectionInterface, ConnectionHandleDeleter>;
+
+    using getConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
+
+    static const Milliseconds kDefaultRefreshTimeout;
+    static const Milliseconds kDefaultRefreshRequirement;
+    static const Milliseconds kDefaultHostTimeout;
+
+    struct Options {
+        Options() {}
+
+        /**
+         * The minimum number of connections to keep alive while the pool is in
+         * operation
+         */
+        size_t minConnections = 1;
+
+        /**
+         * The maximum number of connections to spawn for a host. This includes
+         * pending connections in setup and connections checked out of the pool
+         * as well as the obvious live connections in the pool.
+         */
+        size_t maxConnections = std::numeric_limits<size_t>::max();
+
+        /**
+         * Amount of time to wait before timing out a refresh attempt
+         */
+        Milliseconds refreshTimeout = kDefaultRefreshTimeout;
+
+        /**
+         * Amount of time a connection may be idle before it cannot be returned
+         * for a user request and must instead be checked out and refreshed
+         * before handing to a user.
+         */
+        Milliseconds refreshRequirement = kDefaultRefreshRequirement;
+
+        /**
+         * Amount of time to keep a specific pool around without any checked
+         * out connections or new requests
+         */
+        Milliseconds hostTimeout = kDefaultHostTimeout;
+    };
+
+    explicit ConnectionPool(std::unique_ptr<DependentTypeFactoryInterface> impl,
+                            Options options = Options{});
+
+    void get(const HostAndPort& hostAndPort, Milliseconds timeout, getConnectionCallback cb);
 
     /**
-     * Intended to be called whenever a socket is used in a way which indicates
-     * liveliness. I.e. if an operation is executed over the connection.
+     * TODO add a function returning connection pool stats
      */
-    virtual void indicateUsed() = 0;
 
-    virtual const HostAndPort& getHostAndPort() const = 0;
+private:
+    void returnConnection(ConnectionInterface* connPtr);
 
-protected:
-    virtual stdx::chrono::time_point<stdx::chrono::steady_clock> getLastUsed() const = 0;
+    // options are set at startup and never changed at run time, so these are
+    // accessed outside the lock
+    const Options _options;
 
-    using timeoutCallback = stdx::function<void()>;
-    virtual void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) = 0;
-    virtual void cancelTimeout() = 0;
+    const std::unique_ptr<DependentTypeFactoryInterface> _factory;
 
-    using setupCallback = stdx::function<void(ConnectionPoolConnectionInterface*, Status)>;
-    virtual void setup(setupCallback cb, stdx::chrono::milliseconds timeout) = 0;
+    // The global mutex for specific pool access
+    stdx::mutex _mutex;
+    std::unordered_map<HostAndPort, std::unique_ptr<SpecificPool>> _pools;
+};
 
-    using refreshCallback = stdx::function<void(ConnectionPoolConnectionInterface*, Status)>;
-    virtual void refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) = 0;
+class ConnectionPool::ConnectionHandleDeleter {
+public:
+    ConnectionHandleDeleter() {}
+    ConnectionHandleDeleter(ConnectionPool* pool) : _pool(pool) {}
+
+    void operator()(ConnectionInterface* ptr) {
+        if (_pool && ptr)
+            _pool->returnConnection(ptr);
+    }
+
+private:
+    ConnectionPool* _pool = nullptr;
 };
 
 /**
@@ -83,12 +142,17 @@ protected:
  *
  * Minimal interface sets a timer with a callback and cancels the timer.
  */
-class ConnectionPoolTimerInterface {
+class ConnectionPool::TimerInterface {
 public:
-    virtual ~ConnectionPoolTimerInterface() = default;
-
     using timeoutCallback = stdx::function<void()>;
-    virtual void setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) = 0;
+
+    virtual ~TimerInterface() = default;
+
+    /**
+     * Sets the timeout for the timer. Setting a set timer should override the
+     * previous timer.
+     */
+    virtual void setTimeout(Milliseconds timeout, timeoutCallback cb) = 0;
 
     /**
      * It should be safe to cancel a previously canceled, or never set, timer.
@@ -97,155 +161,161 @@ public:
 };
 
 /**
+ * Interface for connection pool connections
+ *
+ * Provides a minimal interface to manipulate connections within the pool,
+ * specifically callbacks to set them up (connect + auth + whatever else),
+ * refresh them (issue some kind of ping) and manage a timer.
+ */
+class ConnectionPool::ConnectionInterface : public TimerInterface {
+    friend class ConnectionPool;
+
+public:
+    virtual ~ConnectionInterface() = default;
+
+    /**
+     * Intended to be called whenever a socket is used in a way which indicates
+     * liveliness. I.e. if an operation is executed over the connection.
+     */
+    virtual void indicateUsed() = 0;
+
+    /**
+     * The HostAndPort for the connection. This should be the same as the
+     * HostAndPort passed to DependentTypeFactoryInterface::makeConnection.
+     */
+    virtual const HostAndPort& getHostAndPort() const = 0;
+
+protected:
+    /**
+     * Making these protected makes the definitions available to override in
+     * children
+     */
+    using setupCallback = stdx::function<void(ConnectionInterface*, Status)>;
+    using refreshCallback = stdx::function<void(ConnectionInterface*, Status)>;
+
+private:
+    virtual Date_t getLastUsed() const = 0;
+
+    /**
+     * Sets up the connection. This should include connection + auth + any
+     * other associated hooks.
+     */
+    virtual void setup(Milliseconds timeout, setupCallback cb) = 0;
+
+    /**
+     * Refreshes the connection. This should involve a network round trip and
+     * should strongly imply an active connection
+     */
+    virtual void refresh(Milliseconds timeout, refreshCallback cb) = 0;
+};
+
+/**
  * Implementation interface for the connection pool
  *
  * This factory provides generators for connections, timers and a clock for the
  * connection pool.
  */
-class ConnectionPoolImplInterface {
+class ConnectionPool::DependentTypeFactoryInterface {
 public:
-    virtual ~ConnectionPoolImplInterface() = default;
+    virtual ~DependentTypeFactoryInterface() = default;
 
-    virtual std::unique_ptr<ConnectionPoolConnectionInterface> makeConnection(
-        const HostAndPort& hostAndPort) = 0;
-    virtual std::unique_ptr<ConnectionPoolTimerInterface> makeTimer() = 0;
+    /**
+     * Makes a new connection given a host and port
+     */
+    virtual std::unique_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort) = 0;
 
-    virtual stdx::chrono::time_point<stdx::chrono::steady_clock> now() = 0;
+    /**
+     * Makes a new timer
+     */
+    virtual std::unique_ptr<TimerInterface> makeTimer() = 0;
+
+    /**
+     * Returns the current time point
+     */
+    virtual Date_t now() = 0;
 };
 
 /**
- * The actual user visible connection pool.
+ * A pool for a specific HostAndPort
  *
- * This pool is constructed with a ImplInterface which provides the tools it
- * needs to generate connections and manage them over time.
- *
- * The overall workflow here is to manage separate pools for each unique
- * HostAndPort. See comments on the various Options for how the pool operates.
+ * Pools come into existance the first time a connection is requested and
+ * go out of existence after hostTimeout passes without any of their
+ * connections being used.
  */
-class ConnectionPool {
+class ConnectionPool::SpecificPool {
 public:
-    static const stdx::chrono::milliseconds kRefreshTimeout;
-    static const stdx::chrono::milliseconds kRefreshRequirement;
-    static const stdx::chrono::milliseconds kHostTimeout;
+    SpecificPool(ConnectionPool* parent, const HostAndPort& hostAndPort);
+    ~SpecificPool();
 
-    struct Options {
-        Options() {}
-
-        // The minimum number of connections to keep alive while the pool is in
-        // operation
-        size_t minConnections = 1;
-
-        // The maximum number of connections to spawn for a host. This includes
-        // pending connections in setup and connections checked out of the pool
-        // as well as the obvious live connections in the pool.
-        size_t maxConnections = 10;
-
-        // Amount of time to wait before timing out a refresh attempt
-        stdx::chrono::milliseconds refreshTimeout = kRefreshTimeout;
-
-        // Amount of time to hold a connection in the pool before attempting to refresh it
-        stdx::chrono::milliseconds refreshRequirement = kRefreshRequirement;
-
-        // Amount of time to keep a specific pool around without any checked
-        // out connections or new requests
-        stdx::chrono::milliseconds hostTimeout = kHostTimeout;
-    };
-
-    ConnectionPool(std::unique_ptr<ConnectionPoolImplInterface> impl, Options options = Options{});
-
-    using getConnectionCallback =
-        stdx::function<void(StatusWith<ConnectionPoolConnectionInterface*>)>;
+    /**
+     * Get's a connection from the specific pool. Sinks a unique_lock from the
+     * parent to preserve the lock on _mutex
+     */
     void getConnection(const HostAndPort& hostAndPort,
-                       stdx::chrono::milliseconds timeout,
+                       Milliseconds timeout,
+                       stdx::unique_lock<stdx::mutex> lk,
                        getConnectionCallback cb);
 
-    void returnConnection(ConnectionPoolConnectionInterface* connPtr);
+    /**
+     * Returns a connection to a specific pool. Sinks a unique_lock from the
+     * parent to preserve the lock on _mutex
+     */
+    void returnConnection(ConnectionInterface* connPtr, stdx::unique_lock<stdx::mutex> lk);
 
 private:
+    using OwnedConnection = std::unique_ptr<ConnectionInterface>;
+    using OwnershipPool = std::unordered_map<ConnectionInterface*, OwnedConnection>;
+
+    void addToReady(stdx::unique_lock<stdx::mutex>& lk, OwnedConnection conn);
+
+    void fulfillRequests(stdx::unique_lock<stdx::mutex>& lk);
+
+    void spawnConnections(stdx::unique_lock<stdx::mutex>& lk, const HostAndPort& hostAndPort);
+
+    void shutdown();
+
+    void sortRequests();
+
+    OwnedConnection takeFromPool(OwnershipPool& pool, ConnectionInterface* connPtr);
+
+    void updateState();
+
+private:
+    ConnectionPool* const _parent;
+
+    const HostAndPort _hostAndPort;
+
+    OwnershipPool _readyPool;
+    OwnershipPool _processingPool;
+    OwnershipPool _checkedOutPool;
+    std::vector<std::pair<Date_t, getConnectionCallback>> _requests;
+    std::unique_ptr<TimerInterface> _requestTimer;
+    Date_t _requestTimerExpiration;
+
     /**
-     * A pool for a specific HostAndPort
+     * The current state of the pool
      *
-     * Pools come into existance the first time a connection is requested and
-     * go out of existence after hostTimeout passes without any of their
-     * connections being used.
+     * The pool begins in a running state. Moves to idle when no requests
+     * are pending and no connections are checked out. It finally enters
+     * shutdown after hostTimeout has passed (and waits there for current
+     * refreshes to process out).
+     *
+     * At any point a new request sets the state back to running and
+     * restarts all timers.
      */
-    class SpecificPool {
-    public:
-        SpecificPool(ConnectionPool* global, const HostAndPort& hostAndPort);
-        ~SpecificPool();
+    enum class State : uint8_t {
+        // The pool is active
+        running,
 
-        void getConnection(const HostAndPort& hostAndPort,
-                           stdx::chrono::milliseconds timeout,
-                           getConnectionCallback cb,
-                           stdx::unique_lock<stdx::mutex> lk);
-        void returnConnection(ConnectionPoolConnectionInterface* connPtr,
-                              stdx::unique_lock<stdx::mutex> lk);
+        // No current activity, waiting for hostTimeout to pass
+        idle,
 
-    private:
-        using ConnectionHandle = std::unique_ptr<ConnectionPoolConnectionInterface>;
-
-        void addToReady(stdx::unique_lock<stdx::mutex>& lk, ConnectionHandle conn);
-
-        void fulfillRequests(stdx::unique_lock<stdx::mutex>& lk);
-
-        void spawnConnections(stdx::unique_lock<stdx::mutex>& lk, const HostAndPort& hostAndPort);
-
-        void shutdown();
-
-        void sortRequests();
-
-        ConnectionHandle takeFromPool(
-            std::unordered_map<ConnectionPoolConnectionInterface*, ConnectionHandle>& pool,
-            ConnectionPoolConnectionInterface* connPtr);
-
-        void updateState();
-
-        ConnectionPool* _global;
-
-        HostAndPort _hostAndPort;
-
-        std::unordered_map<ConnectionPoolConnectionInterface*, ConnectionHandle> _readyPool;
-        std::unordered_map<ConnectionPoolConnectionInterface*, ConnectionHandle> _processingPool;
-        std::unordered_map<ConnectionPoolConnectionInterface*, ConnectionHandle> _checkedOutPool;
-        std::vector<std::pair<stdx::chrono::time_point<stdx::chrono::steady_clock>,
-                              getConnectionCallback>> _requests;
-        std::unique_ptr<ConnectionPoolTimerInterface> _requestTimer;
-        stdx::chrono::time_point<stdx::chrono::steady_clock> _requestTimerExpiration;
-
-        /**
-         * The current state of the pool
-         *
-         * The pool begins in a running state. Moves to idle when no requests
-         * are pending and no connections are checked out. It finally enters
-         * shutdown after hostTimeout has passed (and waits there for current
-         * refreshes to process out).
-         *
-         * At any point a new request sets the state back to running and
-         * restarts all timers.
-         */
-        enum class State : uint8_t {
-            // The pool is active
-            running,
-
-            // No current activity, waiting for hostTimeout to pass
-            idle,
-
-            // hostTimeout is passed, we're waiting for any processing
-            // connections to finish before shutting down
-            inShutdown,
-        };
-
-        State _state;
+        // hostTimeout is passed, we're waiting for any processing
+        // connections to finish before shutting down
+        inShutdown,
     };
 
-    // The global mutex for everything
-    stdx::mutex _mutex;
-    std::unique_ptr<ConnectionPoolImplInterface> _impl;
-    std::unordered_map<HostAndPort, std::unique_ptr<SpecificPool>> _pools;
-
-    // options are set at startup and never changed at run time, so these are
-    // accessed outside the lock
-    Options _options;
+    State _state;
 };
 
 }  // namespace executor

@@ -46,6 +46,7 @@ public:
 
     void connect(const asio::ip::tcp::resolver::iterator endpoints,
                  ConnectHandler&& connectHandler) override;
+
     void write(asio::const_buffer buffer, StreamHandler&& streamHandler) override;
 
     void read(asio::mutable_buffer buffer, StreamHandler&& streamHandler) override;

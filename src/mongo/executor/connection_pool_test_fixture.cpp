@@ -41,7 +41,7 @@ TimerImpl::~TimerImpl() {
     cancelTimeout();
 }
 
-void TimerImpl::setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) {
+void TimerImpl::setTimeout(Milliseconds timeout, timeoutCallback cb) {
     _cb = std::move(cb);
     _expiration = _global->now() + timeout;
 
@@ -118,24 +118,24 @@ void ConnectionImpl::pushRefresh(Status status) {
     pushRefresh([status]() { return status; });
 }
 
-stdx::chrono::time_point<stdx::chrono::steady_clock> ConnectionImpl::getLastUsed() const {
+Date_t ConnectionImpl::getLastUsed() const {
     return _lastUsed;
 }
 
-void ConnectionImpl::setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) {
-    _timer.setTimeout(cb, timeout);
+void ConnectionImpl::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+    _timer.setTimeout(timeout, cb);
 }
 
 void ConnectionImpl::cancelTimeout() {
     _timer.cancelTimeout();
 }
 
-void ConnectionImpl::setup(setupCallback cb, stdx::chrono::milliseconds timeout) {
+void ConnectionImpl::setup(Milliseconds timeout, setupCallback cb) {
     _setupCallback = std::move(cb);
 
-    _timer.setTimeout([this] {
-        _setupCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
-    }, timeout);
+    _timer.setTimeout(
+        timeout,
+        [this] { _setupCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout")); });
 
     _setupQueue.push_back(this);
 
@@ -146,12 +146,12 @@ void ConnectionImpl::setup(setupCallback cb, stdx::chrono::milliseconds timeout)
     }
 }
 
-void ConnectionImpl::refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) {
+void ConnectionImpl::refresh(Milliseconds timeout, refreshCallback cb) {
     _refreshCallback = std::move(cb);
 
-    _timer.setTimeout([this] {
-        _refreshCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
-    }, timeout);
+    _timer.setTimeout(
+        timeout,
+        [this] { _refreshCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout")); });
 
     _refreshQueue.push_back(this);
 
@@ -167,29 +167,29 @@ std::deque<ConnectionImpl::pushRefreshCallback> ConnectionImpl::_pushRefreshQueu
 std::deque<ConnectionImpl*> ConnectionImpl::_setupQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_refreshQueue;
 
-std::unique_ptr<ConnectionPoolConnectionInterface> PoolImpl::makeConnection(
+std::unique_ptr<ConnectionPool::ConnectionInterface> PoolImpl::makeConnection(
     const HostAndPort& hostAndPort) {
     return stdx::make_unique<ConnectionImpl>(hostAndPort, this);
 }
 
-std::unique_ptr<ConnectionPoolTimerInterface> PoolImpl::makeTimer() {
+std::unique_ptr<ConnectionPool::TimerInterface> PoolImpl::makeTimer() {
     return stdx::make_unique<TimerImpl>(this);
 }
 
-stdx::chrono::time_point<stdx::chrono::steady_clock> PoolImpl::now() {
+Date_t PoolImpl::now() {
     if (_now) {
         return _now.get();
     }
 
-    return stdx::chrono::steady_clock::now();
+    return Date_t::now();
 }
 
-void PoolImpl::setNow(stdx::chrono::time_point<stdx::chrono::steady_clock> now) {
+void PoolImpl::setNow(Date_t now) {
     _now = now;
     TimerImpl::fireIfNecessary();
 }
 
-boost::optional<stdx::chrono::time_point<stdx::chrono::steady_clock>> PoolImpl::_now;
+boost::optional<Date_t> PoolImpl::_now;
 
 }  // namespace connection_pool_test_details
 }  // namespace executor

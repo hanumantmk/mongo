@@ -61,25 +61,25 @@ const HostAndPort& ASIOConnection::getHostAndPort() const {
     return _hostAndPort;
 }
 
-stdx::chrono::time_point<stdx::chrono::steady_clock> ASIOConnection::getLastUsed() const {
+Date_t ASIOConnection::getLastUsed() const {
     return _lastUsed;
 }
 
-void ASIOConnection::setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) {
-    _timer.setTimeout(std::move(cb), timeout);
+void ASIOConnection::setTimeout(Milliseconds timeout, timeoutCallback cb) {
+    _timer.setTimeout(timeout, std::move(cb));
 }
 
 void ASIOConnection::cancelTimeout() {
     _timer.cancelTimeout();
 }
 
-void ASIOConnection::setup(setupCallback cb, stdx::chrono::milliseconds timeout) {
+void ASIOConnection::setup(Milliseconds timeout, setupCallback cb) {
     _setupCallback = std::move(cb);
 
     _global->_impl->_connect(_impl.get());
 }
 
-void ASIOConnection::refresh(refreshCallback cb, stdx::chrono::milliseconds timeout) {
+void ASIOConnection::refresh(Milliseconds timeout, refreshCallback cb) {
     auto op = _impl.get();
 
     _refreshCallback = std::move(cb);
@@ -92,9 +92,11 @@ void ASIOConnection::refresh(refreshCallback cb, stdx::chrono::milliseconds time
     }
 
     // Actually timeout refreshes
-    setTimeout([this]() {
-        asio::post(_global->_impl->_io_service, [this] { _impl->connection().stream().cancel(); });
-    }, timeout);
+    setTimeout(timeout,
+               [this]() {
+                   asio::post(_global->_impl->_io_service,
+                              [this] { _impl->connection().stream().cancel(); });
+               });
 
     // Our pings are isMaster's
     auto& cmd = op->beginCommand(
@@ -126,7 +128,7 @@ void ASIOConnection::bindAsyncOp(std::unique_ptr<NetworkInterfaceASIO::AsyncOp> 
 
 ASIOTimer::ASIOTimer(asio::io_service* io_service) : _io_service(io_service), _impl(*io_service) {}
 
-void ASIOTimer::setTimeout(timeoutCallback cb, stdx::chrono::milliseconds timeout) {
+void ASIOTimer::setTimeout(Milliseconds timeout, timeoutCallback cb) {
     _cb = std::move(cb);
 
     _impl.expires_after(timeout);
@@ -142,15 +144,15 @@ void ASIOTimer::cancelTimeout() {
 
 ASIOImpl::ASIOImpl(NetworkInterfaceASIO* impl) : _impl(impl) {}
 
-stdx::chrono::time_point<stdx::chrono::steady_clock> ASIOImpl::now() {
-    return stdx::chrono::steady_clock::now();
+Date_t ASIOImpl::now() {
+    return Date_t::now();
 }
 
-std::unique_ptr<ConnectionPoolTimerInterface> ASIOImpl::makeTimer() {
+std::unique_ptr<ConnectionPool::TimerInterface> ASIOImpl::makeTimer() {
     return stdx::make_unique<ASIOTimer>(&_impl->_io_service);
 }
 
-std::unique_ptr<ConnectionPoolConnectionInterface> ASIOImpl::makeConnection(
+std::unique_ptr<ConnectionPool::ConnectionInterface> ASIOImpl::makeConnection(
     const HostAndPort& hostAndPort) {
     return stdx::make_unique<ASIOConnection>(hostAndPort, this);
 }

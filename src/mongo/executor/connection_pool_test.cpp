@@ -54,27 +54,23 @@ private:
 TEST_F(ConnectionPoolTest, SameConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
+    ConnectionPool::ConnectionInterface* conn1 = nullptr;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn1 = swConn.getValue();
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn1 = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
-
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
+    ConnectionPool::ConnectionInterface* conn2 = nullptr;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn2 = swConn.getValue();
-
-                           pool.returnConnection(swConn.getValue());
-                       });
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn2 = swConn.getValue().get();
+             });
 
     ASSERT_EQ(conn1, conn2);
 }
@@ -82,27 +78,23 @@ TEST_F(ConnectionPoolTest, SameConn) {
 TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
+    ConnectionPool::ConnectionInterface* conn1 = nullptr;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort("localhost:30000"),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn1 = swConn.getValue();
+    pool.get(HostAndPort("localhost:30000"),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn1 = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
-
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
+    ConnectionPool::ConnectionInterface* conn2 = nullptr;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort("localhost:30001"),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn2 = swConn.getValue();
-
-                           pool.returnConnection(swConn.getValue());
-                       });
+    pool.get(HostAndPort("localhost:30001"),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn2 = swConn.getValue().get();
+             });
 
     ASSERT_NE(conn1, conn2);
 }
@@ -110,25 +102,25 @@ TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
 TEST_F(ConnectionPoolTest, DifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
+    ConnectionPool::ConnectionHandle conn1;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn1 = swConn.getValue();
-                       });
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn1 = std::move(swConn.getValue());
+             });
 
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
+    ConnectionPool::ConnectionHandle conn2;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-                           conn2 = swConn.getValue();
-                       });
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 conn2 = std::move(swConn.getValue());
+             });
 
-    ASSERT_NE(conn1, conn2);
+    ASSERT_NE(conn1.get(), conn2.get());
 }
 
 TEST_F(ConnectionPoolTest, TimeoutOnSetup) {
@@ -136,16 +128,15 @@ TEST_F(ConnectionPoolTest, TimeoutOnSetup) {
 
     bool notOk = false;
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    pool.getConnection(
-        HostAndPort(),
-        stdx::chrono::milliseconds(5000),
-        [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) { notOk = !swConn.isOK(); });
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { notOk = !swConn.isOK(); });
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(5000));
+    PoolImpl::setNow(now + Milliseconds(5000));
 
     ASSERT(notOk);
 }
@@ -164,96 +155,84 @@ TEST_F(ConnectionPoolTest, refreshHappens) {
     });
 
     ConnectionPool::Options options;
-    options.refreshRequirement = stdx::chrono::milliseconds(1000);
+    options.refreshRequirement = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { ASSERT(swConn.isOK()); });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
-
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(1000));
+    PoolImpl::setNow(now + Milliseconds(1000));
     ASSERT(refreshedA);
     ASSERT(!refreshedB);
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(1500));
+    PoolImpl::setNow(now + Milliseconds(1500));
     ASSERT(!refreshedB);
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(2000));
     ASSERT(refreshedB);
 }
 
 TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     ConnectionPool::Options options;
-    options.refreshRequirement = stdx::chrono::milliseconds(1000);
-    options.refreshTimeout = stdx::chrono::milliseconds(2000);
+    options.refreshRequirement = Milliseconds(1000);
+    options.refreshTimeout = Milliseconds(2000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    ConnectionPoolConnectionInterface* conn = nullptr;
+    ConnectionPool::ConnectionInterface* conn = nullptr;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn = swConn.getValue();
+                 conn = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
-
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(500));
+    PoolImpl::setNow(now + Milliseconds(500));
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           ASSERT_EQ(swConn.getValue(), conn);
+                 ASSERT_EQ(swConn.getValue().get(), conn);
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
-
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(2000));
     bool reached = false;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(10000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(10000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           reached = true;
-
-                           pool.returnConnection(swConn.getValue());
-                       });
+                 reached = true;
+             });
     ASSERT(!reached);
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(3000));
+    PoolImpl::setNow(now + Milliseconds(3000));
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(1000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(1000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           ASSERT_NE(swConn.getValue(), conn);
-
-                           pool.returnConnection(swConn.getValue());
-                       });
+                 ASSERT_NE(swConn.getValue().get(), conn);
+             });
 
     ASSERT(reached);
 }
@@ -264,31 +243,33 @@ TEST_F(ConnectionPoolTest, requestsServedByUrgency) {
     bool reachedA = false;
     bool reachedB = false;
 
-    ConnectionPoolConnectionInterface* conn;
+    ConnectionPool::ConnectionHandle conn;
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(2000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(2000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           reachedA = true;
-                       });
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(1000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 reachedA = true;
+             });
 
-                           reachedB = true;
+    pool.get(HostAndPort(),
+             Milliseconds(1000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn = swConn.getValue();
-                       });
+                 reachedB = true;
+
+                 conn = std::move(swConn.getValue());
+             });
 
     ConnectionImpl::pushSetup(Status::OK());
 
     ASSERT(reachedB);
     ASSERT(!reachedA);
 
-    pool.returnConnection(conn);
+    conn.reset();
+
     ASSERT(reachedA);
 }
 
@@ -298,31 +279,31 @@ TEST_F(ConnectionPoolTest, maxPoolRespected) {
     options.maxConnections = 2;
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
-    ConnectionPoolConnectionInterface* conn3 = nullptr;
+    ConnectionPool::ConnectionHandle conn1;
+    ConnectionPool::ConnectionHandle conn2;
+    ConnectionPool::ConnectionHandle conn3;
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(3000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(3000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn3 = swConn.getValue();
-                       });
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(2000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 conn3 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(2000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn2 = swConn.getValue();
-                       });
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(1000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 conn2 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(1000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn1 = swConn.getValue();
-                       });
+                 conn1 = std::move(swConn.getValue());
+             });
 
     ConnectionImpl::pushSetup(Status::OK());
     ConnectionImpl::pushSetup(Status::OK());
@@ -332,34 +313,35 @@ TEST_F(ConnectionPoolTest, maxPoolRespected) {
     ASSERT(conn2);
     ASSERT(!conn3);
 
-    pool.returnConnection(conn1);
+    ConnectionPool::ConnectionInterface* conn1Ptr = conn1.get();
+    conn1.reset();
 
-    ASSERT_EQ(conn1, conn3);
+    ASSERT_EQ(conn1Ptr, conn3.get());
 }
 
 TEST_F(ConnectionPoolTest, minPoolRespected) {
     ConnectionPool::Options options;
     options.minConnections = 2;
     options.maxConnections = 3;
-    options.refreshRequirement = stdx::chrono::milliseconds(1000);
-    options.refreshTimeout = stdx::chrono::milliseconds(2000);
+    options.refreshRequirement = Milliseconds(1000);
+    options.refreshTimeout = Milliseconds(2000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
-    ConnectionPoolConnectionInterface* conn3 = nullptr;
+    ConnectionPool::ConnectionHandle conn1;
+    ConnectionPool::ConnectionHandle conn2;
+    ConnectionPool::ConnectionHandle conn3;
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(1000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(1000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn1 = swConn.getValue();
-                       });
+                 conn1 = std::move(swConn.getValue());
+             });
 
     bool reachedA = false;
     bool reachedB = false;
@@ -382,20 +364,20 @@ TEST_F(ConnectionPoolTest, minPoolRespected) {
     ASSERT(reachedB);
     ASSERT(!reachedC);
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(2000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(2000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn2 = swConn.getValue();
-                       });
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(3000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 conn2 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(3000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn3 = swConn.getValue();
-                       });
+                 conn3 = std::move(swConn.getValue());
+             });
 
     reachedA = false;
     reachedB = false;
@@ -414,19 +396,19 @@ TEST_F(ConnectionPoolTest, minPoolRespected) {
         return Status::OK();
     });
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(1));
+    PoolImpl::setNow(now + Milliseconds(1));
     conn1->indicateUsed();
-    pool.returnConnection(conn1);
+    conn1.reset();
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(2));
+    PoolImpl::setNow(now + Milliseconds(2));
     conn2->indicateUsed();
-    pool.returnConnection(conn2);
+    conn2.reset();
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(3));
+    PoolImpl::setNow(now + Milliseconds(3));
     conn3->indicateUsed();
-    pool.returnConnection(conn3);
+    conn3.reset();
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(5000));
+    PoolImpl::setNow(now + Milliseconds(5000));
 
     ASSERT(reachedA);
     ASSERT(reachedB);
@@ -435,145 +417,133 @@ TEST_F(ConnectionPoolTest, minPoolRespected) {
 
 TEST_F(ConnectionPoolTest, hostTimeoutHappens) {
     ConnectionPool::Options options;
-    options.refreshRequirement = stdx::chrono::milliseconds(5000);
-    options.refreshTimeout = stdx::chrono::milliseconds(5000);
-    options.hostTimeout = stdx::chrono::milliseconds(1000);
+    options.refreshRequirement = Milliseconds(5000);
+    options.refreshTimeout = Milliseconds(5000);
+    options.hostTimeout = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    ConnectionPoolConnectionInterface* conn = nullptr;
+    ConnectionPool::ConnectionInterface* conn = nullptr;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn = swConn.getValue();
+                 conn = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
+    PoolImpl::setNow(now + Milliseconds(1000));
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(1000));
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-
-                           ASSERT_NE(conn, swConn.getValue());
-                           pool.returnConnection(swConn.getValue());
-                       });
+                 ASSERT_NE(conn, swConn.getValue().get());
+             });
 }
 
 TEST_F(ConnectionPoolTest, hostTimeoutHappensMoreGetsDelay) {
     ConnectionPool::Options options;
-    options.refreshRequirement = stdx::chrono::milliseconds(5000);
-    options.refreshTimeout = stdx::chrono::milliseconds(5000);
-    options.hostTimeout = stdx::chrono::milliseconds(1000);
+    options.refreshRequirement = Milliseconds(5000);
+    options.refreshTimeout = Milliseconds(5000);
+    options.hostTimeout = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    ConnectionPoolConnectionInterface* conn = nullptr;
+    ConnectionPool::ConnectionInterface* conn = nullptr;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn = swConn.getValue();
+                 conn = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
+    PoolImpl::setNow(now + Milliseconds(999));
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(999));
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 ASSERT_EQ(conn, swConn.getValue().get());
+             });
 
-                           ASSERT_EQ(conn, swConn.getValue());
-                           pool.returnConnection(swConn.getValue());
-                       });
+    PoolImpl::setNow(now + Milliseconds(2000));
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(2000));
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-
-                           ASSERT_NE(conn, swConn.getValue());
-                           pool.returnConnection(swConn.getValue());
-                       });
+                 ASSERT_NE(conn, swConn.getValue().get());
+             });
 }
 
 TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
     ConnectionPool::Options options;
-    options.refreshRequirement = stdx::chrono::milliseconds(5000);
-    options.refreshTimeout = stdx::chrono::milliseconds(5000);
-    options.hostTimeout = stdx::chrono::milliseconds(1000);
+    options.refreshRequirement = Milliseconds(5000);
+    options.refreshTimeout = Milliseconds(5000);
+    options.hostTimeout = Milliseconds(1000);
     options.minConnections = 1;
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = stdx::chrono::steady_clock::now();
+    auto now = Date_t::now();
 
     PoolImpl::setNow(now);
 
-    ConnectionPoolConnectionInterface* conn1 = nullptr;
-    ConnectionPoolConnectionInterface* conn2 = nullptr;
+    ConnectionPool::ConnectionHandle conn1;
+    ConnectionPool::ConnectionInterface* conn2Ptr = nullptr;
 
     ConnectionImpl::pushSetup(Status::OK());
     ConnectionImpl::pushSetup(Status::OK());
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn1 = swConn.getValue();
-                       });
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 conn1 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-                           conn2 = swConn.getValue();
+                 conn2Ptr = swConn.getValue().get();
+             });
 
-                           pool.returnConnection(swConn.getValue());
-                       });
+    PoolImpl::setNow(now + Milliseconds(1000));
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(1000));
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
+                 ASSERT_EQ(conn2Ptr, swConn.getValue().get());
+             });
 
-                           ASSERT_EQ(conn2, swConn.getValue());
+    conn1.reset();
 
-                           pool.returnConnection(swConn.getValue());
-                       });
+    PoolImpl::setNow(now + Milliseconds(2000));
 
-    pool.returnConnection(conn1);
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
 
-    PoolImpl::setNow(now + stdx::chrono::milliseconds(2000));
-
-    pool.getConnection(HostAndPort(),
-                       stdx::chrono::milliseconds(5000),
-                       [&](StatusWith<ConnectionPoolConnectionInterface*> swConn) {
-                           ASSERT(swConn.isOK());
-
-                           ASSERT_NE(conn2, swConn.getValue());
-                           pool.returnConnection(swConn.getValue());
-                       });
+                 ASSERT_NE(conn2Ptr, swConn.getValue().get());
+             });
 }
 
 }  // namespace connection_pool_test_details
