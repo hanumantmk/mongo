@@ -68,46 +68,80 @@ public:
      * for the error case
      */
     StatusWith(ErrorCodes::Error code, std::string reason, int location = 0)
-        : _status(code, std::move(reason), location) {}
+        : _status(code, std::move(reason), location), _hasValue(false) {}
 
     /**
      * for the error case
      */
-    StatusWith(Status status) : _status(std::move(status)) {
+    StatusWith(Status status) : _status(std::move(status)), _hasValue(false) {
         dassert(!isOK());
     }
 
     /**
      * for the OK case
      */
-    StatusWith(T t) : _status(Status::OK()), _t(std::move(t)) {}
+    StatusWith(T t) : _status(Status::OK()), _hasValue(true) {
+        new (_storage) T(std::move(t));
+    }
 
-#if defined(_MSC_VER) && _MSC_VER < 1900
-    StatusWith(const StatusWith& s) : _status(s._status), _t(s._t) {}
+    StatusWith(const StatusWith& s) : _status(s._status), _hasValue(s._hasValue) {
+        if (_hasValue) {
+            new (_storage) T(s.getValue());
+        }
+    }
 
-    StatusWith(StatusWith&& s) : _status(std::move(s._status)), _t(std::move(s._t)) {}
+    StatusWith(StatusWith&& s) : _status(std::move(s._status)), _hasValue(s._hasValue) {
+        if (_hasValue) {
+            new (_storage) T(std::move(s.getValue()));
+        }
+
+        s._hasValue = false;
+        s._status = Status::OK();
+    }
 
     StatusWith& operator=(const StatusWith& other) {
+        if (_hasValue) {
+            reinterpret_cast<T*>(_storage)->~T();
+        }
+
         _status = other._status;
-        _t = other._t;
+        _hasValue = other._hasValue;
+        if (_hasValue) {
+            new (_storage) T(std::move(other.getValue()));
+        }
         return *this;
     }
 
     StatusWith& operator=(StatusWith&& other) {
+        if (_hasValue) {
+            reinterpret_cast<T*>(_storage)->~T();
+        }
+
         _status = std::move(other._status);
-        _t = std::move(other._t);
+        _hasValue = other._hasValue;
+        if (_hasValue) {
+            new (_storage) T(std::move(other.getValue()));
+        }
+
+        other._hasValue = false;
+
         return *this;
     }
-#endif
+
+    ~StatusWith() {
+        if (_hasValue) {
+            reinterpret_cast<T*>(_storage)->~T();
+        }
+    }
 
     const T& getValue() const {
         dassert(isOK());
-        return *_t;
+        return *reinterpret_cast<const T*>(_storage);
     }
 
     T& getValue() {
         dassert(isOK());
-        return *_t;
+        return *reinterpret_cast<T*>(_storage);
     }
 
     const Status& getStatus() const {
@@ -120,7 +154,8 @@ public:
 
 private:
     Status _status;
-    boost::optional<T> _t;
+    bool _hasValue;
+    typename std::aligned_storage<sizeof(T), alignof(T)>::type _storage[1];
 };
 
 template <typename T, typename... Args>
