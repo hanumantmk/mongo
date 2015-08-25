@@ -253,6 +253,23 @@ void ConnectionPool::SpecificPool::spawnConnections(stdx::unique_lock<stdx::mute
 
                            if (status.isOK()) {
                                addToReady(lk, std::move(conn));
+                           } else if (_requests.size()) {
+                               // If the setup request failed, immediately fail
+                               // all other pending requests.
+
+                               // Move the requests out so they aren't visible
+                               // in other threads
+                               auto requestsToFail = std::move(_requests);
+
+                               // Update state to reflect the lack of requests
+                               updateState();
+
+                               // Drop the lock and process all of the requests
+                               // with the same failed status
+                               lk.unlock();
+                               for (auto&& x : requestsToFail) {
+                                   x.second(status);
+                               }
                            }
                        });
         // Note that this assumes that the refreshTimeout is sound for the
