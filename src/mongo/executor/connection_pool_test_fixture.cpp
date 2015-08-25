@@ -73,7 +73,7 @@ void TimerImpl::fireIfNecessary() {
 std::set<TimerImpl*> TimerImpl::_timers;
 
 ConnectionImpl::ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global)
-    : _hostAndPort(hostAndPort), _timer(global), _global(global) {}
+    : _hostAndPort(hostAndPort), _timer(global), _global(global), _id(_idCounter++) {}
 
 void ConnectionImpl::indicateUsed() {
     _lastUsed = _global->now();
@@ -81,6 +81,10 @@ void ConnectionImpl::indicateUsed() {
 
 void ConnectionImpl::indicateFailed() {
     _isFailed = true;
+}
+
+size_t ConnectionImpl::id() const {
+    return _id;
 }
 
 const HostAndPort& ConnectionImpl::getHostAndPort() const {
@@ -174,6 +178,7 @@ std::deque<ConnectionImpl::PushSetupCallback> ConnectionImpl::_pushSetupQueue;
 std::deque<ConnectionImpl::PushRefreshCallback> ConnectionImpl::_pushRefreshQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_setupQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_refreshQueue;
+size_t ConnectionImpl::_idCounter = 1;
 
 std::unique_ptr<ConnectionPool::ConnectionInterface> PoolImpl::makeConnection(
     const HostAndPort& hostAndPort) {

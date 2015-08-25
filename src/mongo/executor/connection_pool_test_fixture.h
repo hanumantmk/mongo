@@ -78,6 +78,8 @@ public:
 
     ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global);
 
+    size_t id() const;
+
     void indicateUsed() override;
 
     void indicateFailed() override;
@@ -115,6 +117,7 @@ private:
     RefreshCallback _refreshCallback;
     TimerImpl _timer;
     PoolImpl* _global;
+    size_t _id;
 
     // Answer queues
     static std::deque<PushSetupCallback> _pushSetupQueue;
@@ -123,6 +126,8 @@ private:
     // Question queues
     static std::deque<ConnectionImpl*> _setupQueue;
     static std::deque<ConnectionImpl*> _refreshQueue;
+
+    static size_t _idCounter;
 };
 
 /**

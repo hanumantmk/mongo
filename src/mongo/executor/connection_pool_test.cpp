@@ -51,77 +51,78 @@ protected:
 private:
 };
 
+size_t connToId(const StatusWith<ConnectionPool::ConnectionHandle>& swConn) {
+    ASSERT(swConn.isOK());
+
+    return static_cast<ConnectionImpl*>(swConn.getValue().get())->id();
+}
+
 TEST_F(ConnectionPoolTest, SameConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPool::ConnectionInterface* conn1 = nullptr;
+    size_t conn1Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn1 = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn1Id = connToId(swConn); });
 
-    ConnectionPool::ConnectionInterface* conn2 = nullptr;
+    size_t conn2Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn2 = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn2Id = connToId(swConn); });
 
-    ASSERT_EQ(conn1, conn2);
+    ASSERT(conn1Id);
+    ASSERT(conn2Id);
+    ASSERT_EQ(conn1Id, conn2Id);
 }
 
 TEST_F(ConnectionPoolTest, FailedConnDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPool::ConnectionInterface* conn1 = nullptr;
+    size_t conn1Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn1 = swConn.getValue().get();
-                 conn1->indicateFailed();
+                 conn1Id = connToId(swConn);
+                 swConn.getValue()->indicateFailed();
              });
 
-    ConnectionPool::ConnectionInterface* conn2 = nullptr;
+    size_t conn2Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn2 = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn2Id = connToId(swConn); });
 
-    ASSERT_NE(conn1, conn2);
+    ASSERT(conn1Id);
+    ASSERT(conn2Id);
+    ASSERT_NE(conn1Id, conn2Id);
 }
 
 TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
 
-    ConnectionPool::ConnectionInterface* conn1 = nullptr;
+    size_t conn1Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort("localhost:30000"),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn1 = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort("localhost:30000"),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn1Id = connToId(swConn); });
 
-    ConnectionPool::ConnectionInterface* conn2 = nullptr;
+    size_t conn2Id = 0;
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort("localhost:30001"),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-                 conn2 = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort("localhost:30001"),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn2Id = connToId(swConn); });
 
-    ASSERT_NE(conn1, conn2);
+    ASSERT(conn1Id);
+    ASSERT(conn2Id);
+    ASSERT_NE(conn1Id, conn2Id);
 }
 
 TEST_F(ConnectionPoolTest, DifferentConn) {
@@ -213,16 +214,13 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
 
     PoolImpl::setNow(now);
 
-    ConnectionPool::ConnectionInterface* conn = nullptr;
+    size_t connId = 0;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 conn = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { connId = connToId(swConn); });
 
     PoolImpl::setNow(now + Milliseconds(500));
 
@@ -230,9 +228,7 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_EQ(swConn.getValue().get(), conn);
+                 ASSERT_EQ(connToId(swConn), connId);
              });
 
     PoolImpl::setNow(now + Milliseconds(2000));
@@ -254,9 +250,7 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     pool.get(HostAndPort(),
              Milliseconds(1000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_NE(swConn.getValue().get(), conn);
+                 ASSERT_NE(connToId(swConn), connId);
              });
 
     ASSERT(reached);
@@ -451,25 +445,20 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappens) {
 
     PoolImpl::setNow(now);
 
-    ConnectionPool::ConnectionInterface* conn = nullptr;
+    size_t connId = 0;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 conn = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { connId = connToId(swConn); });
 
     PoolImpl::setNow(now + Milliseconds(1000));
 
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_NE(conn, swConn.getValue().get());
+                 ASSERT_NE(connId, connToId(swConn));
              });
 }
 
@@ -484,25 +473,20 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensMoreGetsDelay) {
 
     PoolImpl::setNow(now);
 
-    ConnectionPool::ConnectionInterface* conn = nullptr;
+    size_t connId = 0;
 
     ConnectionImpl::pushSetup(Status::OK());
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 conn = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { connId = connToId(swConn); });
 
     PoolImpl::setNow(now + Milliseconds(999));
 
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_EQ(conn, swConn.getValue().get());
+                 ASSERT_EQ(connId, connToId(swConn));
              });
 
     PoolImpl::setNow(now + Milliseconds(2000));
@@ -510,9 +494,7 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensMoreGetsDelay) {
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_NE(conn, swConn.getValue().get());
+                 ASSERT_NE(connId, connToId(swConn));
              });
 }
 
@@ -529,33 +511,26 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
     PoolImpl::setNow(now);
 
     ConnectionPool::ConnectionHandle conn1;
-    ConnectionPool::ConnectionInterface* conn2Ptr = nullptr;
+    size_t conn2Id = 0;
 
     ConnectionImpl::pushSetup(Status::OK());
     ConnectionImpl::pushSetup(Status::OK());
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
                  conn1 = std::move(swConn.getValue());
              });
-    pool.get(HostAndPort(),
-             Milliseconds(5000),
-             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 conn2Ptr = swConn.getValue().get();
-             });
+    pool.get(
+        HostAndPort(),
+        Milliseconds(5000),
+        [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) { conn2Id = connToId(swConn); });
 
     PoolImpl::setNow(now + Milliseconds(1000));
 
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_EQ(conn2Ptr, swConn.getValue().get());
+                 ASSERT_EQ(conn2Id, connToId(swConn));
              });
 
     conn1.reset();
@@ -565,9 +540,7 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
     pool.get(HostAndPort(),
              Milliseconds(5000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
-                 ASSERT(swConn.isOK());
-
-                 ASSERT_NE(conn2Ptr, swConn.getValue().get());
+                 ASSERT_NE(conn2Id, connToId(swConn));
              });
 }
 
