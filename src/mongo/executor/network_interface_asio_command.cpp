@@ -238,9 +238,11 @@ void NetworkInterfaceASIO::_completeOperation(AsyncOp* op, const ResponseStatus&
             return;
         }
 
-        ownedOp.reset(iter->second.release());
+        ownedOp = std::move(iter->second);
         _inProgress.erase(iter);
     }
+
+    invariant(ownedOp);
 
     auto conn = std::move(op->_connectionPoolHandle);
     auto asioConn = static_cast<connection_pool_asio::ASIOConnection*>(conn.get());

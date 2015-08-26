@@ -59,9 +59,7 @@ void TimerImpl::clear() {
 void TimerImpl::fireIfNecessary() {
     auto now = PoolImpl().now();
 
-    std::vector<TimerImpl*> timers;
-
-    std::copy(_timers.begin(), _timers.end(), std::back_inserter(timers));
+    auto timers = _timers;
 
     for (auto&& x : timers) {
         if (_timers.count(x) && (x->_expiration <= now)) {
@@ -72,8 +70,12 @@ void TimerImpl::fireIfNecessary() {
 
 std::set<TimerImpl*> TimerImpl::_timers;
 
-ConnectionImpl::ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global)
-    : _hostAndPort(hostAndPort), _timer(global), _global(global), _id(_idCounter++) {}
+ConnectionImpl::ConnectionImpl(const HostAndPort& hostAndPort, size_t generation, PoolImpl* global)
+    : _hostAndPort(hostAndPort),
+      _timer(global),
+      _global(global),
+      _id(_idCounter++),
+      _generation(generation) {}
 
 void ConnectionImpl::indicateUsed() {
     _lastUsed = _global->now();
@@ -174,6 +176,10 @@ void ConnectionImpl::refresh(Milliseconds timeout, RefreshCallback cb) {
     }
 }
 
+size_t ConnectionImpl::getGeneration() const {
+    return _generation;
+}
+
 std::deque<ConnectionImpl::PushSetupCallback> ConnectionImpl::_pushSetupQueue;
 std::deque<ConnectionImpl::PushRefreshCallback> ConnectionImpl::_pushRefreshQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_setupQueue;
@@ -181,8 +187,8 @@ std::deque<ConnectionImpl*> ConnectionImpl::_refreshQueue;
 size_t ConnectionImpl::_idCounter = 1;
 
 std::unique_ptr<ConnectionPool::ConnectionInterface> PoolImpl::makeConnection(
-    const HostAndPort& hostAndPort) {
-    return stdx::make_unique<ConnectionImpl>(hostAndPort, this);
+    const HostAndPort& hostAndPort, size_t generation) {
+    return stdx::make_unique<ConnectionImpl>(hostAndPort, generation, this);
 }
 
 std::unique_ptr<ConnectionPool::TimerInterface> PoolImpl::makeTimer() {
@@ -190,11 +196,7 @@ std::unique_ptr<ConnectionPool::TimerInterface> PoolImpl::makeTimer() {
 }
 
 Date_t PoolImpl::now() {
-    if (_now) {
-        return _now.get();
-    }
-
-    return Date_t::now();
+    return _now.get_value_or(Date_t::now());
 }
 
 void PoolImpl::setNow(Date_t now) {

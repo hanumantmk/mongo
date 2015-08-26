@@ -41,10 +41,11 @@ namespace mongo {
 namespace executor {
 namespace connection_pool_asio {
 
-ASIOConnection::ASIOConnection(const HostAndPort& hostAndPort, ASIOImpl* global)
+ASIOConnection::ASIOConnection(const HostAndPort& hostAndPort, size_t generation, ASIOImpl* global)
     : _global(global),
       _timer(&global->_impl->_io_service),
       _hostAndPort(hostAndPort),
+      _generation(generation),
       _impl(new NetworkInterfaceASIO::AsyncOp(
           TaskExecutor::CallbackHandle(),
           RemoteCommandRequest(hostAndPort, std::string("admin"), BSON("isMaster" << 1), BSONObj()),
@@ -71,6 +72,10 @@ Date_t ASIOConnection::getLastUsed() const {
 
 bool ASIOConnection::isFailed() const {
     return _isFailed;
+}
+
+size_t ASIOConnection::getGeneration() const {
+    return _generation;
 }
 
 void ASIOConnection::setTimeout(Milliseconds timeout, TimeoutCallback cb) {
@@ -161,8 +166,8 @@ std::unique_ptr<ConnectionPool::TimerInterface> ASIOImpl::makeTimer() {
 }
 
 std::unique_ptr<ConnectionPool::ConnectionInterface> ASIOImpl::makeConnection(
-    const HostAndPort& hostAndPort) {
-    return stdx::make_unique<ASIOConnection>(hostAndPort, this);
+    const HostAndPort& hostAndPort, size_t generation) {
+    return stdx::make_unique<ASIOConnection>(hostAndPort, generation, this);
 }
 
 }  // namespace connection_pool_asio

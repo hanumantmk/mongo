@@ -59,7 +59,7 @@ private:
  */
 class ASIOConnection : public ConnectionPool::ConnectionInterface {
 public:
-    ASIOConnection(const HostAndPort& hostAndPort, ASIOImpl* global);
+    ASIOConnection(const HostAndPort& hostAndPort, size_t generation, ASIOImpl* global);
 
     void indicateUsed() override;
     void indicateFailed() override;
@@ -68,7 +68,7 @@ public:
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> releaseAsyncOp();
     void bindAsyncOp(std::unique_ptr<NetworkInterfaceASIO::AsyncOp> op);
 
-protected:
+private:
     Date_t getLastUsed() const override;
     bool isFailed() const override;
 
@@ -78,6 +78,8 @@ protected:
     void setup(Milliseconds timeout, SetupCallback cb) override;
     void refresh(Milliseconds timeout, RefreshCallback cb) override;
 
+    size_t getGeneration() const override;
+
 private:
     SetupCallback _setupCallback;
     RefreshCallback _refreshCallback;
@@ -86,6 +88,7 @@ private:
     Date_t _lastUsed;
     bool _isFailed = false;
     HostAndPort _hostAndPort;
+    size_t _generation;
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> _impl;
 };
 
@@ -99,7 +102,7 @@ public:
     ASIOImpl(NetworkInterfaceASIO* impl);
 
     std::unique_ptr<ConnectionPool::ConnectionInterface> makeConnection(
-        const HostAndPort& hostAndPort) override;
+        const HostAndPort& hostAndPort, size_t generation) override;
     std::unique_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 
     Date_t now() override;

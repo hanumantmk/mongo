@@ -141,7 +141,7 @@ void NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHa
     auto nextStep = [this, startTime, cbHandle, request, onFinish](
         StatusWith<ConnectionPool::ConnectionHandle> swConn) {
         if (!swConn.isOK()) {
-            onFinish(std::move(swConn.getStatus()));
+            onFinish(swConn.getStatus());
             return;
         }
 

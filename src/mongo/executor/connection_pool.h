@@ -29,6 +29,7 @@
 
 #include <memory>
 #include <unordered_map>
+#include <queue>
 
 #include "mongo/stdx/chrono.h"
 #include "mongo/stdx/functional.h"
@@ -102,6 +103,8 @@ public:
     explicit ConnectionPool(std::unique_ptr<DependentTypeFactoryInterface> impl,
                             Options options = Options{});
 
+    void dropConnections(const HostAndPort& hostAndPort);
+
     void get(const HostAndPort& hostAndPort, Milliseconds timeout, GetConnectionCallback cb);
 
     /**
@@ -117,14 +120,14 @@ private:
 
     const std::unique_ptr<DependentTypeFactoryInterface> _factory;
 
-    // The global mutex for specific pool access
+    // The global mutex for specific pool access and the generation counter
     stdx::mutex _mutex;
     std::unordered_map<HostAndPort, std::unique_ptr<SpecificPool>> _pools;
 };
 
 class ConnectionPool::ConnectionHandleDeleter {
 public:
-    ConnectionHandleDeleter() {}
+    ConnectionHandleDeleter() = default;
     ConnectionHandleDeleter(ConnectionPool* pool) : _pool(pool) {}
 
     void operator()(ConnectionInterface* connection) {
@@ -178,6 +181,10 @@ public:
      */
     virtual void indicateUsed() = 0;
 
+    /**
+     * Indicates that a connection has failed. This will prevent the connection
+     * from re-entering the connection pool.
+     */
     virtual void indicateFailed() = 0;
 
     /**
@@ -217,6 +224,11 @@ private:
      * should strongly imply an active connection
      */
     virtual void refresh(Milliseconds timeout, RefreshCallback cb) = 0;
+
+    /**
+     * Get the generation of the connection
+     */
+    virtual size_t getGeneration() const = 0;
 };
 
 /**
@@ -232,7 +244,8 @@ public:
     /**
      * Makes a new connection given a host and port
      */
-    virtual std::unique_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort) = 0;
+    virtual std::unique_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort,
+                                                                size_t generation) = 0;
 
     /**
      * Makes a new timer
@@ -257,6 +270,8 @@ public:
     SpecificPool(ConnectionPool* parent, const HostAndPort& hostAndPort);
     ~SpecificPool();
 
+    void dropConnections(stdx::unique_lock<stdx::mutex> lk);
+
     /**
      * Get's a connection from the specific pool. Sinks a unique_lock from the
      * parent to preserve the lock on _mutex
@@ -275,8 +290,16 @@ public:
 private:
     using OwnedConnection = std::unique_ptr<ConnectionInterface>;
     using OwnershipPool = std::unordered_map<ConnectionInterface*, OwnedConnection>;
+    using Request = std::pair<Date_t, GetConnectionCallback>;
+    struct RequestComparator {
+        bool operator()(const Request& a, const Request& b) {
+            return a.first > b.first;
+        }
+    };
 
     void addToReady(stdx::unique_lock<stdx::mutex>& lk, OwnedConnection conn);
+
+    void failAllRequests(const Status& status, stdx::unique_lock<stdx::mutex> lk);
 
     void fulfillRequests(stdx::unique_lock<stdx::mutex>& lk);
 
@@ -284,11 +307,10 @@ private:
 
     void shutdown();
 
-    void sortRequests();
-
     OwnedConnection takeFromPool(OwnershipPool& pool, ConnectionInterface* connection);
+    OwnedConnection takeFromProcessingPool(ConnectionInterface* connection);
 
-    void updateState();
+    void updateStateInLock();
 
 private:
     ConnectionPool* const _parent;
@@ -297,10 +319,15 @@ private:
 
     OwnershipPool _readyPool;
     OwnershipPool _processingPool;
+    OwnershipPool _droppedProcessingPool;
     OwnershipPool _checkedOutPool;
-    std::vector<std::pair<Date_t, GetConnectionCallback>> _requests;
+
+    std::priority_queue<Request, std::vector<Request>, RequestComparator> _requests;
+
     std::unique_ptr<TimerInterface> _requestTimer;
     Date_t _requestTimerExpiration;
+    size_t _generation;
+    bool _inFulfillRequests;
 
     /**
      * The current state of the pool
@@ -315,14 +342,14 @@ private:
      */
     enum class State {
         // The pool is active
-        running,
+        kRunning,
 
         // No current activity, waiting for hostTimeout to pass
-        idle,
+        kIdle,
 
         // hostTimeout is passed, we're waiting for any processing
         // connections to finish before shutting down
-        inShutdown,
+        kInShutdown,
     };
 
     State _state;

@@ -76,7 +76,7 @@ public:
     using PushSetupCallback = stdx::function<Status()>;
     using PushRefreshCallback = stdx::function<Status()>;
 
-    ConnectionImpl(const HostAndPort& hostAndPort, PoolImpl* global);
+    ConnectionImpl(const HostAndPort& hostAndPort, size_t generation, PoolImpl* global);
 
     size_t id() const;
 
@@ -110,6 +110,8 @@ private:
 
     void refresh(Milliseconds timeout, RefreshCallback cb) override;
 
+    size_t getGeneration() const override;
+
     HostAndPort _hostAndPort;
     Date_t _lastUsed;
     bool _isFailed = false;
@@ -118,6 +120,7 @@ private:
     TimerImpl _timer;
     PoolImpl* _global;
     size_t _id;
+    size_t _generation;
 
     // Answer queues
     static std::deque<PushSetupCallback> _pushSetupQueue;
@@ -138,7 +141,7 @@ class PoolImpl : public ConnectionPool::DependentTypeFactoryInterface {
 
 public:
     std::unique_ptr<ConnectionPool::ConnectionInterface> makeConnection(
-        const HostAndPort& hostAndPort) override;
+        const HostAndPort& hostAndPort, size_t generation) override;
 
     std::unique_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 
