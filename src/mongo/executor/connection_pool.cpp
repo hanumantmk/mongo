@@ -245,7 +245,7 @@ void ConnectionPool::SpecificPool::failAllRequests(const Status& status,
     lk.unlock();
 
     while (requestsToFail.size()) {
-        requestsToFail.top().second(status);
+        requestsToFail.top().second(status, nullptr);
         requestsToFail.pop();
     }
 }
@@ -285,7 +285,7 @@ void ConnectionPool::SpecificPool::fulfillRequests(stdx::unique_lock<stdx::mutex
 
         // pass it to the user
         lk.unlock();
-        cb(ConnectionHandle(connPtr, ConnectionHandleDeleter(_parent)));
+        cb(Status::OK(), ConnectionHandle(connPtr, ConnectionHandleDeleter(_parent)));
         lk.lock();
     }
 
@@ -419,7 +419,8 @@ void ConnectionPool::SpecificPool::updateStateInLock() {
 
                         lk.unlock();
                         cb(Status(ErrorCodes::ExceededTimeLimit,
-                                  "Couldn't get a connection within the time limit"));
+                                  "Couldn't get a connection within the time limit"),
+                           nullptr);
                         lk.lock();
                     } else {
                         break;

@@ -59,7 +59,7 @@ public:
 
     using ConnectionHandle = std::unique_ptr<ConnectionInterface, ConnectionHandleDeleter>;
 
-    using GetConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
+    using GetConnectionCallback = stdx::function<void(Status, ConnectionHandle)>;
 
     static const Milliseconds kDefaultRefreshTimeout;
     static const Milliseconds kDefaultRefreshRequirement;
