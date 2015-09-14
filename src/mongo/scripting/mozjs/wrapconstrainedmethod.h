@@ -28,42 +28,42 @@
 
 #pragma once
 
-#include "mongo/scripting/mozjs/wraptype.h"
+#include <jsapi.h>
+
+#include "mongo/scripting/mozjs/implscope.h"
+#include "mongo/util/assert_util.h"
+#include "mongo/util/stringutils.h"
 
 namespace mongo {
 namespace mozjs {
+namespace smUtils {
 
-/**
- * The "NumberLong" Javascript object.
- *
- * Represents a 64 integer with a JS representation like:
- *
- * {
- *     top         : Double,
- *     bottom      : Double,
- *     floatApprox : Double,
- * }
- *
- * Where top is the high 32 bits, bottom the low 32 bits and floatApprox a
- * floating point approximation.
- */
-struct NumberLongInfo : public BaseInfo {
-    static void construct(JSContext* cx, JS::CallArgs args);
+template <typename T, typename... Args>
+bool instanceOf(MozJSImplScope* scope, JS::HandleValue value) {
+    return scope->getProto<T>().instanceOf(value) || instanceOf<Args...>(scope, value);
+}
 
-    struct Functions {
-        MONGO_DECLARE_JS_FUNCTION(toNumber);
-        MONGO_DECLARE_JS_FUNCTION(toString);
-        MONGO_DECLARE_JS_FUNCTION(valueOf);
-        MONGO_DECLARE_JS_FUNCTION(compare);
-    };
+template <>
+inline bool instanceOf<void>(MozJSImplScope* scope, JS::HandleValue value) {
+    return false;
+}
 
-    static const JSFunctionSpec methods[5];
 
-    static const char* const className;
-
-    static long long ToNumberLong(JSContext* cx, JS::HandleObject object);
-    static long long ToNumberLong(JSContext* cx, JS::HandleValue value);
-};
-
+template <typename T, typename... Args>
+bool wrapConstrainedMethod(JSContext* cx, unsigned argc, JS::Value* vp) {
+    try {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        if (!instanceOf<Args..., void>(getScope(cx), args.thisv()))
+            uasserted(ErrorCodes::BadValue,
+                      str::stream() << "Cannot call \"" << T::name() << "\" on object of type \""
+                                    << ObjectWrapper(cx, args.thisv()).getClassName() << "\"");
+        T::call(cx, args);
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+}
+}
 }  // namespace mozjs
 }  // namespace mongo

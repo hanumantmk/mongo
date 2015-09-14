@@ -53,35 +53,50 @@
 
 // MONGO_*_JS_FUNCTION_* macros are public and allow wrapped types to install
 // their own functions on types and into the global scope
-#define MONGO_DEFINE_JS_FUNCTION(name)                                        \
-    static void name(JSContext* cx, JS::CallArgs args);                       \
-    static bool WRAPPER_##name(JSContext* cx, unsigned argc, JS::Value* vp) { \
-        try {                                                                 \
-            JS::CallArgs args = JS::CallArgsFromVp(argc, vp);                 \
-            name(cx, args);                                                   \
-            return true;                                                      \
-        } catch (...) {                                                       \
-            mongoToJSException(cx);                                           \
-            return false;                                                     \
-        }                                                                     \
-    }
+#define MONGO_DECLARE_JS_FUNCTION(function)                 \
+    struct function {                                       \
+        static const char* name() {                         \
+            return #function;                               \
+        }                                                   \
+        static void call(JSContext* cx, JS::CallArgs args); \
+    };
 
 #define MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(name, flags) \
-    JS_FS(#name, Functions::WRAPPER_##name, 0, flags)
+    JS_FS(#name, smUtils::wrapFunction<Functions::name>, 0, flags)
 
 #define MONGO_ATTACH_JS_FUNCTION(name) MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(name, 0)
+
+#define MONGO_ATTACH_JS_CONSTRAINED_METHOD_WITH_FLAGS(name, flags, ...)                     \
+    {                                                                                       \
+        #name, {smUtils::wrapConstrainedMethod < Functions::name, __VA_ARGS__ >, nullptr }, \
+                0,                                                                          \
+                flags,                                                                      \
+                nullptr                                                                     \
+    }
+
+#define MONGO_ATTACH_JS_CONSTRAINED_METHOD(name, ...) \
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_WITH_FLAGS(name, 0, __VA_ARGS__)
 
 namespace mongo {
 namespace mozjs {
 
 namespace smUtils {
 
+template <typename T>
+bool wrapFunction(JSContext* cx, unsigned argc, JS::Value* vp) {
+    try {
+        JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
+        T::call(cx, args);
+        return true;
+    } catch (...) {
+        mongoToJSException(cx);
+        return false;
+    }
+}
+
 // Now all the spidermonkey type methods
 template <typename T>
-static bool addProperty(JSContext* cx,
-                        JS::HandleObject obj,
-                        JS::HandleId id,
-                        JS::MutableHandleValue v) {
+bool addProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue v) {
     try {
         T::addProperty(cx, obj, id, v);
         return true;
@@ -92,7 +107,7 @@ static bool addProperty(JSContext* cx,
 };
 
 template <typename T>
-static bool call(JSContext* cx, unsigned argc, JS::Value* vp) {
+bool call(JSContext* cx, unsigned argc, JS::Value* vp) {
     try {
         T::call(cx, JS::CallArgsFromVp(argc, vp));
         return true;
@@ -103,7 +118,7 @@ static bool call(JSContext* cx, unsigned argc, JS::Value* vp) {
 };
 
 template <typename T>
-static bool construct(JSContext* cx, unsigned argc, JS::Value* vp) {
+bool construct(JSContext* cx, unsigned argc, JS::Value* vp) {
     try {
         T::construct(cx, JS::CallArgsFromVp(argc, vp));
         return true;
@@ -114,7 +129,7 @@ static bool construct(JSContext* cx, unsigned argc, JS::Value* vp) {
 };
 
 template <typename T>
-static bool convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp) {
+bool convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::MutableHandleValue vp) {
     try {
         T::convert(cx, obj, type, vp);
         return true;
@@ -125,7 +140,7 @@ static bool convert(JSContext* cx, JS::HandleObject obj, JSType type, JS::Mutabl
 };
 
 template <typename T>
-static bool delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded) {
+bool delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded) {
     try {
         T::delProperty(cx, obj, id, succeeded);
         return true;
@@ -136,7 +151,7 @@ static bool delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bo
 };
 
 template <typename T>
-static bool enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {
+bool enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {
     try {
         T::enumerate(cx, obj, properties);
         return true;
@@ -147,10 +162,7 @@ static bool enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& pro
 };
 
 template <typename T>
-static bool getProperty(JSContext* cx,
-                        JS::HandleObject obj,
-                        JS::HandleId id,
-                        JS::MutableHandleValue vp) {
+bool getProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, JS::MutableHandleValue vp) {
     try {
         T::getProperty(cx, obj, id, vp);
         return true;
@@ -161,7 +173,7 @@ static bool getProperty(JSContext* cx,
 };
 
 template <typename T>
-static bool hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp) {
+bool hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleValue vp, bool* bp) {
     try {
         T::hasInstance(cx, obj, vp, bp);
         return true;
@@ -172,7 +184,7 @@ static bool hasInstance(JSContext* cx, JS::HandleObject obj, JS::MutableHandleVa
 };
 
 template <typename T>
-static bool setProperty(
+bool setProperty(
     JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool strict, JS::MutableHandleValue vp) {
     try {
         T::setProperty(cx, obj, id, strict, vp);
@@ -184,7 +196,7 @@ static bool setProperty(
 };
 
 template <typename T>
-static bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp) {
+bool resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp) {
     try {
         T::resolve(cx, obj, id, resolvedp);
         return true;
