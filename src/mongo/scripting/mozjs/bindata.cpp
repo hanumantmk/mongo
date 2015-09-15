@@ -46,9 +46,9 @@ namespace mongo {
 namespace mozjs {
 
 const JSFunctionSpec BinDataInfo::methods[4] = {
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(base64, BinDataInfo),
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(hex, BinDataInfo),
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(toString, BinDataInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(base64, BinDataInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(hex, BinDataInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(toString, BinDataInfo),
     JS_FS_END,
 };
 

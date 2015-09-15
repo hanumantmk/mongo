@@ -40,10 +40,10 @@ namespace mongo {
 namespace mozjs {
 
 const JSFunctionSpec CursorInfo::methods[5] = {
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(hasNext, CursorInfo),
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(next, CursorInfo),
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(objsLeftInBatch, CursorInfo),
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD(readOnly, CursorInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(hasNext, CursorInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(next, CursorInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(objsLeftInBatch, CursorInfo),
+    MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(readOnly, CursorInfo),
     JS_FS_END,
 };
 

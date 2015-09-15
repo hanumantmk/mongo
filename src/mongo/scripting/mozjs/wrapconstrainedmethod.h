@@ -38,25 +38,69 @@ namespace mongo {
 namespace mozjs {
 namespace smUtils {
 
+/**
+ * Returns true if "value" is an instance of any of the types passed as
+ * template parameters. Additionally sets isProto if the value is also the
+ * prototype for that type.
+ *
+ * We recurse until we hit the void specialization which we set up by adding
+ * void as the last type in wrapConstrainedMethod.
+ */
 template <typename T, typename... Args>
-bool instanceOf(MozJSImplScope* scope, JS::HandleValue value) {
-    return scope->getProto<T>().instanceOf(value) || instanceOf<Args...>(scope, value);
+bool instanceOf(MozJSImplScope* scope, bool* isProto, JS::HandleValue value) {
+    auto& proto = scope->getProto<T>();
+
+    if (proto.instanceOf(value)) {
+        if (value.toObjectOrNull() == proto.getProto()) {
+            *isProto = true;
+        }
+
+        return true;
+    }
+
+    return instanceOf<Args...>(scope, isProto, value);
 }
 
+/**
+ * Terminating specialization for instanceOf.
+ *
+ * We use this to identify the end of the template list in the general case.
+ */
 template <>
-inline bool instanceOf<void>(MozJSImplScope* scope, JS::HandleValue value) {
+inline bool instanceOf<void>(MozJSImplScope* scope, bool* isProto, JS::HandleValue value) {
     return false;
 }
 
 
-template <typename T, typename... Args>
+/**
+ * Wraps a method with an additional check against a list of possible wrap types.
+ *
+ * Template Parameters:
+ *   T - A type with
+ *       ::call - a static function of type void (JSContext* cx, JS::CallArgs args)
+ *       ::name - a static function which returns a const char* with the type name
+ *   noProto - whether the method can be invoked on the prototype
+ *   Args - The list of types to check against scope->getProto<T>().instanceOf
+ *          for the thisv the method has been invoked against
+ */
+template <typename T, bool noProto, typename... Args>
 bool wrapConstrainedMethod(JSContext* cx, unsigned argc, JS::Value* vp) {
     try {
         JS::CallArgs args = JS::CallArgsFromVp(argc, vp);
-        if (!instanceOf<Args..., void>(getScope(cx), args.thisv()))
+        bool isProto = false;
+
+        if (!instanceOf<Args..., void>(getScope(cx), &isProto, args.thisv())) {
             uasserted(ErrorCodes::BadValue,
                       str::stream() << "Cannot call \"" << T::name() << "\" on object of type \""
                                     << ObjectWrapper(cx, args.thisv()).getClassName() << "\"");
+        }
+
+        if (noProto && isProto) {
+            uasserted(ErrorCodes::BadValue,
+                      str::stream() << "Cannot call \"" << T::name() << "\" on prototype of \""
+                                    << ObjectWrapper(cx, args.thisv()).getClassName() << "\"");
+        }
+
         T::call(cx, args);
         return true;
     } catch (...) {
@@ -64,6 +108,7 @@ bool wrapConstrainedMethod(JSContext* cx, unsigned argc, JS::Value* vp) {
         return false;
     }
 }
-}
+
+}  // namespace smUtils
 }  // namespace mozjs
 }  // namespace mongo

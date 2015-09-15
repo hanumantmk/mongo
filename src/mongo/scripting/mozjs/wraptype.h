@@ -66,16 +66,21 @@
 
 #define MONGO_ATTACH_JS_FUNCTION(name) MONGO_ATTACH_JS_FUNCTION_WITH_FLAGS(name, 0)
 
-#define MONGO_ATTACH_JS_CONSTRAINED_METHOD_WITH_FLAGS(name, flags, ...)                     \
-    {                                                                                       \
-        #name, {smUtils::wrapConstrainedMethod < Functions::name, __VA_ARGS__ >, nullptr }, \
-                0,                                                                          \
-                flags,                                                                      \
-                nullptr                                                                     \
+#define MONGO_ATTACH_JS_CONSTRAINED_METHOD(name, ...)                                              \
+    {                                                                                              \
+        #name, {smUtils::wrapConstrainedMethod < Functions::name, false, __VA_ARGS__ >, nullptr }, \
+                0,                                                                                 \
+                0,                                                                                 \
+                nullptr                                                                            \
     }
 
-#define MONGO_ATTACH_JS_CONSTRAINED_METHOD(name, ...) \
-    MONGO_ATTACH_JS_CONSTRAINED_METHOD_WITH_FLAGS(name, 0, __VA_ARGS__)
+#define MONGO_ATTACH_JS_CONSTRAINED_METHOD_NO_PROTO(name, ...)                                    \
+    {                                                                                             \
+        #name, {smUtils::wrapConstrainedMethod < Functions::name, true, __VA_ARGS__ >, nullptr }, \
+                0,                                                                                \
+                0,                                                                                \
+                nullptr                                                                           \
+    }
 
 namespace mongo {
 namespace mozjs {
