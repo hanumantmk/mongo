@@ -339,37 +339,64 @@ void ObjectWrapper::callMethod(JS::HandleValue fun, JS::MutableHandleValue out) 
     callMethod(fun, args, out);
 }
 
-void ObjectWrapper::writeThis(BSONObjBuilder* b) {
-    auto scope = getScope(_context);
-
-    BSONObj* originalBSON = nullptr;
-    if (scope->getBsonProto().instanceOf(_object)) {
+BSONObj ObjectWrapper::toBSON() {
+    if (getScope(_context)->getBsonProto().instanceOf(_object)) {
+        BSONObj* originalBSON = nullptr;
         bool altered;
 
         std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, _object);
 
-        if (originalBSON && !altered) {
-            b->appendElements(*originalBSON);
-            return;
-        }
+        if (originalBSON && !altered)
+            return *originalBSON;
     }
+
+    std::aligned_storage<sizeof(WriteThisFrame) * 151,
+                         std::alignment_of<WriteThisFrame>::value>::type storage;
+
+    AllocOnlyPoolAllocatorPool pool({reinterpret_cast<char*>(&storage), sizeof(storage)});
+    AllocOnlyPoolAllocator<WriteThisFrame> allocator{&pool};
+
+    WriteThisFrames frames(151, allocator);
+    frames.emplace(_context, _object, nullptr, "");
+    JS::RootedId id(_context);
+
+    BSONObjBuilder b[1];
 
     // We special case the _id field in top-level objects and move it to the front.
     // This matches other drivers behavior and makes finding the _id field quicker in BSON.
-    if (_depth == 0 && hasField("_id")) {
-        _writeField(b, "_id", originalBSON);
+    if (hasField("_id")) {
+        _writeField(b, "_id", &frames, frames.top().originalBSON);
     }
 
-    enumerate([&](JS::HandleId id) {
-        JS::RootedValue x(_context);
+    while (frames.size()) {
+        auto& frame = frames.top();
 
-        IdWrapper idw(_context, id);
+        if (frame.idx == frame.ids.length()) {
+            frames.pop();
+            continue;
+        }
 
-        if (_depth == 0 && idw.isString() && idw.equals("_id"))
-            return;
+        if (frame.idx == 0 && frame.originalBSON && !frame.altered) {
+            // If this is our first look at the object and it has an unaltered
+            // bson behind it, move idx to the end so we'll roll up on the nest
+            // pass through the loop.
+            frame.subbob_or(b)->appendElements(*frame.originalBSON);
+            frame.idx = frame.ids.length();
+            continue;
+        }
 
-        _writeField(b, id, originalBSON);
-    });
+        id.set(frame.ids[frame.idx++]);
+
+        if (frames.size() == 1) {
+            IdWrapper idw(_context, id);
+
+            if (idw.isString() && idw.equals("_id")) {
+                continue;
+            }
+        }
+
+        _writeField(frame.subbob_or(b), JS::HandleId(id), &frames, frame.originalBSON);
+    }
 
     const int sizeWithEOO = b->len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
     uassert(17260,
@@ -377,16 +404,18 @@ void ObjectWrapper::writeThis(BSONObjBuilder* b) {
                           << "Object size " << sizeWithEOO << " exceeds limit of "
                           << BSONObjMaxInternalSize << " bytes.",
             sizeWithEOO <= BSONObjMaxInternalSize);
+
+    return b->obj();
 }
 
-void ObjectWrapper::_writeField(BSONObjBuilder* b, Key key, BSONObj* originalParent) {
+void ObjectWrapper::_writeField(BSONObjBuilder* b, Key key, WriteThisFrames* frames, BSONObj* originalParent) {
     JS::RootedValue value(_context);
-    key.get(_context, _object, &value);
+    key.get(_context, frames->top().thisv, &value);
 
     ValueWriter x(_context, value, _depth);
     x.setOriginalBSON(originalParent);
 
-    x.writeThis(b, key.toString(_context));
+    x.writeThis(b, key.toString(_context), frames);
 }
 
 }  // namespace mozjs

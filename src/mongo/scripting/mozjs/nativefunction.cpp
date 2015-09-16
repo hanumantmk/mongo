@@ -77,6 +77,8 @@ void NativeFunctionInfo::call(JSContext* cx, JS::CallArgs args) {
     auto holder = getHolder(args);
 
     BSONObjBuilder bob;
+    JS::RootedObject robj(cx, JS_NewPlainObject(cx));
+    ObjectWrapper wobj(cx, robj);
 
     for (unsigned i = 0; i < args.length(); i++) {
         // 11 is enough here.  unsigned's are only 32 bits, and 1 << 32 is only
@@ -84,10 +86,10 @@ void NativeFunctionInfo::call(JSContext* cx, JS::CallArgs args) {
         char buf[11];
         std::sprintf(buf, "%i", i);
 
-        ValueWriter(cx, args.get(i)).writeThis(&bob, buf);
+        wobj.setValue(buf, args.get(i));
     }
 
-    BSONObj out = holder->_func(bob.obj(), holder->_ctx);
+    BSONObj out = holder->_func(wobj.toBSON(), holder->_ctx);
 
     ValueReader(cx, args.rval()).fromBSONElement(out.firstElement(), false);
 }

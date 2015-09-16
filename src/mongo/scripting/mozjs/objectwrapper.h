@@ -33,6 +33,7 @@
 
 #include "mongo/platform/decimal128.h"
 #include "mongo/scripting/mozjs/exception.h"
+#include "mongo/scripting/mozjs/writethisframe.h"
 
 namespace mongo {
 
@@ -152,9 +153,9 @@ public:
     }
 
     /**
-     * concatenates all of the fields in the object into the associated builder
+     * Writes a bson object reflecting the contents of the object
      */
-    void writeThis(BSONObjBuilder* b);
+    BSONObj toBSON();
 
     JS::HandleObject thisv() {
         return _object;
@@ -167,7 +168,7 @@ private:
      * optional originalBSON is used to track updates to types (NumberInt
      * overwritten by a float, but coercible to the original type, etc.)
      */
-    void _writeField(BSONObjBuilder* b, Key key, BSONObj* originalBSON);
+    void _writeField(BSONObjBuilder* b, Key key, WriteThisFrames* frames, BSONObj* originalBSON);
 
     JSContext* _context;
     JS::RootedObject _object;

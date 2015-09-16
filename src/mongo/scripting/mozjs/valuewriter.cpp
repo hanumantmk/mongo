@@ -88,20 +88,7 @@ BSONObj ValueWriter::toBSON() {
 
     JS::RootedObject obj(_context, _value.toObjectOrNull());
 
-    if (getScope(_context)->getBsonProto().instanceOf(obj)) {
-        BSONObj* originalBSON;
-        bool altered;
-
-        std::tie(originalBSON, altered) = BSONInfo::originalBSON(_context, obj);
-
-        if (originalBSON && !altered)
-            return *originalBSON;
-    }
-
-    BSONObjBuilder bob;
-    ObjectWrapper(_context, obj, _depth).writeThis(&bob);
-
-    return bob.obj();
+    return ObjectWrapper(_context, obj, _depth).toBSON();
 }
 
 std::string ValueWriter::toString() {
@@ -160,11 +147,11 @@ Decimal128 ValueWriter::toDecimal128() {
     uasserted(ErrorCodes::BadValue, str::stream() << "Unable to write Decimal128 value.");
 }
 
-void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd) {
+void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd, WriteThisFrames* frames) {
     uassert(17279,
             str::stream() << "Exceeded depth limit of " << 150
                           << " when converting js object to BSON. Do you have a cycle?",
-            _depth < 149);
+            frames->size() < 150);
 
     // Null char should be at the end, not in the string
     uassert(16985,
@@ -193,7 +180,7 @@ void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd) {
         b->append(sd, val);
     } else if (_value.isObject()) {
         JS::RootedObject childObj(_context, _value.toObjectOrNull());
-        _writeObject(b, sd, childObj);
+        _writeObject(b, sd, childObj, frames);
     } else if (_value.isBoolean()) {
         b->appendBool(sd, _value.toBoolean());
     } else if (_value.isUndefined()) {
@@ -206,7 +193,7 @@ void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd) {
     }
 }
 
-void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj) {
+void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj, WriteThisFrames* frames) {
     auto scope = getScope(_context);
 
     ObjectWrapper o(_context, obj, _depth);
@@ -265,12 +252,7 @@ void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObjec
     } else {
         // nested object or array
 
-        BSONObjBuilder subbob(JS_IsArrayObject(_context, obj) ? b->subarrayStart(sd)
-                                                              : b->subobjStart(sd));
-
-        ObjectWrapper child(_context, obj, _depth + 1);
-
-        child.writeThis(b);
+        frames->emplace(_context, obj, b, sd);
     }
 }
 

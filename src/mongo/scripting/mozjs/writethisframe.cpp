@@ -26,66 +26,30 @@
  * then also delete it in the license file.
  */
 
-#pragma once
+#include "mongo/platform/basic.h"
 
-#include <jsapi.h>
-#include <string>
-
-#include "mongo/bson/bsonobj.h"
 #include "mongo/scripting/mozjs/writethisframe.h"
+
+#include "mongo/scripting/mozjs/implscope.h"
+#include "mongo/scripting/mozjs/bson.h"
+#include "mongo/scripting/mozjs/exception.h"
+#include "mongo/util/assert_util.h"
 
 namespace mongo {
 namespace mozjs {
 
-/**
- * Writes C++ values out of JS Values
- *
- * depth is used to trap circular objects in js and prevent stack smashing
- *
- * originalBSON is a hack to keep integer types in their original type when
- * they're read out, manipulated in js and saved back.
- */
-class ValueWriter {
-public:
-    ValueWriter(JSContext* cx, JS::HandleValue value, int depth = 0);
+WriteThisFrame::WriteThisFrame(JSContext* cx, JSObject* obj, BSONObjBuilder* parent, StringData sd)
+    : thisv(cx, obj), ids(cx, JS_Enumerate(cx, thisv)) {
+    if (parent) {
+        subbob.emplace(JS_IsArrayObject(cx, thisv) ? parent->subarrayStart(sd) : parent->subobjStart(sd));
+    }
 
-    BSONObj toBSON();
+    if (!ids) throwCurrentJSException(cx, ErrorCodes::JSInterpreterFailure, "Failure to enumerate object");
 
-    /**
-     * These coercions flow through JS::To_X. I.e. they can call toString() or
-     * toNumber()
-     */
-    std::string toString();
-    int type();
-    double toNumber();
-    int32_t toInt32();
-    int64_t toInt64();
-    Decimal128 toDecimal128();
-    bool toBoolean();
-
-    /**
-     * Writes the value into a bsonobjbuilder under the name in sd.
-     *
-     * We take WriteThisFrames so we can push a new object on if the underlying
-     * value is an object. This allows us to recurse without C++ stack frames.
-     *
-     * Look in toBSON on ObjectWrapper for the top of that loop.
-     */
-    void writeThis(BSONObjBuilder* b, StringData sd, WriteThisFrames* frames);
-
-    void setOriginalBSON(BSONObj* obj);
-
-private:
-    /**
-     * Writes the object into a bsonobjbuilder under the name in sd.
-     */
-    void _writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj, WriteThisFrames* frames);
-
-    JSContext* _context;
-    JS::HandleValue _value;
-    int _depth;
-    BSONObj* _originalParent;
-};
+    if (getScope(cx)->getBsonProto().instanceOf(thisv)) {
+        std::tie(originalBSON, altered) = BSONInfo::originalBSON(cx, thisv);
+    }
+}
 
 }  // namespace mozjs
 }  // namespace mongo

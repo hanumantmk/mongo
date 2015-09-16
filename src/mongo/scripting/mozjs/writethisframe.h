@@ -28,64 +28,48 @@
 
 #pragma once
 
+#include <boost/optional.hpp>
 #include <jsapi.h>
 #include <string>
 
-#include "mongo/bson/bsonobj.h"
-#include "mongo/scripting/mozjs/writethisframe.h"
+#include "mongo/base/alloc_only_pool_allocator.h"
+#include "mongo/base/contiguous_stack.h"
+#include "mongo/bson/bsonobjbuilder.h"
 
 namespace mongo {
 namespace mozjs {
 
 /**
- * Writes C++ values out of JS Values
+ * The state need to write a single level of a nested javascript object as a
+ * bson object.
  *
- * depth is used to trap circular objects in js and prevent stack smashing
- *
- * originalBSON is a hack to keep integer types in their original type when
- * they're read out, manipulated in js and saved back.
+ * We use this between ObjectWrapper and ValueWriter to avoid recursion in
+ * translating js to bson.
  */
-class ValueWriter {
-public:
-    ValueWriter(JSContext* cx, JS::HandleValue value, int depth = 0);
+struct WriteThisFrame {
+    WriteThisFrame(JSContext* cx, JSObject* obj, BSONObjBuilder* parent, StringData sd);
 
-    BSONObj toBSON();
+    BSONObjBuilder* subbob_or(BSONObjBuilder* option) {
+        return subbob ? &subbob.get() : option;
+    }
 
-    /**
-     * These coercions flow through JS::To_X. I.e. they can call toString() or
-     * toNumber()
-     */
-    std::string toString();
-    int type();
-    double toNumber();
-    int32_t toInt32();
-    int64_t toInt64();
-    Decimal128 toDecimal128();
-    bool toBoolean();
-
-    /**
-     * Writes the value into a bsonobjbuilder under the name in sd.
-     *
-     * We take WriteThisFrames so we can push a new object on if the underlying
-     * value is an object. This allows us to recurse without C++ stack frames.
-     *
-     * Look in toBSON on ObjectWrapper for the top of that loop.
-     */
-    void writeThis(BSONObjBuilder* b, StringData sd, WriteThisFrames* frames);
-
-    void setOriginalBSON(BSONObj* obj);
-
-private:
-    /**
-     * Writes the object into a bsonobjbuilder under the name in sd.
-     */
-    void _writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj, WriteThisFrames* frames);
-
-    JSContext* _context;
-    JS::HandleValue _value;
-    int _depth;
-    BSONObj* _originalParent;
+    JS::RootedObject thisv;
+    JS::AutoIdArray ids;
+    std::size_t idx = 0;
+    boost::optional<BSONObjBuilder> subbob;
+    BSONObj* originalBSON = nullptr;
+    bool altered = true;
 };
+
+/**
+ * Synthetic stack of variables for writeThis
+ *
+ * We use a ContiguousStack here because we have SpiderMonkey Rooting types
+ * which are non-copyable and non-movable. They also have to actually be on the
+ * stack, so we use an alloc only pool allocator with our stack so we can back
+ * the stack with stack allocated memory.
+ */
+using WriteThisFrames = ContiguousStack<WriteThisFrame, AllocOnlyPoolAllocator<WriteThisFrame>>;
 
 }  // namespace mozjs
 }  // namespace mongo

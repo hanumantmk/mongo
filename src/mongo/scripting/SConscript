@@ -135,6 +135,7 @@ if usemozjs:
             'mozjs/timestamp.cpp',
             'mozjs/valuereader.cpp',
             'mozjs/valuewriter.cpp',
+            'mozjs/writethisframe.cpp',
         ],
         LIBDEPS=[
             'bson_template_evaluator',
