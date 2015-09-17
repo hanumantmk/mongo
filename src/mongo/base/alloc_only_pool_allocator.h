@@ -32,6 +32,8 @@
 
 #include "mongo/base/data_range.h"
 #include "mongo/base/data_range_cursor.h"
+#include "mongo/stdx/memory.h"
+#include "mongo/util/assert_util.h"
 
 namespace mongo {
 
@@ -53,7 +55,7 @@ public:
      */
     template <typename T>
     T* allocate(std::size_t n) {
-        if (std::align(std::alignment_of<T>::value, sizeof(T) * n, _ptr, _remaining)) {
+        if (stdx::align(std::alignment_of<T>::value, sizeof(T) * n, _ptr, _remaining)) {
             auto result = reinterpret_cast<T*>(_ptr);
             _ptr = static_cast<char*>(_ptr) + sizeof(T) * n;
             _remaining -= sizeof(T) * n;
@@ -122,7 +124,7 @@ bool operator==(const AllocOnlyPoolAllocator<T>& lhs, const AllocOnlyPoolAllocat
 
 template <typename T, typename U>
 bool operator!=(const AllocOnlyPoolAllocator<T>& lhs, const AllocOnlyPoolAllocator<U>& rhs) {
-    !(lhs == rhs);
+    return !(lhs == rhs);
 }
 
 }  // namespace mongo
