@@ -43,8 +43,8 @@
 namespace mongo {
 namespace mozjs {
 
-ValueWriter::ValueWriter(JSContext* cx, JS::HandleValue value, int depth)
-    : _context(cx), _value(value), _depth(depth), _originalParent(nullptr) {}
+ValueWriter::ValueWriter(JSContext* cx, JS::HandleValue value)
+    : _context(cx), _value(value), _originalParent(nullptr) {}
 
 void ValueWriter::setOriginalBSON(BSONObj* obj) {
     _originalParent = obj;
@@ -88,7 +88,7 @@ BSONObj ValueWriter::toBSON() {
 
     JS::RootedObject obj(_context, _value.toObjectOrNull());
 
-    return ObjectWrapper(_context, obj, _depth).toBSON();
+    return ObjectWrapper(_context, obj).toBSON();
 }
 
 std::string ValueWriter::toString() {
@@ -147,11 +147,13 @@ Decimal128 ValueWriter::toDecimal128() {
     uasserted(ErrorCodes::BadValue, str::stream() << "Unable to write Decimal128 value.");
 }
 
-void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd, WriteThisFrames* frames) {
+void ValueWriter::writeThis(BSONObjBuilder* b,
+                            StringData sd,
+                            ObjectWrapper::WriteFieldRecursionFrames* frames) {
     uassert(17279,
-            str::stream() << "Exceeded depth limit of " << 150
+            str::stream() << "Exceeded depth limit of " << ObjectWrapper::kMaxWriteFieldDepth
                           << " when converting js object to BSON. Do you have a cycle?",
-            frames->size() < 150);
+            frames->size() < ObjectWrapper::kMaxWriteFieldDepth);
 
     // Null char should be at the end, not in the string
     uassert(16985,
@@ -193,10 +195,13 @@ void ValueWriter::writeThis(BSONObjBuilder* b, StringData sd, WriteThisFrames* f
     }
 }
 
-void ValueWriter::_writeObject(BSONObjBuilder* b, StringData sd, JS::HandleObject obj, WriteThisFrames* frames) {
+void ValueWriter::_writeObject(BSONObjBuilder* b,
+                               StringData sd,
+                               JS::HandleObject obj,
+                               ObjectWrapper::WriteFieldRecursionFrames* frames) {
     auto scope = getScope(_context);
 
-    ObjectWrapper o(_context, obj, _depth);
+    ObjectWrapper o(_context, obj);
 
     if (JS_ObjectIsFunction(_context, _value.toObjectOrNull())) {
         uassert(16716,

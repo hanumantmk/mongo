@@ -41,6 +41,10 @@
 namespace mongo {
 namespace mozjs {
 
+#ifndef _MSC_EXTENSIONS
+const int ObjectWrapper::kMaxWriteFieldDepth;
+#endif  // _MSC_EXTENSIONS
+
 void ObjectWrapper::Key::get(JSContext* cx, JS::HandleObject o, JS::MutableHandleValue value) {
     switch (_type) {
         case Type::Field:
@@ -173,11 +177,11 @@ std::string ObjectWrapper::Key::toString(JSContext* cx) {
         cx, ErrorCodes::InternalError, "Failed to toString a ObjectWrapper::Key");
 }
 
-ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleObject obj, int depth)
-    : _context(cx), _object(cx, obj), _depth(depth) {}
+ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleObject obj)
+    : _context(cx), _object(cx, obj) {}
 
-ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleValue value, int depth)
-    : _context(cx), _object(cx, value.toObjectOrNull()), _depth(depth) {}
+ObjectWrapper::ObjectWrapper(JSContext* cx, JS::HandleValue value)
+    : _context(cx), _object(cx, value.toObjectOrNull()) {}
 
 double ObjectWrapper::getNumber(Key key) {
     JS::RootedValue x(_context);
@@ -225,7 +229,7 @@ BSONObj ObjectWrapper::getObject(Key key) {
     JS::RootedValue x(_context);
     getValue(key, &x);
 
-    return ValueWriter(_context, x, _depth).toBSON();
+    return ValueWriter(_context, x).toBSON();
 }
 
 void ObjectWrapper::getValue(Key key, JS::MutableHandleValue value) {
@@ -255,14 +259,14 @@ void ObjectWrapper::setBoolean(Key key, bool val) {
 
 void ObjectWrapper::setBSONElement(Key key, const BSONElement& elem, bool readOnly) {
     JS::RootedValue value(_context);
-    ValueReader(_context, &value, _depth).fromBSONElement(elem, readOnly);
+    ValueReader(_context, &value).fromBSONElement(elem, readOnly);
 
     setValue(key, value);
 }
 
 void ObjectWrapper::setBSON(Key key, const BSONObj& obj, bool readOnly) {
     JS::RootedValue value(_context);
-    ValueReader(_context, &value, _depth).fromBSON(obj, readOnly);
+    ValueReader(_context, &value).fromBSON(obj, readOnly);
 
     setValue(key, value);
 }
@@ -350,27 +354,23 @@ BSONObj ObjectWrapper::toBSON() {
             return *originalBSON;
     }
 
-    std::aligned_storage<sizeof(WriteThisFrame) * 151,
-                         std::alignment_of<WriteThisFrame>::value>::type storage;
-
-    AllocOnlyPoolAllocatorPool pool({reinterpret_cast<char*>(&storage), sizeof(storage)});
-    AllocOnlyPoolAllocator<WriteThisFrame> allocator{&pool};
-
-    WriteThisFrames frames(151, allocator);
+    WriteFieldRecursionFrames frames;
     frames.emplace(_context, _object, nullptr, "");
     JS::RootedId id(_context);
 
-    BSONObjBuilder b[1];
+    BSONObjBuilder b;
 
     // We special case the _id field in top-level objects and move it to the front.
     // This matches other drivers behavior and makes finding the _id field quicker in BSON.
     if (hasField("_id")) {
-        _writeField(b, "_id", &frames, frames.top().originalBSON);
+        _writeField(&b, "_id", &frames, frames.top().originalBSON);
     }
 
     while (frames.size()) {
         auto& frame = frames.top();
 
+        // If the index is the same as length, we've seen all the keys at this
+        // level and should go up a level
         if (frame.idx == frame.ids.length()) {
             frames.pop();
             continue;
@@ -380,7 +380,7 @@ BSONObj ObjectWrapper::toBSON() {
             // If this is our first look at the object and it has an unaltered
             // bson behind it, move idx to the end so we'll roll up on the nest
             // pass through the loop.
-            frame.subbob_or(b)->appendElements(*frame.originalBSON);
+            frame.subbob_or(&b)->appendElements(*frame.originalBSON);
             frame.idx = frame.ids.length();
             continue;
         }
@@ -395,24 +395,49 @@ BSONObj ObjectWrapper::toBSON() {
             }
         }
 
-        _writeField(frame.subbob_or(b), JS::HandleId(id), &frames, frame.originalBSON);
+        // writeField invokes ValueWriter with the frame stack, which will push
+        // onto frames for subobjects, which will effectively recurse the loop.
+        _writeField(frame.subbob_or(&b), JS::HandleId(id), &frames, frame.originalBSON);
     }
 
-    const int sizeWithEOO = b->len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
+    const int sizeWithEOO = b.len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
     uassert(17260,
             str::stream() << "Converting from JavaScript to BSON failed: "
                           << "Object size " << sizeWithEOO << " exceeds limit of "
                           << BSONObjMaxInternalSize << " bytes.",
             sizeWithEOO <= BSONObjMaxInternalSize);
 
-    return b->obj();
+    return b.obj();
 }
 
-void ObjectWrapper::_writeField(BSONObjBuilder* b, Key key, WriteThisFrames* frames, BSONObj* originalParent) {
+ObjectWrapper::WriteFieldRecursionFrame::WriteFieldRecursionFrame(JSContext* cx,
+                                                                  JSObject* obj,
+                                                                  BSONObjBuilder* parent,
+                                                                  StringData sd)
+    : thisv(cx, obj), ids(cx, JS_Enumerate(cx, thisv)) {
+    if (parent) {
+        subbob.emplace(JS_IsArrayObject(cx, thisv) ? parent->subarrayStart(sd)
+                                                   : parent->subobjStart(sd));
+    }
+
+    if (!ids) {
+        throwCurrentJSException(
+            cx, ErrorCodes::JSInterpreterFailure, "Failure to enumerate object");
+    }
+
+    if (getScope(cx)->getBsonProto().instanceOf(thisv)) {
+        std::tie(originalBSON, altered) = BSONInfo::originalBSON(cx, thisv);
+    }
+}
+
+void ObjectWrapper::_writeField(BSONObjBuilder* b,
+                                Key key,
+                                WriteFieldRecursionFrames* frames,
+                                BSONObj* originalParent) {
     JS::RootedValue value(_context);
     key.get(_context, frames->top().thisv, &value);
 
-    ValueWriter x(_context, value, _depth);
+    ValueWriter x(_context, value);
     x.setOriginalBSON(originalParent);
 
     x.writeThis(b, key.toString(_context), frames);

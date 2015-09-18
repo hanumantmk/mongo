@@ -2171,34 +2171,13 @@ def doConfigure(myenv):
         context.Result(ret)
         return ret
 
-    def CheckCXX11Align(context):
-        test_body = """
-        #include <memory>
-        int main(int argc, char **argv) {
-            char buf[100];
-            void* p = buf;
-            std::size_t sz = sizeof(buf);
-            auto foo = std::align(1, sizeof(int), p, sz);
-            return 0;
-        }
-        """
-        context.Message('Checking for C++11 std::align support... ')
-        ret = context.TryCompile(textwrap.dedent(test_body), '.cpp')
-        context.Result(ret)
-        return ret
-
-    # Check for std::make_unique  and std::align support without using the
-    # __cplusplus macro
+    # Check for std::make_unique support without using the __cplusplus macro
     conf = Configure(myenv, help=False, custom_tests = {
         'CheckCXX14MakeUnique': CheckCXX14MakeUnique,
-        'CheckCXX11Align': CheckCXX11Align,
     })
 
     if conf.CheckCXX14MakeUnique():
         conf.env.SetConfigHeaderDefine('MONGO_CONFIG_HAVE_STD_MAKE_UNIQUE')
-
-    if conf.CheckCXX11Align():
-        conf.env.SetConfigHeaderDefine('MONGO_CONFIG_HAVE_STD_ALIGN')
 
     myenv = conf.Finish()
 

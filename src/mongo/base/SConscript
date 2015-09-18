@@ -9,8 +9,7 @@ generateErrorCodes = env.Command(
 env.Alias('generated-sources', generateErrorCodes)
 
 env.CppUnitTest('base_test',
-                ['alloc_only_pool_allocator_test.cpp',
-                 'counter_test.cpp',
+                ['counter_test.cpp',
                  'data_builder_test.cpp',
                  'data_cursor_test.cpp',
                  'data_range_cursor_test.cpp',
