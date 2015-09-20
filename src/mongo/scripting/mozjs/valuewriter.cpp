@@ -281,6 +281,8 @@ void ValueWriter::_writeObject(BSONObjBuilder* b,
                              binData.size(),
                              static_cast<mongo::BinDataType>(static_cast<int>(o.getNumber("type"))),
                              binData.c_str());
+
+            return;
         }
 
         if (scope->getTimestampProto().instanceOf(obj)) {

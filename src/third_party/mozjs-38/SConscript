@@ -23,6 +23,9 @@ env.Prepend(CPPDEFINES=[
         'NO_NSPR_10_SUPPORT',
 	'STATIC_JS_API=1',
         'U_NO_DEFAULT_INCLUDE_UTF_HEADERS=1',
+        'DEBUG',
+        'JS_DEBUG',
+        'JS_GC_ZEAL',
         ])
 
 # js-confdefs.h has to get in front on windows or wherever

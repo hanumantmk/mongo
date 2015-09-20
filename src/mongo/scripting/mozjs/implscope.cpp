@@ -278,6 +278,9 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
     _checkErrorState(JS_InitStandardClasses(_context, _global));
 
     installBSONTypes();
+
+    JS_FireOnNewGlobalObject(_context, _global);
+
     execSetup(JSFiles::assert);
     execSetup(JSFiles::types);
 
