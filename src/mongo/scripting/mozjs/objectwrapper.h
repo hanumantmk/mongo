@@ -213,6 +213,7 @@ private:
      */
     void _writeField(BSONObjBuilder* b,
                      Key key,
+                     JS::MutableHandleObject childObj,
                      WriteFieldRecursionFrames* frames,
                      BSONObj* originalBSON);
 

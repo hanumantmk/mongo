@@ -71,6 +71,7 @@ public:
      */
     void writeThis(BSONObjBuilder* b,
                    StringData sd,
+                   JS::MutableHandleObject obj,
                    ObjectWrapper::WriteFieldRecursionFrames* frames);
 
     void setOriginalBSON(BSONObj* obj);

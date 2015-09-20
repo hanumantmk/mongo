@@ -354,16 +354,17 @@ BSONObj ObjectWrapper::toBSON() {
             return *originalBSON;
     }
 
+    JS::RootedId id(_context);
+    JS::RootedObject childObj(_context);
     WriteFieldRecursionFrames frames;
     frames.emplace(_context, _object, nullptr, "");
-    JS::RootedId id(_context);
 
     BSONObjBuilder b;
 
     // We special case the _id field in top-level objects and move it to the front.
     // This matches other drivers behavior and makes finding the _id field quicker in BSON.
     if (hasField("_id")) {
-        _writeField(&b, "_id", &frames, frames.top().originalBSON);
+        _writeField(&b, "_id", &childObj, &frames, frames.top().originalBSON);
     }
 
     while (frames.size()) {
@@ -397,7 +398,7 @@ BSONObj ObjectWrapper::toBSON() {
 
         // writeField invokes ValueWriter with the frame stack, which will push
         // onto frames for subobjects, which will effectively recurse the loop.
-        _writeField(frame.subbob_or(&b), JS::HandleId(id), &frames, frame.originalBSON);
+        _writeField(frame.subbob_or(&b), JS::HandleId(id), &childObj, &frames, frame.originalBSON);
     }
 
     const int sizeWithEOO = b.len() + 1 /*EOO*/ - 4 /*BSONObj::Holder ref count*/;
@@ -432,6 +433,7 @@ ObjectWrapper::WriteFieldRecursionFrame::WriteFieldRecursionFrame(JSContext* cx,
 
 void ObjectWrapper::_writeField(BSONObjBuilder* b,
                                 Key key,
+                                JS::MutableHandleObject childObj,
                                 WriteFieldRecursionFrames* frames,
                                 BSONObj* originalParent) {
     JS::RootedValue value(_context);
@@ -440,7 +442,7 @@ void ObjectWrapper::_writeField(BSONObjBuilder* b,
     ValueWriter x(_context, value);
     x.setOriginalBSON(originalParent);
 
-    x.writeThis(b, key.toString(_context), frames);
+    x.writeThis(b, key.toString(_context), childObj, frames);
 }
 
 }  // namespace mozjs
