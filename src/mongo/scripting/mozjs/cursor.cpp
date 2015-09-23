@@ -83,7 +83,7 @@ void CursorInfo::Functions::next::call(JSContext* cx, JS::CallArgs args) {
     BSONObj bson = cursor->next();
     bool ro = o.hasField("_ro") ? o.getBoolean("_ro") : false;
 
-    ValueReader(cx, args.rval()).fromBSON(bson, ro);
+    ValueReader(cx, args.rval()).fromBSON(bson.getOwned(), nullptr, ro);
 }
 
 void CursorInfo::Functions::hasNext::call(JSContext* cx, JS::CallArgs args) {

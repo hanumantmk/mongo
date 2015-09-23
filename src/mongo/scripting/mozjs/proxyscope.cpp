@@ -119,6 +119,10 @@ void MozJSProxyScope::gc() {
     _implScope->gc();
 }
 
+void MozJSProxyScope::increaseGeneration() {
+    runOnImplThread([&] { _implScope->increaseGeneration(); });
+}
+
 double MozJSProxyScope::getNumber(const char* field) {
     double out;
     runOnImplThread([&] { out = _implScope->getNumber(field); });

@@ -103,6 +103,8 @@ public:
 
     virtual void gc() = 0;
 
+    virtual void increaseGeneration() = 0;
+
     virtual ScriptingFunction createFunction(const char* code);
 
     /**

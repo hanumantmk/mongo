@@ -417,6 +417,9 @@ public:
     void gc() {
         _real->gc();
     }
+    void increaseGeneration() {
+        _real->increaseGeneration();
+    }
     bool isKillPending() const {
         return _real->isKillPending();
     }

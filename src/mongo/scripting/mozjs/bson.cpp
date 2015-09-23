@@ -30,6 +30,7 @@
 
 #include "mongo/scripting/mozjs/bson.h"
 
+#include <memory>
 #include <set>
 
 #include "mongo/scripting/mozjs/idwrapper.h"
@@ -37,6 +38,7 @@
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
+#include "mongo/stdx/memory.h"
 
 namespace mongo {
 namespace mozjs {
@@ -56,10 +58,21 @@ namespace {
  * the appearance of mutable state on the read/write versions.
  */
 struct BSONHolder {
-    BSONHolder(const BSONObj& obj, bool ro)
-        : _obj(obj.getOwned()), _resolved(false), _readOnly(ro), _altered(false) {}
+    BSONHolder(const BSONObj& obj, const BSONObj* parent, std::size_t generation, bool ro)
+        : _obj(obj),
+          _parent(parent ? stdx::make_unique<BSONObj>(*parent) : nullptr),
+          _generation(generation),
+          _resolved(false),
+          _readOnly(ro),
+          _altered(false) {}
+
+    const BSONObj& getParent() const {
+        return _parent ? *(_parent) : _obj;
+    }
 
     BSONObj _obj;
+    std::unique_ptr<BSONObj> _parent;
+    std::size_t _generation;
     bool _resolved;
     bool _readOnly;
     bool _altered;
@@ -70,13 +83,20 @@ BSONHolder* getHolder(JSObject* obj) {
     return static_cast<BSONHolder*>(JS_GetPrivate(obj));
 }
 
+void checkGeneration(JSContext* cx, const BSONHolder* holder) {
+    if ((!holder->_obj.isOwned()) && (getScope(cx)->getGeneration() != holder->_generation))
+        uasserted(ErrorCodes::BadValue,
+                  "BSONObj no longer valid. Has been invalidated by increaseGeneration");
+}
+
 }  // namespace
 
-void BSONInfo::make(JSContext* cx, JS::MutableHandleObject obj, BSONObj bson, bool ro) {
+void BSONInfo::make(
+    JSContext* cx, JS::MutableHandleObject obj, BSONObj bson, const BSONObj* parent, bool ro) {
     auto scope = getScope(cx);
 
     scope->getProto<BSONInfo>().newObject(obj);
-    JS_SetPrivate(obj, new BSONHolder(bson, ro));
+    JS_SetPrivate(obj, new BSONHolder(bson, parent, scope->getGeneration(), ro));
 }
 
 void BSONInfo::finalize(JSFreeOp* fop, JSObject* obj) {
@@ -93,6 +113,8 @@ void BSONInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& 
 
     if (!holder)
         return;
+
+    checkGeneration(cx, holder);
 
     BSONObjIterator i(holder->_obj);
 
@@ -126,6 +148,8 @@ void BSONInfo::setProperty(
             uasserted(ErrorCodes::BadValue, "Read only object");
         }
 
+        checkGeneration(cx, holder);
+
         auto iter = holder->_removed.find(IdWrapper(cx, id).toString());
 
         if (iter != holder->_removed.end()) {
@@ -146,6 +170,8 @@ void BSONInfo::delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
             uasserted(ErrorCodes::BadValue, "Read only object");
         }
 
+        checkGeneration(cx, holder);
+
         holder->_altered = true;
 
         holder->_removed.insert(IdWrapper(cx, id).toString());
@@ -163,6 +189,8 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
         return;
     }
 
+    checkGeneration(cx, holder);
+
     IdWrapper idw(cx, id);
 
     if (!holder->_readOnly && holder->_removed.count(idw.toString())) {
@@ -178,7 +206,7 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
 
         JS::RootedValue vp(cx);
 
-        ValueReader(cx, &vp).fromBSONElement(elem, holder->_readOnly);
+        ValueReader(cx, &vp).fromBSONElement(elem, holder->getParent(), holder->_readOnly);
 
         o.defineProperty(id, vp, JSPROP_ENUMERATE);
 
@@ -196,8 +224,11 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
 std::tuple<BSONObj*, bool> BSONInfo::originalBSON(JSContext* cx, JS::HandleObject obj) {
     std::tuple<BSONObj*, bool> out(nullptr, false);
 
-    if (auto holder = getHolder(obj))
+    if (auto holder = getHolder(obj)) {
+        checkGeneration(cx, holder);
+
         out = std::make_tuple(&holder->_obj, holder->_altered);
+    }
 
     return out;
 }

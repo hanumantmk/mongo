@@ -290,6 +290,10 @@ public:
     void setParentStack(std::string);
     const std::string& getParentStack() const;
 
+    std::size_t getGeneration() const;
+
+    void increaseGeneration();
+
 private:
     void _MozJSCreateFunction(const char* raw,
                               ScriptingFunction functionNumber,
@@ -352,6 +356,7 @@ private:
     int _exitCode;
     bool _quickExit;
     std::string _parentStack;
+    std::size_t _generation;
 
     WrapType<BinDataInfo> _binDataProto;
     WrapType<BSONInfo> _bsonProto;

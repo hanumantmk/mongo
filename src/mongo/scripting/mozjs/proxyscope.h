@@ -127,6 +127,8 @@ public:
 
     void gc() override;
 
+    void increaseGeneration() override;
+
     double getNumber(const char* field) override;
     int getNumberInt(const char* field) override;
     long long getNumberLongLong(const char* field) override;
