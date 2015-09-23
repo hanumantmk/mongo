@@ -241,6 +241,7 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
       _connectState(ConnectState::Not),
       _status(Status::OK()),
       _quickExit(false),
+      _generation(0),
       _binDataProto(_context),
       _bsonProto(_context),
       _countDownLatchProto(_context),
@@ -319,7 +320,7 @@ void MozJSImplScope::init(const BSONObj* data) {
     BSONObjIterator i(*data);
     while (i.more()) {
         BSONElement e = i.next();
-        setElement(e.fieldName(), e);
+        setElement(e.fieldName(), e, *data);
     }
 }
 
@@ -341,10 +342,10 @@ void MozJSImplScope::setBoolean(const char* field, bool val) {
     ObjectWrapper(_context, _global).setBoolean(field, val);
 }
 
-void MozJSImplScope::setElement(const char* field, const BSONElement& e) {
+void MozJSImplScope::setElement(const char* field, const BSONElement& e, const BSONObj& parent) {
     MozJSEntry entry(this);
 
-    ObjectWrapper(_context, _global).setBSONElement(field, e, false);
+    ObjectWrapper(_context, _global).setBSONElement(field, e, parent, false);
 }
 
 void MozJSImplScope::setObject(const char* field, const BSONObj& obj, bool readOnly) {
@@ -415,7 +416,7 @@ BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
     MozJSEntry entry(this);
 
     JS::RootedValue function(_context);
-    ValueReader(_context, &function).fromBSONElement(args.firstElement(), true);
+    ValueReader(_context, &function).fromBSONElement(args.firstElement(), args, true);
 
     int argc = args.nFields() - 1;
 
@@ -425,7 +426,7 @@ BSONObj MozJSImplScope::callThreadArgs(const BSONObj& args) {
     JS::RootedValue value(_context);
 
     for (int i = 0; i < argc; ++i) {
-        ValueReader(_context, &value).fromBSONElement(*it, true);
+        ValueReader(_context, &value).fromBSONElement(*it, args, true);
         argv.append(value);
         it.next();
     }
@@ -513,7 +514,7 @@ int MozJSImplScope::invoke(ScriptingFunction func,
             BSONElement next = it.next();
 
             JS::RootedValue value(_context);
-            ValueReader(_context, &value).fromBSONElement(next, readOnlyArgs);
+            ValueReader(_context, &value).fromBSONElement(next, *argsObject, readOnlyArgs);
 
             args.append(value);
         }
@@ -521,7 +522,7 @@ int MozJSImplScope::invoke(ScriptingFunction func,
 
     JS::RootedValue smrecv(_context);
     if (recv)
-        ValueReader(_context, &smrecv).fromBSON(*recv, readOnlyRecv);
+        ValueReader(_context, &smrecv).fromBSON(*recv, nullptr, readOnlyRecv);
     else
         smrecv.setObjectOrNull(_global);
 
@@ -675,6 +676,7 @@ void MozJSImplScope::reset() {
     unregisterOperation();
     _pendingKill.store(false);
     _pendingGC.store(false);
+    advanceGeneration();
 }
 
 void MozJSImplScope::installBSONTypes() {
@@ -782,6 +784,14 @@ void MozJSImplScope::setOOM() {
 
 void MozJSImplScope::setParentStack(std::string parentStack) {
     _parentStack = std::move(parentStack);
+}
+
+std::size_t MozJSImplScope::getGeneration() const {
+    return _generation;
+}
+
+void MozJSImplScope::advanceGeneration() {
+    _generation++;
 }
 
 const std::string& MozJSImplScope::getParentStack() const {
