@@ -35,6 +35,7 @@
 
 #include "mongo/scripting/mozjs/idwrapper.h"
 #include "mongo/scripting/mozjs/implscope.h"
+#include "mongo/scripting/mozjs/internedstring.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
@@ -193,14 +194,13 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
     }
 
     IdWrapper idw(cx, id);
+    std::string sname = idw.toString();
 
-    if (!holder->_readOnly && holder->_removed.count(idw.toString())) {
+    if (!holder->_readOnly && holder->_removed.count(sname)) {
         return;
     }
 
     ObjectWrapper o(cx, obj);
-
-    std::string sname = IdWrapper(cx, id).toString();
 
     if (holder->_obj.hasField(sname)) {
         auto elem = holder->_obj[sname];
@@ -251,7 +251,7 @@ void BSONInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObj
     JS::RootedValue value(cx);
     value.setBoolean(true);
 
-    ObjectWrapper(cx, proto).defineProperty("_bson", value, 0);
+    ObjectWrapper(cx, proto).defineProperty(InternedString::_bson, value, 0);
 }
 
 }  // namespace mozjs

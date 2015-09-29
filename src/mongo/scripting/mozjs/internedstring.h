@@ -28,36 +28,47 @@
 
 #pragma once
 
-#include "mongo/scripting/mozjs/wraptype.h"
+#include <array>
+#include <jsapi.h>
 
 namespace mongo {
 namespace mozjs {
 
-/**
- * The "ObjectId" Javascript object.
- *
- * Holds a private bson OID
- */
-struct OIDInfo : public BaseInfo {
-    static void construct(JSContext* cx, JS::CallArgs args);
-    static void finalize(JSFreeOp* fop, JSObject* obj);
+enum class InternedString {
+#define MONGO_MOZJS_INTERNED_STRING(name, str) name,
+#include "mongo/scripting/mozjs/internedstring.defs"
+#undef MONGO_MOZJS_INTERNED_STRING
+    NUM_IDS,
+};
 
-    struct Functions {
-        MONGO_DECLARE_JS_FUNCTION(getter);
-        MONGO_DECLARE_JS_FUNCTION(toString);
-    };
+class InternedStringId {
+public:
+    InternedStringId(JSContext* cx, InternedString id);
 
-    static const JSFunctionSpec methods[2];
+    operator JS::HandleId() {
+        return _id;
+    }
 
-    static const unsigned classFlags = JSCLASS_HAS_PRIVATE;
+    operator jsid() {
+        return _id;
+    }
 
-    static const char* const className;
+private:
+    JS::RootedId _id;
+};
 
-    static void postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto);
+class InternedStringTable {
+public:
+    InternedStringTable(JSContext* cx);
+    ~InternedStringTable();
 
-    static void make(JSContext* cx, const OID& oid, JS::MutableHandleValue out);
-    static OID getOID(JSContext* cx, JS::HandleValue value);
-    static OID getOID(JSContext* cx, JS::HandleObject object);
+    JS::HandleId getInternedString(InternedString id) {
+        return _internedStrings[static_cast<std::size_t>(id)];
+    }
+
+private:
+    std::array<JS::PersistentRootedId, static_cast<std::size_t>(InternedString::NUM_IDS)>
+        _internedStrings;
 };
 
 }  // namespace mozjs

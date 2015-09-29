@@ -34,6 +34,7 @@
 
 #include <jscustomallocator.h>
 #include <jsfriendapi.h>
+#include <vm/PosixNSPR.h>
 
 #include "mongo/base/error_codes.h"
 #include "mongo/db/operation_context.h"
@@ -197,8 +198,12 @@ void MozJSImplScope::_gcCallback(JSRuntime* rt, JSGCStatus status, void* data) {
           << std::endl;
 }
 
-MozJSImplScope::MozRuntime::MozRuntime() {
+MozJSImplScope::MozRuntime::MozRuntime(bool threadNeedsSetup) {
     mongo::sm::reset(kMallocMemoryLimit);
+
+    if (_threadNeedsSetup) {
+        createCurrentThreadAsPR_Thread();
+    }
 
     {
         stdx::unique_lock<stdx::mutex> lk(gRuntimeCreationMutex);
@@ -224,16 +229,21 @@ MozJSImplScope::MozRuntime::MozRuntime() {
 MozJSImplScope::MozRuntime::~MozRuntime() {
     JS_DestroyContext(_context);
     JS_DestroyRuntime(_runtime);
+
+    if (_threadNeedsSetup) {
+        destroyCurrentThreadAsPR_Thread();
+    }
 }
 
-MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
+MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine, bool threadNeedsSetup)
     : _engine(engine),
-      _mr(),
+      _mr(threadNeedsSetup),
       _runtime(_mr._runtime),
       _context(_mr._context),
       _globalProto(_context),
       _global(_globalProto.getProto()),
       _funcs(),
+      _internedStrings(_context),
       _pendingKill(false),
       _opId(0),
       _opCtx(nullptr),
@@ -242,6 +252,7 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
       _status(Status::OK()),
       _quickExit(false),
       _generation(0),
+      _threadNeedsSetup(threadNeedsSetup),
       _binDataProto(_context),
       _bsonProto(_context),
       _countDownLatchProto(_context),

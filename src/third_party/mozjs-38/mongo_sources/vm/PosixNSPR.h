@@ -15,6 +15,13 @@ class Lock;
 class CondVar;
 };
 
+namespace mongo {
+namespace mozjs {
+void createCurrentThreadAsPR_Thread();
+void destroyCurrentThreadAsPR_Thread();
+}
+}
+
 typedef nspr::Thread PRThread;
 typedef nspr::Lock PRLock;
 typedef nspr::CondVar PRCondVar;

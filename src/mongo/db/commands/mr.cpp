@@ -762,8 +762,12 @@ void State::init() {
     // setup js
     const string userToken =
         AuthorizationSession::get(ClientBasic::getCurrent())->getAuthenticatedUserNamesToken();
-    _scope.reset(globalScriptEngine->getPooledScope(_txn, _config.dbname, "mapreduce" + userToken)
-                     .release());
+    //_scope.reset(globalScriptEngine->getPooledScope(_txn, _config.dbname, "mapreduce" + userToken)
+    //                 .release());
+    _scope.reset(globalScriptEngine->newScopeSingle());
+    _scope->registerOperation(_txn);
+    _scope->setLocalDB(_config.dbname);
+    _scope->loadStored(_txn, true);
 
     if (!_config.scopeSetup.isEmpty())
         _scope->init(&_config.scopeSetup);

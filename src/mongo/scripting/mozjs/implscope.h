@@ -44,6 +44,7 @@
 #include "mongo/scripting/mozjs/engine.h"
 #include "mongo/scripting/mozjs/error.h"
 #include "mongo/scripting/mozjs/global.h"
+#include "mongo/scripting/mozjs/internedstring.h"
 #include "mongo/scripting/mozjs/jsthread.h"
 #include "mongo/scripting/mozjs/maxkey.h"
 #include "mongo/scripting/mozjs/minkey.h"
@@ -77,7 +78,7 @@ class MozJSImplScope final : public Scope {
     MONGO_DISALLOW_COPYING(MozJSImplScope);
 
 public:
-    explicit MozJSImplScope(MozJSScriptEngine* engine);
+    explicit MozJSImplScope(MozJSScriptEngine* engine, bool threadNeedsSetup = false);
     ~MozJSImplScope();
 
     void init(const BSONObj* data) override;
@@ -292,7 +293,11 @@ public:
 
     std::size_t getGeneration() const;
 
-    void advanceGeneration();
+    void advanceGeneration() override;
+
+    JS::HandleId getInternedStringId(InternedString name) {
+        return _internedStrings.getInternedString(name);
+    }
 
 private:
     void _MozJSCreateFunction(const char* raw,
@@ -307,9 +312,10 @@ private:
      */
     struct MozRuntime {
     public:
-        MozRuntime();
+        MozRuntime(bool threadNeedsSetup);
         ~MozRuntime();
 
+        bool _threadNeedsSetup;
         JSRuntime* _runtime;
         JSContext* _context;
     };
@@ -346,6 +352,7 @@ private:
     WrapType<GlobalInfo> _globalProto;
     JS::HandleObject _global;
     std::vector<JS::PersistentRootedValue> _funcs;
+    InternedStringTable _internedStrings;
     std::atomic<bool> _pendingKill;
     std::string _error;
     unsigned int _opId;        // op id for this scope
@@ -357,6 +364,7 @@ private:
     bool _quickExit;
     std::string _parentStack;
     std::size_t _generation;
+    bool _threadNeedsSetup;
 
     WrapType<BinDataInfo> _binDataProto;
     WrapType<BSONInfo> _bsonProto;

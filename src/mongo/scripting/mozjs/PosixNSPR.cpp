@@ -26,6 +26,7 @@
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/stdx/thread.h"
+#include "mongo/util/assert_util.h"
 #include "mongo/util/concurrency/thread_name.h"
 #include "mongo/util/concurrency/threadlocal.h"
 
@@ -49,6 +50,19 @@ public:
 namespace {
 MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL nspr::Thread* kCurrentThread;
 }  // namespace
+
+namespace mongo {
+namespace mozjs {
+void createCurrentThreadAsPR_Thread() {
+    kCurrentThread = new nspr::Thread(nullptr, nullptr, false);
+}
+void destroyCurrentThreadAsPR_Thread() {
+    invariant(kCurrentThread);
+    delete kCurrentThread;
+    kCurrentThread = nullptr;
+}
+}
+}
 
 void* nspr::Thread::ThreadRoutine(void* arg) {
     Thread* self = static_cast<Thread*>(arg);

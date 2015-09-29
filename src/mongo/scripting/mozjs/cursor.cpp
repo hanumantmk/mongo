@@ -32,6 +32,7 @@
 
 #include "mongo/scripting/mozjs/bson.h"
 #include "mongo/scripting/mozjs/implscope.h"
+#include "mongo/scripting/mozjs/internedstring.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/wrapconstrainedmethod.h"
@@ -81,7 +82,7 @@ void CursorInfo::Functions::next::call(JSContext* cx, JS::CallArgs args) {
     ObjectWrapper o(cx, args.thisv());
 
     BSONObj bson = cursor->next();
-    bool ro = o.hasField("_ro") ? o.getBoolean("_ro") : false;
+    bool ro = o.hasOwnField(InternedString::_ro) ? o.getBoolean(InternedString::_ro) : false;
 
     ValueReader(cx, args.rval()).fromBSON(bson.getOwned(), nullptr, ro);
 }
@@ -109,7 +110,7 @@ void CursorInfo::Functions::objsLeftInBatch::call(JSContext* cx, JS::CallArgs ar
 }
 
 void CursorInfo::Functions::readOnly::call(JSContext* cx, JS::CallArgs args) {
-    ObjectWrapper(cx, args.thisv()).setBoolean("_ro", true);
+    ObjectWrapper(cx, args.thisv()).setBoolean(InternedString::_ro, true);
 
     args.rval().set(args.thisv());
 }
