@@ -35,9 +35,11 @@
 
 #include "mongo/scripting/mozjs/idwrapper.h"
 #include "mongo/scripting/mozjs/implscope.h"
+#include "mongo/scripting/mozjs/internedstring.h"
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
+#include "mongo/util/string_map.h"
 
 namespace mongo {
 namespace mozjs {
@@ -86,7 +88,7 @@ struct BSONHolder {
     bool _resolved;
     bool _readOnly;
     bool _altered;
-    std::set<std::string> _removed;
+    StringMap<bool> _removed;
 };
 
 BSONHolder* getValidHolder(JSContext* cx, JSObject* obj) {
@@ -134,7 +136,7 @@ void BSONInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& 
 
         // TODO: when we get heterogenous set lookup, switch to StringData
         // rather than involving the temporary string
-        if (holder->_removed.count(e.fieldName()))
+        if (holder->_removed.find(e.fieldName()) != holder->_removed.end())
             continue;
 
         ValueReader(cx, &val).fromStringData(e.fieldNameStringData());
@@ -155,7 +157,8 @@ void BSONInfo::setProperty(
             uasserted(ErrorCodes::BadValue, "Read only object");
         }
 
-        auto iter = holder->_removed.find(IdWrapper(cx, id).toString());
+        JSStringWrapper jsstr;
+        auto iter = holder->_removed.find(IdWrapper(cx, id).toStringData(&jsstr));
 
         if (iter != holder->_removed.end()) {
             holder->_removed.erase(iter);
@@ -177,7 +180,8 @@ void BSONInfo::delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
 
         holder->_altered = true;
 
-        holder->_removed.insert(IdWrapper(cx, id).toString());
+        JSStringWrapper jsstr;
+        holder->_removed[IdWrapper(cx, id).toStringData(&jsstr)] = true;
     }
 
     *succeeded = true;
@@ -193,14 +197,15 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
     }
 
     IdWrapper idw(cx, id);
+    JSStringWrapper jsstr;
 
-    if (!holder->_readOnly && holder->_removed.count(idw.toString())) {
+    auto sname = idw.toStringData(&jsstr);
+
+    if (!holder->_readOnly && holder->_removed.find(sname) != holder->_removed.end()) {
         return;
     }
 
     ObjectWrapper o(cx, obj);
-
-    std::string sname = IdWrapper(cx, id).toString();
 
     if (holder->_obj.hasField(sname)) {
         auto elem = holder->_obj[sname];
@@ -251,7 +256,7 @@ void BSONInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObj
     JS::RootedValue value(cx);
     value.setBoolean(true);
 
-    ObjectWrapper(cx, proto).defineProperty("_bson", value, 0);
+    ObjectWrapper(cx, proto).defineProperty(InternedString::_bson, value, 0);
 }
 
 }  // namespace mozjs
