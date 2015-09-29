@@ -30,7 +30,7 @@
 
 #include "mongo/scripting/mozjs/bson.h"
 
-#include <memory>
+#include <boost/optional.hpp>
 #include <set>
 
 #include "mongo/scripting/mozjs/idwrapper.h"
@@ -38,7 +38,6 @@
 #include "mongo/scripting/mozjs/objectwrapper.h"
 #include "mongo/scripting/mozjs/valuereader.h"
 #include "mongo/scripting/mozjs/valuewriter.h"
-#include "mongo/stdx/memory.h"
 
 namespace mongo {
 namespace mozjs {
@@ -60,33 +59,43 @@ namespace {
 struct BSONHolder {
     BSONHolder(const BSONObj& obj, const BSONObj* parent, std::size_t generation, bool ro)
         : _obj(obj),
-          _parent(parent ? stdx::make_unique<BSONObj>(*parent) : nullptr),
           _generation(generation),
+          _isOwned(obj.isOwned() || (parent && parent->isOwned())),
           _resolved(false),
           _readOnly(ro),
-          _altered(false) {}
+          _altered(false) {
+        if (parent) {
+            _parent.emplace(*parent);
+        }
+    }
 
     const BSONObj& getParent() const {
         return _parent ? *(_parent) : _obj;
     }
 
+    void uassertValid(JSContext* cx) const {
+        if (!_isOwned && getScope(cx)->getGeneration() != _generation)
+            uasserted(ErrorCodes::BadValue,
+                      "Attempt to access an invalidated BSON Object in JS scope");
+    }
+
     BSONObj _obj;
-    std::unique_ptr<BSONObj> _parent;
+    boost::optional<BSONObj> _parent;
     std::size_t _generation;
+    bool _isOwned;
     bool _resolved;
     bool _readOnly;
     bool _altered;
     std::set<std::string> _removed;
 };
 
-BSONHolder* getHolder(JSObject* obj) {
-    return static_cast<BSONHolder*>(JS_GetPrivate(obj));
-}
+BSONHolder* getValidHolder(JSContext* cx, JSObject* obj) {
+    auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
-void checkGeneration(JSContext* cx, const BSONHolder* holder) {
-    if ((!holder->_obj.isOwned()) && (getScope(cx)->getGeneration() != holder->_generation))
-        uasserted(ErrorCodes::BadValue,
-                  "BSONObj no longer valid. Has been invalidated by increaseGeneration");
+    if (holder)
+        holder->uassertValid(cx);
+
+    return holder;
 }
 
 }  // namespace
@@ -100,7 +109,7 @@ void BSONInfo::make(
 }
 
 void BSONInfo::finalize(JSFreeOp* fop, JSObject* obj) {
-    auto holder = getHolder(obj);
+    auto holder = static_cast<BSONHolder*>(JS_GetPrivate(obj));
 
     if (!holder)
         return;
@@ -109,12 +118,10 @@ void BSONInfo::finalize(JSFreeOp* fop, JSObject* obj) {
 }
 
 void BSONInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& properties) {
-    auto holder = getHolder(obj);
+    auto holder = getValidHolder(cx, obj);
 
     if (!holder)
         return;
-
-    checkGeneration(cx, holder);
 
     BSONObjIterator i(holder->_obj);
 
@@ -141,14 +148,12 @@ void BSONInfo::enumerate(JSContext* cx, JS::HandleObject obj, JS::AutoIdVector& 
 
 void BSONInfo::setProperty(
     JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool strict, JS::MutableHandleValue vp) {
-    auto holder = getHolder(obj);
+    auto holder = getValidHolder(cx, obj);
 
     if (holder) {
         if (holder->_readOnly) {
             uasserted(ErrorCodes::BadValue, "Read only object");
         }
-
-        checkGeneration(cx, holder);
 
         auto iter = holder->_removed.find(IdWrapper(cx, id).toString());
 
@@ -163,14 +168,12 @@ void BSONInfo::setProperty(
 }
 
 void BSONInfo::delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* succeeded) {
-    auto holder = getHolder(obj);
+    auto holder = getValidHolder(cx, obj);
 
     if (holder) {
         if (holder->_readOnly) {
             uasserted(ErrorCodes::BadValue, "Read only object");
         }
-
-        checkGeneration(cx, holder);
 
         holder->_altered = true;
 
@@ -181,15 +184,13 @@ void BSONInfo::delProperty(JSContext* cx, JS::HandleObject obj, JS::HandleId id,
 }
 
 void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, bool* resolvedp) {
-    auto holder = getHolder(obj);
+    auto holder = getValidHolder(cx, obj);
 
     *resolvedp = false;
 
     if (!holder) {
         return;
     }
-
-    checkGeneration(cx, holder);
 
     IdWrapper idw(cx, id);
 
@@ -224,11 +225,8 @@ void BSONInfo::resolve(JSContext* cx, JS::HandleObject obj, JS::HandleId id, boo
 std::tuple<BSONObj*, bool> BSONInfo::originalBSON(JSContext* cx, JS::HandleObject obj) {
     std::tuple<BSONObj*, bool> out(nullptr, false);
 
-    if (auto holder = getHolder(obj)) {
-        checkGeneration(cx, holder);
-
+    if (auto holder = getValidHolder(cx, obj))
         out = std::make_tuple(&holder->_obj, holder->_altered);
-    }
 
     return out;
 }

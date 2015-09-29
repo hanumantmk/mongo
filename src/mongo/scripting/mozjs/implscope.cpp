@@ -320,7 +320,7 @@ void MozJSImplScope::init(const BSONObj* data) {
     BSONObjIterator i(*data);
     while (i.more()) {
         BSONElement e = i.next();
-        setElement(e.fieldName(), e);
+        setElement(e.fieldName(), e, *data);
     }
 }
 
@@ -342,15 +342,10 @@ void MozJSImplScope::setBoolean(const char* field, bool val) {
     ObjectWrapper(_context, _global).setBoolean(field, val);
 }
 
-void MozJSImplScope::setElement(const char* field, const BSONElement& e) {
+void MozJSImplScope::setElement(const char* field, const BSONElement& e, const BSONObj& parent) {
     MozJSEntry entry(this);
-    auto obj = [&] {
-        BSONObjBuilder bob;
-        bob.append(e);
-        return bob.obj();
-    }();
 
-    ObjectWrapper(_context, _global).setBSONElement(field, obj.firstElement(), obj, false);
+    ObjectWrapper(_context, _global).setBSONElement(field, e, parent, false);
 }
 
 void MozJSImplScope::setObject(const char* field, const BSONObj& obj, bool readOnly) {
@@ -681,7 +676,7 @@ void MozJSImplScope::reset() {
     unregisterOperation();
     _pendingKill.store(false);
     _pendingGC.store(false);
-    increaseGeneration();
+    advanceGeneration();
 }
 
 void MozJSImplScope::installBSONTypes() {
@@ -795,7 +790,7 @@ std::size_t MozJSImplScope::getGeneration() const {
     return _generation;
 }
 
-void MozJSImplScope::increaseGeneration() {
+void MozJSImplScope::advanceGeneration() {
     _generation++;
 }
 
