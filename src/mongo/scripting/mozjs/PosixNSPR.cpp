@@ -45,7 +45,12 @@ public:
     mongo::stdx::thread& thread() {
         return thread_;
     }
+
+    static unsigned TLSSize;
+    std::vector<void*> TLSArray;
 };
+
+unsigned nspr::Thread::TLSSize = 0;
 
 namespace {
 MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL nspr::Thread* kCurrentThread;
@@ -53,13 +58,14 @@ MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL nspr::Thread* kCurrentThread;
 
 namespace mongo {
 namespace mozjs {
-void createCurrentThreadAsPR_Thread() {
-    kCurrentThread = new nspr::Thread(nullptr, nullptr, false);
+PRThread* makePR_Thread() {
+    return new PRThread(nullptr, nullptr, false);
 }
-void destroyCurrentThreadAsPR_Thread() {
-    invariant(kCurrentThread);
-    delete kCurrentThread;
-    kCurrentThread = nullptr;
+void destroyPR_Thread(PRThread* thread) {
+    delete thread;
+}
+void bindPR_Thread(PRThread* thread) {
+    kCurrentThread = thread;
 }
 }
 }
@@ -122,40 +128,41 @@ PRStatus PR_SetCurrentThreadName(const char* name) {
     return PR_SUCCESS;
 }
 
-static const size_t MaxTLSKeyCount = 32;
-static size_t gTLSKeyCount;
-namespace {
-MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL std::array<void*, MaxTLSKeyCount> gTLSArray;
-
-}  // namespace
-
 PRStatus PR_NewThreadPrivateIndex(unsigned* newIndex, PRThreadPrivateDTOR destructor) {
     /*
      * We only call PR_NewThreadPrivateIndex from the main thread, so there's no
      * need to lock the table of TLS keys.
      */
-    MOZ_ASSERT(gTLSKeyCount + 1 < MaxTLSKeyCount);
 
-    *newIndex = gTLSKeyCount;
-    gTLSKeyCount++;
+    *newIndex = PRThread::TLSSize++;
 
     return PR_SUCCESS;
 }
 
 PRStatus PR_SetThreadPrivate(unsigned index, void* priv) {
-    if (index >= gTLSKeyCount)
-        return PR_FAILURE;
+    auto thread = kCurrentThread;
 
-    gTLSArray[index] = priv;
+    if (!thread) return PR_FAILURE;
+
+    if (thread->TLSArray.size() <= index) {
+        thread->TLSArray.resize(index + 1, nullptr);
+    }
+
+    thread->TLSArray[index] = priv;
 
     return PR_SUCCESS;
 }
 
 void* PR_GetThreadPrivate(unsigned index) {
-    if (index >= gTLSKeyCount)
-        return nullptr;
+    auto thread = kCurrentThread;
 
-    return gTLSArray[index];
+    if (!thread) return nullptr;
+
+    if (thread->TLSArray.size() <= index) {
+        thread->TLSArray.resize(index + 1, nullptr);
+    }
+
+    return thread->TLSArray[index];
 }
 
 PRStatus PR_CallOnce(PRCallOnceType* once, PRCallOnceFN func) {

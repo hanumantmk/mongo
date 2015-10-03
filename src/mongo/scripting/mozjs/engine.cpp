@@ -56,15 +56,21 @@ std::string ScriptEngine::getInterpreterVersionString() {
 namespace mozjs {
 
 MozJSScriptEngine::MozJSScriptEngine() {
+    _thread = makePR_Thread();
+    bindPR_Thread(_thread);
     uassert(ErrorCodes::JSInterpreterFailure, "Failed to JS_Init()", JS_Init());
+    bindPR_Thread(nullptr);
 }
 
 MozJSScriptEngine::~MozJSScriptEngine() {
+    bindPR_Thread(_thread);
     JS_ShutDown();
+    bindPR_Thread(nullptr);
+    destroyPR_Thread(_thread);
 }
 
 mongo::Scope* MozJSScriptEngine::createScope() {
-    return new MozJSProxyScope(this);
+    return new MozJSImplScope(this, true);
 }
 
 mongo::Scope* MozJSScriptEngine::createScopeSingle() {

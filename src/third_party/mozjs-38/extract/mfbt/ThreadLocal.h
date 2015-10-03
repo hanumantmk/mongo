@@ -9,6 +9,8 @@
 #ifndef mozilla_ThreadLocal_h
 #define mozilla_ThreadLocal_h
 
+#include "vm/PosixNSPR.h"
+
 #if defined(XP_WIN)
 // This file will get included in any file that wants to add a profiler mark.
 // In order to not bring <windows.h> together we could include windef.h and
@@ -72,11 +74,7 @@ typedef sig_atomic_t sig_safe_t;
 template<typename T>
 class ThreadLocal
 {
-#if defined(XP_WIN)
-  typedef unsigned long key_t;
-#else
-  typedef pthread_key_t key_t;
-#endif
+  typedef unsigned key_t;
 
   // Integral types narrower than void* must be extended to avoid
   // warnings from valgrind on some platforms.  This helper type
@@ -119,12 +117,9 @@ ThreadLocal<T>::init()
                 "mozilla::ThreadLocal can't be used for types larger than "
                 "a pointer");
   MOZ_ASSERT(!initialized());
-#ifdef XP_WIN
-  mKey = TlsAlloc();
-  mInited = mKey != 0xFFFFFFFFUL; // TLS_OUT_OF_INDEXES
-#else
-  mInited = !pthread_key_create(&mKey, nullptr);
-#endif
+
+  PR_NewThreadPrivateIndex(&mKey, nullptr);
+  mInited = true;
   return mInited;
 }
 
@@ -133,12 +128,9 @@ inline T
 ThreadLocal<T>::get() const
 {
   MOZ_ASSERT(initialized());
+
   void* h;
-#ifdef XP_WIN
-  h = TlsGetValue(mKey);
-#else
-  h = pthread_getspecific(mKey);
-#endif
+  h = PR_GetThreadPrivate(mKey);
   return static_cast<T>(reinterpret_cast<typename Helper<T>::Type>(h));
 }
 
@@ -147,13 +139,10 @@ inline void
 ThreadLocal<T>::set(const T aValue)
 {
   MOZ_ASSERT(initialized());
+
   void* h = reinterpret_cast<void*>(static_cast<typename Helper<T>::Type>(aValue));
-#ifdef XP_WIN
-  bool succeeded = TlsSetValue(mKey, h);
-#else
-  bool succeeded = !pthread_setspecific(mKey, h);
-#endif
-  if (!succeeded) {
+  PRStatus succeeded = PR_SetThreadPrivate(mKey, h);
+  if (succeeded != PR_SUCCESS) {
     MOZ_CRASH();
   }
 }

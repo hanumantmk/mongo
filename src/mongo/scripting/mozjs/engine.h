@@ -30,6 +30,7 @@
 
 #include <jsapi.h>
 #include <unordered_map>
+#include <vm/PosixNSPR.h>
 
 #include "mongo/scripting/deadline_monitor.h"
 #include "mongo/scripting/engine.h"
@@ -88,6 +89,8 @@ private:
                                    // _globalInterruptLock).
 
     DeadlineMonitor<MozJSImplScope> _deadlineMonitor;
+
+    PRThread* _thread;
 };
 
 }  // namespace mozjs

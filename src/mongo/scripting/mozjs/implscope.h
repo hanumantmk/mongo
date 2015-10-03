@@ -29,6 +29,7 @@
 #pragma once
 
 #include <jsapi.h>
+#include <vm/PosixNSPR.h>
 
 #include "mongo/client/dbclientcursor.h"
 #include "mongo/scripting/mozjs/bindata.h"
@@ -304,6 +305,15 @@ private:
                               ScriptingFunction functionNumber,
                               JS::MutableHandleValue fun);
 
+    struct MozRuntime;
+    struct MozJSThreadLocal {
+        MozJSThreadLocal(MozRuntime* mr);
+        MozJSThreadLocal(MozJSImplScope* scope);
+        ~MozJSThreadLocal();
+
+        MozRuntime* mr;
+    };
+
     /**
      * This structure exists exclusively to construct the runtime and context
      * ahead of the various global prototypes in the ImplScope construction.
@@ -316,8 +326,11 @@ private:
         ~MozRuntime();
 
         bool _threadNeedsSetup;
+        PRThread* _thread;
+        std::size_t _entranceCount = 0;
         JSRuntime* _runtime;
         JSContext* _context;
+        boost::optional<MozJSThreadLocal> _tl;
     };
 
     /**

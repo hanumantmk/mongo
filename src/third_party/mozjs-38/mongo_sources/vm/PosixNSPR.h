@@ -15,16 +15,17 @@ class Lock;
 class CondVar;
 };
 
-namespace mongo {
-namespace mozjs {
-void createCurrentThreadAsPR_Thread();
-void destroyCurrentThreadAsPR_Thread();
-}
-}
-
 typedef nspr::Thread PRThread;
 typedef nspr::Lock PRLock;
 typedef nspr::CondVar PRCondVar;
+
+namespace mongo {
+namespace mozjs {
+PRThread* makePR_Thread();
+void destroyPR_Thread(PRThread* thread);
+void bindPR_Thread(PRThread*);
+}
+}
 
 enum PRThreadType {
    PR_USER_THREAD,

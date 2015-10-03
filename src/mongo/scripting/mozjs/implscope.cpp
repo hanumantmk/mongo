@@ -93,9 +93,42 @@ bool gFirstRuntimeCreated = false;
 
 MONGO_TRIVIALLY_CONSTRUCTIBLE_THREAD_LOCAL MozJSImplScope* kCurrentScope;
 
-struct MozJSImplScope::MozJSEntry {
-    MozJSEntry(MozJSImplScope* scope) : ar(scope->_context), ac(scope->_context, scope->_global) {}
+MozJSImplScope::MozJSThreadLocal::MozJSThreadLocal(MozRuntime* mr) : mr(mr) {
+    if (!mr->_threadNeedsSetup)
+        return;
 
+    if (mr->_entranceCount == 0) {
+        invariant(PR_GetCurrentThread() == nullptr);
+        bindPR_Thread(mr->_thread);
+    } else {
+        invariant(PR_GetCurrentThread() == mr->_thread);
+    }
+
+    mr->_entranceCount++;
+}
+
+MozJSImplScope::MozJSThreadLocal::MozJSThreadLocal(MozJSImplScope* scope)
+    : MozJSThreadLocal(&scope->_mr) {}
+
+MozJSImplScope::MozJSThreadLocal::~MozJSThreadLocal() {
+    if (!mr->_threadNeedsSetup)
+        return;
+
+    invariant(mr->_entranceCount);
+    invariant(PR_GetCurrentThread() == mr->_thread);
+
+    mr->_entranceCount--;
+
+    if (!mr->_entranceCount) {
+        bindPR_Thread(nullptr);
+    }
+}
+
+struct MozJSImplScope::MozJSEntry {
+    MozJSEntry(MozJSImplScope* scope)
+        : tl(scope), ar(scope->_context), ac(scope->_context, scope->_global) {}
+
+    MozJSThreadLocal tl;
     JSAutoRequest ar;
     JSAutoCompartment ac;
 };
@@ -198,12 +231,14 @@ void MozJSImplScope::_gcCallback(JSRuntime* rt, JSGCStatus status, void* data) {
           << std::endl;
 }
 
-MozJSImplScope::MozRuntime::MozRuntime(bool threadNeedsSetup) {
+MozJSImplScope::MozRuntime::MozRuntime(bool threadNeedsSetup) : _threadNeedsSetup(threadNeedsSetup) {
     mongo::sm::reset(kMallocMemoryLimit);
 
     if (_threadNeedsSetup) {
-        createCurrentThreadAsPR_Thread();
+        _thread = makePR_Thread();
     }
+
+    _tl.emplace(this);
 
     {
         stdx::unique_lock<stdx::mutex> lk(gRuntimeCreationMutex);
@@ -230,8 +265,10 @@ MozJSImplScope::MozRuntime::~MozRuntime() {
     JS_DestroyContext(_context);
     JS_DestroyRuntime(_runtime);
 
+    _tl.reset();
+
     if (_threadNeedsSetup) {
-        destroyCurrentThreadAsPR_Thread();
+        destroyPR_Thread(_thread);
     }
 }
 
@@ -278,41 +315,47 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine, bool threadNeedsSetup)
       _oidProto(_context),
       _regExpProto(_context),
       _timestampProto(_context) {
-    kCurrentScope = this;
+    {
+        kCurrentScope = this;
 
-    // The default is quite low and doesn't seem to directly correlate with
-    // malloc'd bytes.  Set it to MAX_INT here and catching things in the
-    // jscustomallocator.cpp
-    JS_SetGCParameter(_runtime, JSGC_MAX_BYTES, 0xffffffff);
+        // The default is quite low and doesn't seem to directly correlate with
+        // malloc'd bytes.  Set it to MAX_INT here and catching things in the
+        // jscustomallocator.cpp
+        JS_SetGCParameter(_runtime, JSGC_MAX_BYTES, 0xffffffff);
 
-    JS_SetInterruptCallback(_runtime, _interruptCallback);
-    JS_SetGCCallback(_runtime, _gcCallback, this);
-    JS_SetContextPrivate(_context, this);
-    JSAutoRequest ar(_context);
+        JS_SetInterruptCallback(_runtime, _interruptCallback);
+        JS_SetGCCallback(_runtime, _gcCallback, this);
+        JS_SetContextPrivate(_context, this);
+        JSAutoRequest ar(_context);
 
-    JS_SetErrorReporter(_runtime, _reportError);
+        JS_SetErrorReporter(_runtime, _reportError);
 
-    JSAutoCompartment ac(_context, _global);
+        JSAutoCompartment ac(_context, _global);
 
-    _checkErrorState(JS_InitStandardClasses(_context, _global));
+        _checkErrorState(JS_InitStandardClasses(_context, _global));
 
-    installBSONTypes();
+        installBSONTypes();
 
-    JS_FireOnNewGlobalObject(_context, _global);
+        JS_FireOnNewGlobalObject(_context, _global);
 
-    execSetup(JSFiles::assert);
-    execSetup(JSFiles::types);
+        execSetup(JSFiles::assert);
+        execSetup(JSFiles::types);
 
-    // install process-specific utilities in the global scope (dependancy: types.js, assert.js)
-    if (_engine->getScopeInitCallback())
-        _engine->getScopeInitCallback()(*this);
+        // install process-specific utilities in the global scope (dependancy: types.js, assert.js)
+        if (_engine->getScopeInitCallback())
+            _engine->getScopeInitCallback()(*this);
 
-    // install global utility functions
-    installGlobalUtils(*this);
-    _mongoHelpersProto.install(_global);
+        // install global utility functions
+        installGlobalUtils(*this);
+        _mongoHelpersProto.install(_global);
+    }
+
+    _mr._tl.reset();
 }
 
 MozJSImplScope::~MozJSImplScope() {
+    _mr._tl.emplace(this);
+
     for (auto&& x : _funcs) {
         x.reset();
     }
