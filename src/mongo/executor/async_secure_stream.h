@@ -42,7 +42,7 @@ namespace executor {
 
 class AsyncSecureStream final : public AsyncStreamInterface {
 public:
-    AsyncSecureStream(asio::io_service* io_service, asio::ssl::context* sslContext);
+    AsyncSecureStream(asio::io_service::strand* strand, asio::ssl::context* sslContext);
 
     ~AsyncSecureStream();
 
@@ -61,6 +61,7 @@ private:
     void _handleHandshake(std::error_code ec, const std::string& hostName);
 
     asio::ssl::stream<asio::ip::tcp::socket> _stream;
+    asio::io_service::strand* _strand;
     ConnectHandler _userHandler;
     bool _connected = false;
 };
