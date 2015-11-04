@@ -120,6 +120,8 @@ private:
 
     void updateStateInLock();
 
+    void backgroundTimer();
+
 private:
     ConnectionPool* const _parent;
 
@@ -133,9 +135,10 @@ private:
     std::priority_queue<Request, std::vector<Request>, RequestComparator> _requests;
 
     std::unique_ptr<TimerInterface> _requestTimer;
-    Date_t _requestTimerExpiration;
     size_t _generation;
     bool _inFulfillRequests;
+
+    Date_t _shutdownExpiration = Date_t::max();
 
     size_t _created;
 
@@ -266,7 +269,9 @@ ConnectionPool::SpecificPool::SpecificPool(ConnectionPool* parent, const HostAnd
       _generation(0),
       _inFulfillRequests(false),
       _created(0),
-      _state(State::kRunning) {}
+      _state(State::kRunning) {
+    backgroundTimer();
+}
 
 ConnectionPool::SpecificPool::~SpecificPool() {
     DESTRUCTOR_GUARD(_requestTimer->cancelTimeout();)
@@ -551,19 +556,6 @@ void ConnectionPool::SpecificPool::shutdown() {
     stdx::unique_lock<stdx::mutex> lk(_parent->_mutex);
 
     _state = State::kInShutdown;
-
-    // If we have processing connections, wait for them to finish or timeout
-    // before shutdown
-    if (_processingPool.size() || _droppedProcessingPool.size()) {
-        _requestTimer->setTimeout(Seconds(1), [this]() { shutdown(); });
-
-        return;
-    }
-
-    invariant(_requests.empty());
-    invariant(_checkedOutPool.empty());
-
-    _parent->_pools.erase(_hostAndPort);
 }
 
 ConnectionPool::SpecificPool::OwnedConnection ConnectionPool::SpecificPool::takeFromPool(
@@ -587,75 +579,74 @@ ConnectionPool::SpecificPool::OwnedConnection ConnectionPool::SpecificPool::take
 
 // Updates our state and manages the request timer
 void ConnectionPool::SpecificPool::updateStateInLock() {
-    if (_requests.size()) {
-        // We have some outstanding requests, we're live
-
-        // If we were already running and the timer is the same as it was
-        // before, nothing to do
-        if (_state == State::kRunning && _requestTimerExpiration == _requests.top().first)
-            return;
-
+    if (_requests.size() || _checkedOutPool.size()) {
         _state = State::kRunning;
+        return;
+    }
 
-        _requestTimer->cancelTimeout();
-
-        _requestTimerExpiration = _requests.top().first;
-
-        auto timeout = _requests.top().first - _parent->_factory->now();
-
-        // We set a timer for the most recent request, then invoke each timed
-        // out request we couldn't service
-        _requestTimer->setTimeout(
-            timeout,
-            [this]() {
-                stdx::unique_lock<stdx::mutex> lk(_parent->_mutex);
-
-                auto now = _parent->_factory->now();
-
-                while (_requests.size()) {
-                    auto& x = _requests.top();
-
-                    if (x.first <= now) {
-                        auto cb = std::move(x.second);
-                        _requests.pop();
-
-                        lk.unlock();
-                        cb(Status(ErrorCodes::ExceededTimeLimit,
-                                  "Couldn't get a connection within the time limit"));
-                        lk.lock();
-                    } else {
-                        break;
-                    }
-                }
-
-                updateStateInLock();
-            });
-    } else if (_checkedOutPool.size()) {
-        // If we have no requests, but someone's using a connection, we just
-        // hang around until the next request or a return
-
-        _requestTimer->cancelTimeout();
-        _state = State::kRunning;
-        _requestTimerExpiration = _requestTimerExpiration.max();
-    } else {
-        // If we don't have any live requests and no one has checked out connections
-
-        // If we used to be idle, just bail
-        if (_state == State::kIdle)
-            return;
+    if (_state == State::kRunning) {
+        _shutdownExpiration = _parent->_factory->now() + _parent->_options.hostTimeout;
 
         _state = State::kIdle;
 
-        _requestTimer->cancelTimeout();
-
-        _requestTimerExpiration = _parent->_factory->now() + _parent->_options.hostTimeout;
-
-        auto timeout = _parent->_options.hostTimeout;
-
-        // Set the shutdown timer
-        _requestTimer->setTimeout(timeout, [this]() { shutdown(); });
+        return;
     }
 }
 
+void ConnectionPool::SpecificPool::backgroundTimer() {
+    _requestTimer->setTimeout(
+        Seconds(1),
+        [this]() {
+            stdx::unique_lock<stdx::mutex> lk(_parent->_mutex);
+
+            switch (_state) {
+                case State::kRunning: {
+                    auto now = _parent->_factory->now();
+
+                    while (_requests.size()) {
+                        auto& x = _requests.top();
+
+                        if (x.first <= now) {
+                            auto cb = std::move(x.second);
+                            _requests.pop();
+
+                            lk.unlock();
+                            cb(Status(ErrorCodes::ExceededTimeLimit,
+                                      "Couldn't get a connection within the time limit"));
+                            lk.lock();
+                        } else {
+                            break;
+                        }
+                    }
+
+                    updateStateInLock();
+
+                    break;
+                }
+                case State::kIdle: {
+                    if (_parent->_factory->now() > _shutdownExpiration) {
+                        _state = State::kInShutdown;
+                    }
+
+                    break;
+                }
+                case State::kInShutdown: {
+                    // If we have processing connections, wait for them to finish or timeout
+                    // before shutdown
+                    if (!(_processingPool.size() || _droppedProcessingPool.size())) {
+                        invariant(_requests.empty());
+                        invariant(_checkedOutPool.empty());
+
+                        _parent->_pools.erase(_hostAndPort);
+
+                        return;
+                    }
+                    break;
+                }
+            }
+
+            backgroundTimer();
+        });
+}
 }  // namespace executor
 }  // namespace mongo

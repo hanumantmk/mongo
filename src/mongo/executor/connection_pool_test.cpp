@@ -577,6 +577,8 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappens) {
 
     // Jump pass the hostTimeout
     PoolImpl::setNow(now + Milliseconds(1000));
+    PoolImpl::setNow(now + Milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(3000));
 
     bool reachedB = false;
 
@@ -640,6 +642,7 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensMoreGetsDelay) {
 
     // Now we've timed out
     PoolImpl::setNow(now + Milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(3000));
 
     bool reachedC = false;
     // Different id
@@ -719,6 +722,8 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
 
     // expire the pool
     PoolImpl::setNow(now + Milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(3000));
+    PoolImpl::setNow(now + Milliseconds(4000));
 
     bool reachedB = false;
 
