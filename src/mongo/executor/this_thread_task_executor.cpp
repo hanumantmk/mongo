@@ -123,7 +123,7 @@ ThisThreadTaskExecutor::~ThisThreadTaskExecutor() {}
 
 void ThisThreadTaskExecutor::startup() {
     _net->startup();
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     if (_inShutdown) {
         return;
     }
@@ -149,16 +149,20 @@ void ThisThreadTaskExecutor::shutdown() {
 }
 
 void ThisThreadTaskExecutor::join() {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-    while (!_unsignaledEvents.empty()) {
-        auto eventState = _unsignaledEvents.front();
-        invariant(eventState->waiters.empty());
-        EventHandle event;
-        setEventForHandle(&event, std::move(eventState));
-        signalEvent_inlock(event, std::move(lk));
+    {
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
+        while (!_unsignaledEvents.empty()) {
+            auto eventState = _unsignaledEvents.front();
+            invariant(eventState->waiters.empty());
+            EventHandle event;
+            setEventForHandle(&event, std::move(eventState));
+            signalEvent_inlock(event, std::move(lk));
+        }
     }
+
     _net->shutdown();
-    lk.lock();
+
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     invariant(_poolInProgressQueue.empty());
     invariant(_networkInProgressQueue.empty());
     invariant(_sleepersQueue.empty());
@@ -436,12 +440,11 @@ void ThisThreadTaskExecutor::drainPool(stdx::unique_lock<stdx::mutex> lk) {
     if (_runningCallbacks || _poolInProgressQueue.empty())
         return;
 
-    if (stdx::this_thread::get_id() != _networkThreadId) {
+    if (!_net->onNetworkThread()) {
         lk.unlock();
         _net->setAlarm(now(),
                        [this] {
                            stdx::unique_lock<stdx::mutex> lk(_mutex);
-                           _networkThreadId = stdx::this_thread::get_id();
                            drainPool(std::move(lk));
                        });
         return;

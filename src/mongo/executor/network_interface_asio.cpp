@@ -338,6 +338,13 @@ void NetworkInterfaceASIO::setAlarm(Date_t when, const stdx::function<void()>& a
     });
 };
 
+bool NetworkInterfaceASIO::onNetworkThread() {
+    auto id = stdx::this_thread::get_id();
+    return std::any_of(_serviceRunners.begin(),
+                       _serviceRunners.end(),
+                       [&](const stdx::thread& thread) { return thread.get_id() == id; });
+}
+
 bool NetworkInterfaceASIO::inShutdown() const {
     return (_state.load() == State::kShutdown);
 }

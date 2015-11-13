@@ -169,8 +169,6 @@ private:
     bool _inShutdown = false;
 
     bool _runningCallbacks = false;
-
-    stdx::thread::id _networkThreadId;
 };
 
 }  // namespace executor

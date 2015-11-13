@@ -258,6 +258,27 @@ env.Library(
 )
 
 env.Library(
+    target='this_thread_task_executor_test_fixture',
+    source=[
+        'this_thread_task_executor_test_fixture.cpp',
+        ],
+    LIBDEPS=[
+        'this_thread_task_executor',
+        'task_executor_test_fixture',
+    ]
+)
+
+env.CppUnitTest(
+    target='this_thread_task_executor_test',
+    source=[
+        'this_thread_task_executor_test.cpp',
+    ],
+    LIBDEPS=[
+        'this_thread_task_executor_test_fixture',
+    ]
+)
+
+env.Library(
     target='thread_pool_task_executor_test_fixture',
     source=[
         'thread_pool_task_executor_test_fixture.cpp',

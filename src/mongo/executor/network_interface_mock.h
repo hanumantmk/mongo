@@ -102,6 +102,8 @@ public:
     void cancelAllCommands() override {}
     virtual void setAlarm(Date_t when, const stdx::function<void()>& action);
 
+    virtual bool onNetworkThread();
+
 
     ////////////////////////////////////////////////////////////////////////////////
     //
@@ -230,7 +232,7 @@ private:
     /**
      * Implementation of waitForWork*.
      */
-    void _waitForWork_inlock(stdx::unique_lock<stdx::mutex>* lk);
+    void _waitForWork_inlock();
 
     /**
      * Returns true if there are ready requests for the network thread to service.
@@ -262,24 +264,9 @@ private:
      * reaquire "lk" several times, but will not return until the executor has blocked
      * in waitFor*.
      */
-    void _runReadyNetworkOperations_inlock(stdx::unique_lock<stdx::mutex>* lk);
+    void _runReadyNetworkOperations_inlock();
 
-    // Mutex that synchronizes access to mutable data in this class and its subclasses.
-    // Fields guarded by the mutex are labled (M), below, and those that are read-only
-    // in multi-threaded execution, and so unsynchronized, are labeled (R).
-    stdx::mutex _mutex;
-
-    // Condition signaled to indicate that the network processing thread should wake up.
-    stdx::condition_variable _shouldWakeNetworkCondition;  // (M)
-
-    // Condition signaled to indicate that the executor run thread should wake up.
-    stdx::condition_variable _shouldWakeExecutorCondition;  // (M)
-
-    // Bitmask indicating which threads are runnable.
-    int _waitingToRunMask;  // (M)
-
-    // Indicator of which thread, if any, is currently running.
-    ThreadType _currentlyRunning;  // (M)
+    bool _inNetwork;
 
     // The current time reported by this instance of NetworkInterfaceMock.
     Date_t _now;  // (M)
