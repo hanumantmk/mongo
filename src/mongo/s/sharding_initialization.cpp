@@ -43,7 +43,7 @@
 #include "mongo/executor/network_interface_factory.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/executor/task_executor_pool.h"
-#include "mongo/executor/thread_pool_task_executor.h"
+#include "mongo/executor/this_thread_task_executor.h"
 #include "mongo/rpc/metadata/config_server_metadata.h"
 #include "mongo/rpc/metadata/metadata_hook.h"
 #include "mongo/rpc/metadata/config_server_metadata.h"
@@ -63,7 +63,7 @@ namespace {
 
 using executor::NetworkInterface;
 using executor::TaskExecutorPool;
-using executor::ThreadPoolTaskExecutor;
+using executor::ThisThreadTaskExecutor;
 
 // Same logic as sharding_connection_hook.cpp.
 class ShardingEgressMetadataHook final : public rpc::EgressMetadataHook {
@@ -116,11 +116,8 @@ public:
     }
 };
 
-std::unique_ptr<ThreadPoolTaskExecutor> makeTaskExecutor(std::unique_ptr<NetworkInterface> net) {
-    ThreadPool::Options tpOptions;
-    tpOptions.poolName = "ShardWork";
-    return stdx::make_unique<ThreadPoolTaskExecutor>(stdx::make_unique<ThreadPool>(tpOptions),
-                                                     std::move(net));
+std::unique_ptr<ThisThreadTaskExecutor> makeTaskExecutor(std::unique_ptr<NetworkInterface> net) {
+    return stdx::make_unique<ThisThreadTaskExecutor>(std::move(net));
 }
 
 std::unique_ptr<TaskExecutorPool> makeTaskExecutorPool(std::unique_ptr<NetworkInterface> fixedNet) {
@@ -129,19 +126,13 @@ std::unique_ptr<TaskExecutorPool> makeTaskExecutorPool(std::unique_ptr<NetworkIn
         auto net =
             executor::makeNetworkInterface(stdx::make_unique<ShardingNetworkConnectionHook>(),
                                            stdx::make_unique<ShardingEgressMetadataHook>());
-        ThreadPool::Options tpOptions;
-        tpOptions.poolName = (str::stream() << "ShardQueryWork" << i);
-        auto exec = stdx::make_unique<ThreadPoolTaskExecutor>(
-            stdx::make_unique<ThreadPool>(tpOptions), std::move(net));
+        auto exec = stdx::make_unique<ThisThreadTaskExecutor>(std::move(net));
 
         executors.emplace_back(std::move(exec));
     }
 
     // Add executor used to perform non-performance critical work.
-    ThreadPool::Options tpOptions;
-    tpOptions.poolName = "ShardWorkFixed";
-    auto fixedExec = stdx::make_unique<ThreadPoolTaskExecutor>(
-        stdx::make_unique<ThreadPool>(tpOptions), std::move(fixedNet));
+    auto fixedExec = stdx::make_unique<ThisThreadTaskExecutor>(std::move(fixedNet));
 
     auto executorPool = stdx::make_unique<TaskExecutorPool>();
     executorPool->addExecutors(std::move(executors), std::move(fixedExec));

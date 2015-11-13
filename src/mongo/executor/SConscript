@@ -248,6 +248,16 @@ env.Library(
 )
 
 env.Library(
+    target='this_thread_task_executor',
+    source=[
+        'this_thread_task_executor.cpp',
+    ],
+    LIBDEPS=[
+        'task_executor_interface',
+    ]
+)
+
+env.Library(
     target='thread_pool_task_executor_test_fixture',
     source=[
         'thread_pool_task_executor_test_fixture.cpp',
