@@ -239,6 +239,7 @@ env.Library(
 env.Library(
     target='thread_pool_task_executor',
     source=[
+        'this_thread_pool.cpp',
         'thread_pool_task_executor.cpp',
     ],
     LIBDEPS=[

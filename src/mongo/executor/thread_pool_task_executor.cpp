@@ -131,7 +131,7 @@ void ThreadPoolTaskExecutor::startup() {
 }
 
 void ThreadPoolTaskExecutor::shutdown() {
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     _inShutdown = true;
     WorkQueue pending;
     pending.splice(pending.end(), _networkInProgressQueue);
@@ -145,24 +145,26 @@ void ThreadPoolTaskExecutor::shutdown() {
     for (auto&& cbState : _poolInProgressQueue) {
         cbState->canceled.store(1);
     }
-    scheduleIntoPool_inlock(&pending);
+    scheduleIntoPool_inlock(&pending, std::move(lk));
     _net->signalWorkAvailable();
     _pool->shutdown();
 }
 
 void ThreadPoolTaskExecutor::join() {
     _pool->join();
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-    while (!_unsignaledEvents.empty()) {
-        auto eventState = _unsignaledEvents.front();
-        invariant(eventState->waiters.empty());
-        EventHandle event;
-        setEventForHandle(&event, std::move(eventState));
-        signalEvent_inlock(event);
+    {
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
+        while (!_unsignaledEvents.empty()) {
+            auto eventState = _unsignaledEvents.front();
+            invariant(eventState->waiters.empty());
+            EventHandle event;
+            setEventForHandle(&event, std::move(eventState));
+            signalEvent_inlock(event, std::move(lk));
+        }
     }
-    lk.unlock();
     _net->shutdown();
-    lk.lock();
+
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     invariant(_poolInProgressQueue.empty());
     invariant(_networkInProgressQueue.empty());
     invariant(_sleepersQueue.empty());
@@ -190,8 +192,8 @@ StatusWith<TaskExecutor::EventHandle> ThreadPoolTaskExecutor::makeEvent() {
 }
 
 void ThreadPoolTaskExecutor::signalEvent(const EventHandle& event) {
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
-    signalEvent_inlock(event);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+    signalEvent_inlock(event, std::move(lk));
 }
 
 StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::onEvent(const EventHandle& event,
@@ -200,14 +202,14 @@ StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::onEvent(const E
         return {ErrorCodes::BadValue, "Passed invalid event handle to onEvent"};
     }
     auto wq = makeSingletonWorkQueue(work);
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     auto eventState = checked_cast<EventState*>(getEventFromHandle(event));
     auto cbHandle = enqueueCallbackState_inlock(&eventState->waiters, &wq);
     if (!cbHandle.isOK()) {
         return cbHandle;
     }
     if (eventState->isSignaledFlag) {
-        scheduleIntoPool_inlock(&eventState->waiters);
+        scheduleIntoPool_inlock(&eventState->waiters, std::move(lk));
     }
     return cbHandle;
 }
@@ -225,12 +227,12 @@ StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::scheduleWork(
     const CallbackFn& work) {
     auto wq = makeSingletonWorkQueue(work);
     WorkQueue temp;
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
     auto cbHandle = enqueueCallbackState_inlock(&temp, &wq);
     if (!cbHandle.isOK()) {
         return cbHandle;
     }
-    scheduleIntoPool_inlock(&temp);
+    scheduleIntoPool_inlock(&temp, std::move(lk));
     return cbHandle;
 }
 
@@ -254,8 +256,8 @@ StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::scheduleWorkAt(
                            return;
                        }
                        invariant(now() >= when);
-                       stdx::lock_guard<stdx::mutex> lk(_mutex);
-                       scheduleIntoPool_inlock(&_sleepersQueue, cbState->iter);
+                       stdx::unique_lock<stdx::mutex> lk(_mutex);
+                       scheduleIntoPool_inlock(&_sleepersQueue, cbState->iter, std::move(lk));
                    });
 
     return cbHandle;
@@ -321,8 +323,7 @@ StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::scheduleRemoteC
                                   << (response.isOK() ? response.getValue().toString()
                                                       : response.getStatus().toString());
                            swap(cbState->callback, newCb);
-                           scheduleIntoPool_inlock(&_networkInProgressQueue, cbState->iter);
-                           lk.unlock();  // Lets newCb's destructor run outside _mutex.
+                           scheduleIntoPool_inlock(&_networkInProgressQueue, cbState->iter, std::move(lk));
                        });
     return cbHandle;
 }
@@ -347,7 +348,7 @@ void ThreadPoolTaskExecutor::cancel(const CallbackHandle& cbHandle) {
                                  });
         if (iter != _sleepersQueue.end()) {
             invariant(iter == cbState->iter);
-            scheduleIntoPool_inlock(&_sleepersQueue, cbState->iter);
+            scheduleIntoPool_inlock(&_sleepersQueue, cbState->iter, std::move(lk));
         }
     }
 }
@@ -403,36 +404,38 @@ ThreadPoolTaskExecutor::EventList ThreadPoolTaskExecutor::makeSingletonEventList
     return result;
 }
 
-void ThreadPoolTaskExecutor::signalEvent_inlock(const EventHandle& event) {
+void ThreadPoolTaskExecutor::signalEvent_inlock(const EventHandle& event, stdx::unique_lock<stdx::mutex> lk) {
     invariant(event.isValid());
     auto eventState = checked_cast<EventState*>(getEventFromHandle(event));
     invariant(!eventState->isSignaledFlag);
     eventState->isSignaledFlag = true;
     eventState->isSignaledCondition.notify_all();
-    scheduleIntoPool_inlock(&eventState->waiters);
     _unsignaledEvents.erase(eventState->iter);
+    scheduleIntoPool_inlock(&eventState->waiters, std::move(lk));
 }
 
-void ThreadPoolTaskExecutor::scheduleIntoPool_inlock(WorkQueue* fromQueue) {
-    scheduleIntoPool_inlock(fromQueue, fromQueue->begin(), fromQueue->end());
+void ThreadPoolTaskExecutor::scheduleIntoPool_inlock(WorkQueue* fromQueue, stdx::unique_lock<stdx::mutex> lk) {
+    scheduleIntoPool_inlock(fromQueue, fromQueue->begin(), fromQueue->end(), std::move(lk));
 }
 
 void ThreadPoolTaskExecutor::scheduleIntoPool_inlock(WorkQueue* fromQueue,
-                                                     const WorkQueue::iterator& iter) {
-    scheduleIntoPool_inlock(fromQueue, iter, std::next(iter));
+                                                     const WorkQueue::iterator& iter, stdx::unique_lock<stdx::mutex> lk) {
+    scheduleIntoPool_inlock(fromQueue, iter, std::next(iter), std::move(lk));
 }
 
 void ThreadPoolTaskExecutor::scheduleIntoPool_inlock(WorkQueue* fromQueue,
                                                      const WorkQueue::iterator& begin,
-                                                     const WorkQueue::iterator& end) {
+                                                     const WorkQueue::iterator& end, stdx::unique_lock<stdx::mutex> lk) {
     dassert(fromQueue != &_poolInProgressQueue);
-    std::for_each(
-        begin,
-        end,
-        [this](const std::shared_ptr<CallbackState>& cbState) {
-            fassert(28735, _pool->schedule([this, cbState] { runCallback(std::move(cbState)); }));
-        });
+    std::vector<std::shared_ptr<CallbackState>> todo;
+    std::copy(begin, end, std::back_inserter(todo));
     _poolInProgressQueue.splice(_poolInProgressQueue.end(), *fromQueue, begin, end);
+
+    lk.unlock();
+
+    for (const auto& cbState : todo) {
+        fassert(28735, _pool->schedule([this, cbState] { runCallback(std::move(cbState)); }));
+    }
     _net->signalWorkAvailable();
 }
 

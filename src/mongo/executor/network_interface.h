@@ -138,6 +138,8 @@ public:
      */
     virtual void setAlarm(Date_t when, const stdx::function<void()>& action) = 0;
 
+    virtual bool onNetworkThread() = 0;
+
 protected:
     NetworkInterface();
 };
