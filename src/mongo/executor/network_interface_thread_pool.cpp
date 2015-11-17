@@ -98,7 +98,7 @@ void NetworkInterfaceThreadPool::join() {
     _net->signalWorkAvailable();
 
     stdx::unique_lock<stdx::mutex> lk(_mutex);
-    _joiningCondition.wait(lk, [&] { return _tasks.empty(); });
+    _joiningCondition.wait(lk, [&] { return _tasks.empty() && (!_consumingTasks); });
 }
 
 Status NetworkInterfaceThreadPool::schedule(Task task) {
