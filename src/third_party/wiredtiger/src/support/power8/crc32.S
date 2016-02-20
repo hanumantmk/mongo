@@ -89,6 +89,30 @@ FUNC_START(__crc32_vpmsum)
 	std	r27,-40(r1)
 	std	r26,-48(r1)
 	std	r25,-56(r1)
+li r31, -256
+stvx v20, r31, r1 # save v20
+li r31, -240
+stvx v21, r31, r1 # save v21
+li r31, -224
+stvx v22, r31, r1 # save v22
+li r31, -208
+stvx v23, r31, r1 # save v23
+li r31, -192
+stvx v24, r31, r1 # save v24
+li r31, -176
+stvx v25, r31, r1 # save v25
+li r31, -160
+stvx v26, r31, r1 # save v26
+li r31, -144
+stvx v27, r31, r1 # save v27
+li r31, -128
+stvx v28, r31, r1 # save v28
+li r31, -112
+stvx v29, r31, r1 # save v29
+li r31, -96
+stvx v30, r31, r1 # save v30
+li r31, -80
+stvx v31, r31, r1 # save v31
 
 	li	off16,16
 	li	off32,32
@@ -571,6 +595,31 @@ FUNC_START(__crc32_vpmsum)
 	/* Get it into r3 */
 	MFVRD(r3, v0)
 
+	li r31, -256
+	lvx v20, r31, r1 # restore v20
+	li r31, -240
+	lvx v21, r31, r1	# restore v21
+	li r31, -224
+	lvx v22, r31, r1	# restore v22
+	li r31, -208
+	lvx v23, r31, r1 # restore v23
+	li r31, -192
+	lvx v24, r31, r1 # restore v24
+	li r31, -176
+	lvx v25, r31, r1	# restore v25
+	li r31, -160
+	lvx v26, r31, r1 # restore v26
+	li r31, -144
+	lvx v27, r31, r1 # restore v27
+	li r31, -128
+	lvx v28, r31, r1 # restore v28
+	li r31, -112
+	lvx v29, r31, r1 # restore v29
+	li r31, -96
+	lvx v30, r31, r1 # restore v30
+	li r31, -80
+	lvx v31, r31, r1 # restore v31
+
 	ld	r31,-8(r1)
 	ld	r30,-16(r1)
 	ld	r29,-24(r1)
@@ -736,6 +785,7 @@ FUNC_START(__crc32_vpmsum)
 
 .Lzero:
 	mr	r3,r10
+
 	blr
 FUNC_END(__crc32_vpmsum)
 #endif
