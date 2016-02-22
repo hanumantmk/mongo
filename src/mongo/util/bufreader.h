@@ -129,15 +129,7 @@ public:
 
     /// reads a NUL terminated string
     StringData readCStr() {
-        ConstDataRange cdr(_pos, _end);
-
-        auto swRange = cdr.read<Terminated<'\0', ConstDataRange>>();
-
-        if (!swRange.isOK()) {
-            throw eof();
-        }
-
-        auto range = swRange.getValue().value;
+        auto range = read<Terminated<'\0', ConstDataRange>>().value;
 
         return StringData(range.data(), range.length());
     }
