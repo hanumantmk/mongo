@@ -29,9 +29,16 @@
 #include "mongo/db/fts/unicode/string.h"
 
 #include <algorithm>
+#include <boost/algorithm/searching/boyer_moore.hpp>
+#include <boost/predef.h>
 
+#include "mongo/platform/bits.h"
 #include "mongo/shell/linenoise_utf8.h"
 #include "mongo/util/assert_util.h"
+
+#if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE2_VERSION
+#include "emmintrin.h"
+#endif
 
 namespace mongo {
 namespace unicode {
@@ -42,10 +49,6 @@ using linenoise_utf8::copyString8to32;
 using std::u32string;
 
 String::String(const StringData utf8_src) {
-    // Reserve space for underlying buffers to prevent excessive reallocations.
-    _outputBuf.reserve(utf8_src.size() * 4);
-    _data.reserve(utf8_src.size() * 4);
-
     // Convert UTF-8 input to UTF-32 data.
     setData(utf8_src);
 }
@@ -79,12 +82,6 @@ void String::setData(const StringData utf8_src) {
     _needsOutputConversion = true;
 }
 
-String::String(u32string&& src) : _data(std::move(src)), _needsOutputConversion(true) {
-    // Reserve space for underlying buffers to prevent excessive reallocations.
-    _outputBuf.reserve(src.size() * 4);
-    _data.reserve(src.size() * 4);
-}
-
 std::string String::toString() {
     // _outputBuf is the target, resize it so that it's guaranteed to fit all of the input
     // characters, plus a null character if there isn't one.
@@ -98,14 +95,6 @@ std::string String::toString() {
         _needsOutputConversion = false;
     }
     return _outputBuf;
-}
-
-size_t String::size() const {
-    return _data.size();
-}
-
-const char32_t& String::operator[](int i) const {
-    return _data[i];
 }
 
 String String::substr(size_t pos, size_t len) const {
@@ -147,63 +136,271 @@ void String::substrToBuf(size_t pos, size_t len, String& buffer) const {
 
 void String::toLowerToBuf(CaseFoldMode mode, String& buffer) const {
     buffer._data.resize(_data.size());
-    auto index = 0;
+    auto outIt = buffer._data.begin();
     for (auto codepoint : _data) {
-        buffer._data[index++] = codepointToLower(codepoint, mode);
+        *outIt++ = codepointToLower(codepoint, mode);
     }
     buffer._needsOutputConversion = true;
 }
 
 void String::removeDiacriticsToBuf(String& buffer) const {
     buffer._data.resize(_data.size());
-    auto index = 0;
+    auto outIt = buffer._data.begin();
     for (auto codepoint : _data) {
-        if (!codepointIsDiacritic(codepoint)) {
-            buffer._data[index++] = codepointRemoveDiacritics(codepoint);
+        if (codepoint <= 0x7f) {
+            // ASCII only has two diacritics so they are hard-coded here.
+            if (codepoint != '^' && codepoint != '`') {
+                *outIt++ = codepoint;
+            }
+        } else if (auto clean = codepointRemoveDiacritics(codepoint)) {
+            *outIt++ = clean;
+        } else {
+            // codepoint was a pure diacritic mark, so skip it.
         }
     }
-    buffer._data.resize(index);
+    buffer._data.resize(outIt - buffer._data.begin());
     buffer._needsOutputConversion = true;
 }
 
-bool String::substrMatch(const String& str,
-                         const String& find,
-                         SubstrMatchOptions options,
-                         CaseFoldMode cfMode) {
-    // In Turkish, lowercasing needs to be applied first because the letter İ has a different case
-    // folding mapping than the letter I, but removing diacritics removes the dot from İ.
-    if (cfMode == CaseFoldMode::kTurkish) {
-        String cleanStr = str.toLower(cfMode);
-        String cleanFind = find.toLower(cfMode);
-        return substrMatch(cleanStr, cleanFind, options | kCaseSensitive, CaseFoldMode::kNormal);
+namespace {
+#if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE3_VERSION
+#define HAVE_FAST_BYTES
+/**
+ * A sequence of bytes that can be manipulated using vectorized instructions.
+ *
+ * This is specific to the use-case below and not intended as a general purpose vector class.
+ */
+class Bytes {
+public:
+    using Native = __m128i;
+    using Mask = uint32_t;  // should be uint16_t but better codegen with uint32_t.
+    using Scalar = int8_t;
+    static const int size = sizeof(Native);
+
+    /**
+     * Sets all bytes to 0.
+     */
+    Bytes() : _data(_mm_setzero_si128()) {}
+
+    /**
+     * Sets all bytes to val.
+     */
+    explicit Bytes(Scalar val) : _data(_mm_set1_epi8(val)) {}
+
+    /**
+     * Load a vector from a potentially unaligned location.
+     */
+    static Bytes load(const void* ptr) {
+        // This function is documented as taking an unaligned pointer.
+        return _mm_loadu_si128(reinterpret_cast<const Native*>(ptr));
     }
 
-    if (options & kDiacriticSensitive) {
-        if (options & kCaseSensitive) {
-            // Case sensitive and diacritic sensitive.
-            return std::search(str._data.cbegin(),
-                               str._data.cend(),
-                               find._data.cbegin(),
-                               find._data.cend(),
-                               [&](char32_t c1, char32_t c2) { return (c1 == c2); }) !=
-                str._data.cend();
+    /**
+     * Store this vector to a potentially unaligned location.
+     */
+    void store(void* ptr) const {
+        // This function is documented as taking an unaligned pointer.
+        _mm_storeu_si128(reinterpret_cast<Native*>(ptr), _data);
+    }
+
+    /**
+     * Returns a bitmask with the high bit from each byte.
+     */
+    Mask maskHigh() const {
+        return _mm_movemask_epi8(_data);
+    }
+
+    /**
+     * Returns a bitmask with any bit from each byte.
+     *
+     * This operation only makes sense if all bytes are either 0x00 or 0xff, such as the result from
+     * comparison operations.
+     */
+    Mask maskAny() const {
+        return maskHigh();  // Other archs may be more efficient here.
+    }
+
+    /**
+     * Counts zero bits in mask from whichever side corresponds to the lowest memory address.
+     */
+    static uint32_t countInitialZeros(Mask mask) {
+        return mask == 0 ? size : countTrailingZeros64(mask);
+    }
+
+    /**
+     * Sets each byte to 0xff if it is ==(EQ), <(LT), or >(GT), otherwise 0x00.
+     *
+     * May use either signed or unsigned comparisons since this use case doesn't care about bytes
+     * with high bit set.
+     */
+    Bytes compareEQ(Scalar val) const {
+        return _mm_cmpeq_epi8(_data, Bytes(val)._data);
+    }
+    Bytes compareLT(Scalar val) const {
+        return _mm_cmplt_epi8(_data, Bytes(val)._data);
+    }
+    Bytes compareGT(Scalar val) const {
+        return _mm_cmpgt_epi8(_data, Bytes(val)._data);
+    }
+
+    Bytes operator|(Bytes other) const {
+        return _mm_or_si128(_data, other._data);
+    }
+
+    Bytes& operator|=(Bytes other) {
+        return (*this = (*this | other));
+    }
+
+    Bytes operator&(Bytes other) const {
+        return _mm_and_si128(_data, other._data);
+    }
+
+    Bytes& operator&=(Bytes other) {
+        return (*this = (*this & other));
+    }
+
+private:
+    Bytes(Native data) : _data(data) {}
+
+    Native _data;
+};
+#endif
+}
+
+std::pair<std::unique_ptr<char[]>, char*> String::prepForSubstrMatch(StringData utf8,
+                                                                     SubstrMatchOptions options,
+                                                                     CaseFoldMode mode) {
+    // This function should only be called when casefolding or stripping diacritics.
+    dassert(!(options & kCaseSensitive) || !(options & kDiacriticSensitive));
+
+    // Allocate space for up to 2x growth which is the worst possible case for stripping diacritics
+    // and casefolding. Proof: the only case where 1 byte goes to >1 is 'I' in Turkish going to 2
+    // bytes. The biggest codepoint is 4 bytes which is also 2x 2 bytes. This holds as long as we
+    // don't map a single code point to more than one.
+    std::unique_ptr<char[]> buffer(new char[utf8.size() * 2]);
+    auto outputIt = buffer.get();
+
+    for (auto inputIt = utf8.begin(), endIt = utf8.end(); inputIt != endIt;) {
+#ifdef HAVE_FAST_BYTES
+        if (size_t(endIt - inputIt) >= Bytes::size) {
+            // Try the fast path for 16 contiguous bytes of ASCII.
+            auto word = Bytes::load(&*inputIt);
+
+            // Count the bytes of ASCII.
+            uint32_t usableBytes = Bytes::countInitialZeros(word.maskHigh());
+            if (usableBytes) {
+                if (!(options & kCaseSensitive)) {
+                    // 0xFF for each byte in word that is uppercase, 0x00 for all others.
+                    Bytes uppercaseMask = word.compareGT('A' - 1) & word.compareLT('Z' + 1);
+                    word |= (uppercaseMask & Bytes(0x20));
+                }
+
+                if (!(options & kDiacriticSensitive)) {
+                    Bytes::Mask diacriticMask =
+                        word.compareEQ('^').maskAny() | word.compareEQ('`').maskAny();
+                    if (diacriticMask) {
+                        usableBytes =
+                            std::min(usableBytes, Bytes::countInitialZeros(diacriticMask));
+                    }
+                }
+
+                word.store(&*outputIt);
+                outputIt += usableBytes;
+                inputIt += usableBytes;
+                if (usableBytes == Bytes::size)
+                    continue;
+            }
+            // If we get here, inputIt is positioned on a byte that we know needs special handling.
+            // Either it isn't ASCII or it is a diacritic that needs to be stripped.
+        }
+#endif
+        const uint8_t firstByte = *inputIt++;
+        char32_t codepoint = 0;
+        if (firstByte <= 0x7f) {
+            // ASCII special case. Can use faster operations.
+            if ((!(options & kCaseSensitive)) && (firstByte >= 'A' && firstByte <= 'Z')) {
+                codepoint = (mode == CaseFoldMode::kTurkish && firstByte == 'I')
+                    ? 0x131                // In Turkish, I -> ı (i with no dot).
+                    : (firstByte | 0x20);  // Set the ascii lowercase bit on the character.
+            } else {
+                // ASCII has two pure diacritics that should be skipped and no characters that
+                // change when removing diacritics.
+                if ((options & kDiacriticSensitive) || !(firstByte == '^' || firstByte == '`')) {
+                    *outputIt++ = (firstByte);
+                }
+                continue;
+            }
+        } else {
+            // firstByte indicates that it is not an ASCII char.
+            int leadingOnes = countLeadingZeros64(~(uint64_t(firstByte) << (64 - 8)));
+
+            // Only checking enough to ensure that this code doesn't crash in the face of malformed
+            // utf-8. We make no guarantees about what results will be returned in this case.
+            uassert(ErrorCodes::BadValue,
+                    "text contains invalid UTF-8",
+                    leadingOnes > 1 && leadingOnes <= 4 && inputIt + leadingOnes - 1 <= endIt);
+
+            codepoint = firstByte & (0xff >> leadingOnes);  // mask off the size indicator.
+            for (int subByteIx = 1; subByteIx < leadingOnes; subByteIx++) {
+                const uint8_t subByte = *inputIt++;
+                codepoint <<= 6;
+                codepoint |= subByte & 0x3f;  // mask off continuation bits.
+            }
+
+            if (!(options & kCaseSensitive)) {
+                codepoint = codepointToLower(codepoint, mode);
+            }
+
+            if (!(options & kDiacriticSensitive)) {
+                codepoint = codepointRemoveDiacritics(codepoint);
+                if (!codepoint)
+                    continue;  // codepoint is a pure diacritic.
+            }
         }
 
-        // Case insensitive and diacritic sensitive.
-        return std::search(str._data.cbegin(),
-                           str._data.cend(),
-                           find._data.cbegin(),
-                           find._data.cend(),
-                           [&](char32_t c1, char32_t c2) {
-                               return (codepointToLower(c1, cfMode) ==
-                                       codepointToLower(c2, cfMode));
-                           }) != str._data.cend();
+        // Back to utf-8.
+        if (codepoint <= 0x7f /* max 1-byte codepoint */) {
+            *outputIt++ = (codepoint);
+        } else if (codepoint <= 0x7ff /* max 2-byte codepoint*/) {
+            *outputIt++ = ((codepoint >> (6 * 1)) | 0xc0);  // 2 leading 1s.
+            *outputIt++ = (((codepoint >> (6 * 0)) & 0x3f) | 0x80);
+        } else if (codepoint <= 0xffff /* max 3-byte codepoint*/) {
+            *outputIt++ = ((codepoint >> (6 * 2)) | 0xe0);  // 3 leading 1s.
+            *outputIt++ = (((codepoint >> (6 * 1)) & 0x3f) | 0x80);
+            *outputIt++ = (((codepoint >> (6 * 0)) & 0x3f) | 0x80);
+        } else {
+            *outputIt++ = ((codepoint >> (6 * 3)) | 0xf0);  // 4 leading 1s.
+            *outputIt++ = (((codepoint >> (6 * 2)) & 0x3f) | 0x80);
+            *outputIt++ = (((codepoint >> (6 * 1)) & 0x3f) | 0x80);
+            *outputIt++ = (((codepoint >> (6 * 0)) & 0x3f) | 0x80);
+        }
     }
 
-    String cleanStr = str.removeDiacritics();
-    String cleanFind = find.removeDiacritics();
+    return {std::move(buffer), outputIt};
+}
 
-    return substrMatch(cleanStr, cleanFind, options | kDiacriticSensitive, cfMode);
+bool String::substrMatch(const std::string& str,
+                         const std::string& find,
+                         SubstrMatchOptions options,
+                         CaseFoldMode cfMode) {
+    if (cfMode == CaseFoldMode::kTurkish) {
+        // Turkish comparisons are always case insensitive due to their handling of I/i.
+        options &= ~kCaseSensitive;
+    }
+
+    if ((options & kCaseSensitive) && (options & kDiacriticSensitive)) {
+        // No transformation needed. Just do the search on the input strings.
+        return boost::algorithm::boyer_moore_search(
+                   str.cbegin(), str.cend(), find.cbegin(), find.cend()) != str.cend();
+    }
+
+    auto haystack = prepForSubstrMatch(str, options, cfMode);
+    auto needle = prepForSubstrMatch(find, options, cfMode);
+
+    // Case sensitive and diacritic sensitive.
+    return boost::algorithm::boyer_moore_search(
+               haystack.first.get(), haystack.second, needle.first.get(), needle.second) !=
+        haystack.second;
 }
 
 }  // namespace unicode
