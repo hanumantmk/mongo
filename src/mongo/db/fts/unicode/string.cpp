@@ -28,6 +28,10 @@
 
 #include "mongo/db/fts/unicode/string.h"
 
+#include <altivec.h>
+#undef vector
+#undef bool
+
 #include <algorithm>
 #include <boost/algorithm/searching/boyer_moore.hpp>
 #include <boost/predef.h>
@@ -163,7 +167,6 @@ void String::removeDiacriticsToBuf(String& buffer) const {
 }
 
 namespace {
-#if BOOST_HW_SIMD_X86 >= BOOST_HW_SIMD_X86_SSE3_VERSION
 #define HAVE_FAST_BYTES
 /**
  * A sequence of bytes that can be manipulated using vectorized instructions.
@@ -172,27 +175,31 @@ namespace {
  */
 class Bytes {
 public:
-    using Native = __m128i;
-    using Mask = uint32_t;  // should be uint16_t but better codegen with uint32_t.
+    using Native = __vector signed char;
+    using Mask = uint64_t;
     using Scalar = int8_t;
     static const int size = sizeof(Native);
 
     /**
      * Sets all bytes to 0.
      */
-    Bytes() : _data(_mm_setzero_si128()) {}
+    Bytes() {
+        _data = vec_splat_s8(0);
+    }
 
     /**
      * Sets all bytes to val.
      */
-    explicit Bytes(Scalar val) : _data(_mm_set1_epi8(val)) {}
+    explicit Bytes(Scalar val) {
+	_data = vec_splats(val);
+    }
 
     /**
      * Load a vector from a potentially unaligned location.
      */
     static Bytes load(const void* ptr) {
         // This function is documented as taking an unaligned pointer.
-        return _mm_loadu_si128(reinterpret_cast<const Native*>(ptr));
+        return vec_vsx_ld(0, reinterpret_cast<const Native*>(ptr));
     }
 
     /**
@@ -200,14 +207,15 @@ public:
      */
     void store(void* ptr) const {
         // This function is documented as taking an unaligned pointer.
-        _mm_storeu_si128(reinterpret_cast<Native*>(ptr), _data);
+        vec_vsx_st(_data, 0, reinterpret_cast<Native*>(ptr));
     }
 
     /**
      * Returns a bitmask with the high bit from each byte.
      */
     Mask maskHigh() const {
-        return _mm_movemask_epi8(_data);
+	const Native bits = {0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120};
+	return vec_extract(vec_vbpermq(_data, bits), 0);
     }
 
     /**
@@ -224,7 +232,7 @@ public:
      * Counts zero bits in mask from whichever side corresponds to the lowest memory address.
      */
     static uint32_t countInitialZeros(Mask mask) {
-        return mask == 0 ? size : countTrailingZeros64(mask);
+        return mask == 0 ? size : countLeadingZeros64(mask << (64 - sizeof(Native)));
     }
 
     /**
@@ -234,17 +242,17 @@ public:
      * with high bit set.
      */
     Bytes compareEQ(Scalar val) const {
-        return _mm_cmpeq_epi8(_data, Bytes(val)._data);
+        return (Native)vec_cmpeq(_data, Bytes(val)._data);
     }
     Bytes compareLT(Scalar val) const {
-        return _mm_cmplt_epi8(_data, Bytes(val)._data);
+        return (Native)vec_cmplt(_data, Bytes(val)._data);
     }
     Bytes compareGT(Scalar val) const {
-        return _mm_cmpgt_epi8(_data, Bytes(val)._data);
+        return (Native)vec_cmpgt(_data, Bytes(val)._data);
     }
 
     Bytes operator|(Bytes other) const {
-        return _mm_or_si128(_data, other._data);
+        return (Native)vec_or(_data, other._data);
     }
 
     Bytes& operator|=(Bytes other) {
@@ -252,7 +260,7 @@ public:
     }
 
     Bytes operator&(Bytes other) const {
-        return _mm_and_si128(_data, other._data);
+        return (Native)vec_and(_data, other._data);
     }
 
     Bytes& operator&=(Bytes other) {
@@ -264,7 +272,6 @@ private:
 
     Native _data;
 };
-#endif
 }
 
 std::pair<std::unique_ptr<char[]>, char*> String::prepForSubstrMatch(StringData utf8,
