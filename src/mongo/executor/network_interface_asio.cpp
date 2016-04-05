@@ -56,10 +56,6 @@
 namespace mongo {
 namespace executor {
 
-namespace {
-const std::size_t kIOServiceWorkers = 1;
-}  // namespace
-
 NetworkInterfaceASIO::Options::Options() = default;
 
 #if defined(_MSC_VER) && _MSC_VER < 1900
@@ -163,53 +159,81 @@ std::string NetworkInterfaceASIO::getHostName() {
 }
 
 void NetworkInterfaceASIO::startup() {
-    _serviceRunners.resize(kIOServiceWorkers);
-    for (std::size_t i = 0; i < kIOServiceWorkers; ++i) {
-        _serviceRunners[i] = stdx::thread([this, i]() {
-            setThreadName(_options.instanceName + "-" + std::to_string(i));
-            try {
-                LOG(2) << "The NetworkInterfaceASIO worker thread is spinning up";
-                asio::io_service::work work(_io_service);
-                _io_service.run();
-            } catch (...) {
-                severe() << "Uncaught exception in NetworkInterfaceASIO IO "
-                            "worker thread of type: " << exceptionToStatus();
-                fassertFailed(28820);
-            }
-        });
-    };
+    if (_options.serviceRunners) {
+        _serviceRunners.resize(_options.serviceRunners);
+        for (std::size_t i = 0; i < _options.serviceRunners; ++i) {
+            _serviceRunners[i] = stdx::thread([this, i]() {
+                setThreadName(_options.instanceName + "-" + std::to_string(i));
+                try {
+                    LOG(2) << "The NetworkInterfaceASIO worker thread is spinning up";
+                    asio::io_service::work work(_io_service);
+                    _io_service.run();
+                } catch (...) {
+                    severe() << "Uncaught exception in NetworkInterfaceASIO IO "
+                                "worker thread of type: " << exceptionToStatus();
+                    fassertFailed(28820);
+                }
+            });
+        };
+    }
     _state.store(State::kRunning);
 }
 
 void NetworkInterfaceASIO::shutdown() {
     _state.store(State::kShutdown);
-    _io_service.stop();
-    for (auto&& worker : _serviceRunners) {
-        worker.join();
+    if (_options.serviceRunners) {
+        _io_service.stop();
+        for (auto&& worker : _serviceRunners) {
+            worker.join();
+        }
     }
     LOG(2) << "NetworkInterfaceASIO shutdown successfully";
 }
 
 void NetworkInterfaceASIO::waitForWork() {
     stdx::unique_lock<stdx::mutex> lk(_executorMutex);
-    // TODO: This can be restructured with a lambda.
-    while (!_isExecutorRunnable) {
-        _isExecutorRunnableCondition.wait(lk);
+
+    if (_options.serviceRunners) {
+        // TODO: This can be restructured with a lambda.
+        while (!_isExecutorRunnable) {
+            _isExecutorRunnableCondition.wait(lk);
+        }
+        _isExecutorRunnable = false;
+    } else {
+        while (!_isExecutorRunnable) {
+            _io_service.run_one();
+            _io_service.reset();
+        }
+        _isExecutorRunnable = false;
     }
-    _isExecutorRunnable = false;
 }
 
 void NetworkInterfaceASIO::waitForWorkUntil(Date_t when) {
     stdx::unique_lock<stdx::mutex> lk(_executorMutex);
-    // TODO: This can be restructured with a lambda.
-    while (!_isExecutorRunnable) {
-        const Milliseconds waitTime(when - now());
-        if (waitTime <= Milliseconds(0)) {
-            break;
+
+    if (_options.serviceRunners) {
+        // TODO: This can be restructured with a lambda.
+        while (!_isExecutorRunnable) {
+            const Milliseconds waitTime(when - now());
+            if (waitTime <= Milliseconds(0)) {
+                break;
+            }
+            _isExecutorRunnableCondition.wait_for(lk, waitTime);
         }
-        _isExecutorRunnableCondition.wait_for(lk, waitTime);
+        _isExecutorRunnable = false;
+    } else {
+        while (!_isExecutorRunnable) {
+            auto alarm = asio::system_timer(_io_service, when.toSystemTimePoint());
+            alarm.async_wait([](std::error_code ec) {});
+
+            _io_service.run_one();
+            _io_service.reset();
+
+            alarm.cancel();
+        }
+
+        _isExecutorRunnable = false;
     }
-    _isExecutorRunnable = false;
 }
 
 void NetworkInterfaceASIO::signalWorkAvailable() {

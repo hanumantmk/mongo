@@ -115,6 +115,7 @@ public:
         std::unique_ptr<NetworkConnectionHook> networkConnectionHook;
         std::unique_ptr<AsyncStreamFactoryInterface> streamFactory;
         std::unique_ptr<rpc::EgressMetadataHook> metadataHook;
+        std::size_t serviceRunners = 1;
     };
 
     NetworkInterfaceASIO(Options = Options());

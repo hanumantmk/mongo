@@ -241,65 +241,65 @@ private:
     bool _cancel;
 };
 
-TEST_F(NetworkInterfaceASIOIntegrationTest, StressTest) {
-    startNet();
-    const std::size_t numOps = 10000;
-    std::vector<Deferred<Status>> ops;
-
-    std::unique_ptr<SecureRandom> seedSource{SecureRandom::create()};
-    auto seed = seedSource->nextInt64();
-
-    log() << "Random seed is " << seed;
-    auto rng = PseudoRandom(seed);  // TODO: read from command line
-    randomNumberGenerator(&rng);
-    log() << "Starting stress test...";
-
-    ThreadPool::Options threadPoolOpts;
-    threadPoolOpts.poolName = "StressTestPool";
-    threadPoolOpts.maxThreads = 8;
-    ThreadPool pool(threadPoolOpts);
-    pool.startup();
-
-    auto poolGuard = MakeGuard([&pool] {
-        pool.schedule([&pool] { pool.shutdown(); });
-        pool.join();
-    });
-
-    std::generate_n(std::back_inserter(ops),
-                    numOps,
-                    [&rng, &pool, this] {
-
-                        // stagger operations slightly to mitigate connection pool contention
-                        sleepmillis(rng.nextInt32(10));
-
-                        auto i = rng.nextCanonicalDouble();
-
-                        if (i < .3) {
-                            return StressTestOp::runCancelOp(this, &pool);
-                        } else if (i < .7) {
-                            return StressTestOp::runCompleteOp(this, &pool);
-                        } else if (i < .99) {
-                            return StressTestOp::runTimeoutOp(this, &pool);
-                        } else {
-                            // Just a sprinkling of long ops, to mitigate connection pool contention
-                            return StressTestOp::runLongOp(this, &pool);
-                        }
-                    });
-
-    log() << "running ops";
-    auto res = helpers::collect(ops, &pool)
-                   .then(&pool,
-                         [](std::vector<Status> opResults) -> Status {
-                             for (const auto& opResult : opResults) {
-                                 if (!opResult.isOK()) {
-                                     return opResult;
-                                 }
-                             }
-                             return Status::OK();
-                         })
-                   .get();
-    ASSERT_OK(res);
-}
+//TEST_F(NetworkInterfaceASIOIntegrationTest, StressTest) {
+//    startNet();
+//    const std::size_t numOps = 10000;
+//    std::vector<Deferred<Status>> ops;
+//
+//    std::unique_ptr<SecureRandom> seedSource{SecureRandom::create()};
+//    auto seed = seedSource->nextInt64();
+//
+//    log() << "Random seed is " << seed;
+//    auto rng = PseudoRandom(seed);  // TODO: read from command line
+//    randomNumberGenerator(&rng);
+//    log() << "Starting stress test...";
+//
+//    ThreadPool::Options threadPoolOpts;
+//    threadPoolOpts.poolName = "StressTestPool";
+//    threadPoolOpts.maxThreads = 8;
+//    ThreadPool pool(threadPoolOpts);
+//    pool.startup();
+//
+//    auto poolGuard = MakeGuard([&pool] {
+//        pool.schedule([&pool] { pool.shutdown(); });
+//        pool.join();
+//    });
+//
+//    std::generate_n(std::back_inserter(ops),
+//                    numOps,
+//                    [&rng, &pool, this] {
+//
+//                        // stagger operations slightly to mitigate connection pool contention
+//                        sleepmillis(rng.nextInt32(10));
+//
+//                        auto i = rng.nextCanonicalDouble();
+//
+//                        if (i < .3) {
+//                            return StressTestOp::runCancelOp(this, &pool);
+//                        } else if (i < .7) {
+//                            return StressTestOp::runCompleteOp(this, &pool);
+//                        } else if (i < .99) {
+//                            return StressTestOp::runTimeoutOp(this, &pool);
+//                        } else {
+//                            // Just a sprinkling of long ops, to mitigate connection pool contention
+//                            return StressTestOp::runLongOp(this, &pool);
+//                        }
+//                    });
+//
+//    log() << "running ops";
+//    auto res = helpers::collect(ops, &pool)
+//                   .then(&pool,
+//                         [](std::vector<Status> opResults) -> Status {
+//                             for (const auto& opResult : opResults) {
+//                                 if (!opResult.isOK()) {
+//                                     return opResult;
+//                                 }
+//                             }
+//                             return Status::OK();
+//                         })
+//                   .get();
+//    ASSERT_OK(res);
+//}
 
 // Hook that intentionally never finishes
 class HangingHook : public executor::NetworkConnectionHook {
@@ -332,6 +332,28 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, HookHangs) {
     assertCommandFailsOnClient(
         "admin", BSON("ping" << 1), Seconds(1), ErrorCodes::ExceededTimeLimit);
 }
+
+//TEST_F(NetworkInterfaceASIOIntegrationTest, NoRunnersWorks) {
+//    NetworkInterfaceASIO::Options options;
+//    options.serviceRunners = 0;
+//    startNet(std::move(options));
+//    return;
+//
+//    bool hasFired = false;
+//
+//    net().startCommand(
+//        makeCallbackHandle(),
+//        {fixture().getServers()[0], "admin", BSON("ping" << 1), BSONObj(), Milliseconds(100)},
+//        [&](StatusWith<RemoteCommandResponse> resp) mutable {
+//        hasFired = true;
+//    });
+//
+//    ASSERT_FALSE(hasFired);
+//
+//    net().waitForWork();
+//
+//    ASSERT_TRUE(hasFired);
+//}
 
 }  // namespace
 }  // namespace executor

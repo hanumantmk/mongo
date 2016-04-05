@@ -207,6 +207,7 @@ StatusWith<CursorId> runQueryWithoutRetrying(OperationContext* txn,
         params.remotes.emplace_back(shard->getId(), cmdBuilder.obj());
     }
 
+    // JCAREYTODO: use on thread executor
     auto ccc = ClusterClientCursorImpl::make(
         shardRegistry->getExecutorPool()->getArbitraryExecutor(), std::move(params));
 
