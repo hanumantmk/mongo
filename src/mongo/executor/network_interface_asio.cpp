@@ -191,9 +191,9 @@ void NetworkInterfaceASIO::shutdown() {
 }
 
 void NetworkInterfaceASIO::waitForWork() {
-    stdx::unique_lock<stdx::mutex> lk(_executorMutex);
-
     if (_options.serviceRunners) {
+        stdx::unique_lock<stdx::mutex> lk(_executorMutex);
+
         // TODO: This can be restructured with a lambda.
         while (!_isExecutorRunnable) {
             _isExecutorRunnableCondition.wait(lk);
@@ -201,17 +201,19 @@ void NetworkInterfaceASIO::waitForWork() {
         _isExecutorRunnable = false;
     } else {
         while (!_isExecutorRunnable) {
-            _io_service.run_one();
-            _io_service.reset();
+            if (! _io_service.poll()) {
+                _io_service.run_one();
+                _io_service.reset();
+            }
         }
         _isExecutorRunnable = false;
     }
 }
 
 void NetworkInterfaceASIO::waitForWorkUntil(Date_t when) {
-    stdx::unique_lock<stdx::mutex> lk(_executorMutex);
-
     if (_options.serviceRunners) {
+        stdx::unique_lock<stdx::mutex> lk(_executorMutex);
+
         // TODO: This can be restructured with a lambda.
         while (!_isExecutorRunnable) {
             const Milliseconds waitTime(when - now());
@@ -226,8 +228,10 @@ void NetworkInterfaceASIO::waitForWorkUntil(Date_t when) {
             auto alarm = asio::system_timer(_io_service, when.toSystemTimePoint());
             alarm.async_wait([](std::error_code ec) {});
 
-            _io_service.run_one();
-            _io_service.reset();
+            if (! _io_service.poll()) {
+                _io_service.run_one();
+                _io_service.reset();
+            }
 
             alarm.cancel();
         }
@@ -462,10 +466,14 @@ bool NetworkInterfaceASIO::inShutdown() const {
 }
 
 bool NetworkInterfaceASIO::onNetworkThread() {
-    auto id = stdx::this_thread::get_id();
-    return std::any_of(_serviceRunners.begin(),
-                       _serviceRunners.end(),
-                       [id](const stdx::thread& thread) { return id == thread.get_id(); });
+    if (_options.serviceRunners) {
+        auto id = stdx::this_thread::get_id();
+        return std::any_of(_serviceRunners.begin(),
+                           _serviceRunners.end(),
+                           [id](const stdx::thread& thread) { return id == thread.get_id(); });
+    } else {
+        return true;
+    }
 }
 
 void NetworkInterfaceASIO::_failWithInfo(const char* file,

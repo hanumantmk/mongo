@@ -75,9 +75,20 @@ ClusterClientCursorGuard ClusterClientCursorImpl::make(executor::TaskExecutor* e
     return ClusterClientCursorGuard(std::move(cursor));
 }
 
+ClusterClientCursorGuard ClusterClientCursorImpl::make(std::unique_ptr<executor::TaskExecutor> executor,
+                                                       ClusterClientCursorParams&& params) {
+    std::unique_ptr<ClusterClientCursor> cursor(
+        new ClusterClientCursorImpl(std::move(executor), std::move(params)));
+    return ClusterClientCursorGuard(std::move(cursor));
+}
+
 ClusterClientCursorImpl::ClusterClientCursorImpl(executor::TaskExecutor* executor,
                                                  ClusterClientCursorParams&& params)
     : _isTailable(params.isTailable), _root(buildMergerPlan(executor, std::move(params))) {}
+
+ClusterClientCursorImpl::ClusterClientCursorImpl(std::unique_ptr<executor::TaskExecutor> executor,
+                                                 ClusterClientCursorParams&& params)
+    : _executor(std::move(executor)), _isTailable(params.isTailable), _root(buildMergerPlan(_executor.get(), std::move(params))) {}
 
 ClusterClientCursorImpl::ClusterClientCursorImpl(std::unique_ptr<RouterStageMock> root)
     : _root(std::move(root)) {}

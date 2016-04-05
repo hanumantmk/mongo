@@ -117,6 +117,8 @@ public:
         return _executorPool->getFixedExecutor();
     }
 
+    std::unique_ptr<executor::TaskExecutor> getStackExecutor() const;
+
     executor::TaskExecutorPool* getExecutorPool() const {
         return _executorPool.get();
     }

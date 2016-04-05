@@ -221,7 +221,12 @@ void ThreadPoolTaskExecutor::waitForEvent(const EventHandle& event) {
     auto eventState = checked_cast<EventState*>(getEventFromHandle(event));
     stdx::unique_lock<stdx::mutex> lk(_mutex);
     while (!eventState->isSignaledFlag) {
-        eventState->isSignaledCondition.wait(lk);
+        lk.unlock();
+        _net->waitForWork();
+        lk.lock();
+//        if (!eventState->isSignaledFlag) {
+//            eventState->isSignaledCondition.wait(lk);
+//        }
     }
 }
 
@@ -381,7 +386,12 @@ void ThreadPoolTaskExecutor::wait(const CallbackHandle& cbHandle) {
         cbState->finishedCondition.emplace();
     }
     while (!cbState->isFinished.load()) {
-        cbState->finishedCondition->wait(lk);
+        lk.unlock();
+        _net->waitForWork();
+        lk.lock();
+//        if (!cbState->isFinished.load()) {
+//            cbState->finishedCondition->wait(lk);
+//        }
     }
 }
 

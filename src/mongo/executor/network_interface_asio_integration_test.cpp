@@ -333,27 +333,30 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, HookHangs) {
         "admin", BSON("ping" << 1), Seconds(1), ErrorCodes::ExceededTimeLimit);
 }
 
-//TEST_F(NetworkInterfaceASIOIntegrationTest, NoRunnersWorks) {
-//    NetworkInterfaceASIO::Options options;
-//    options.serviceRunners = 0;
-//    startNet(std::move(options));
-//    return;
-//
-//    bool hasFired = false;
-//
-//    net().startCommand(
-//        makeCallbackHandle(),
-//        {fixture().getServers()[0], "admin", BSON("ping" << 1), BSONObj(), Milliseconds(100)},
-//        [&](StatusWith<RemoteCommandResponse> resp) mutable {
-//        hasFired = true;
-//    });
-//
-//    ASSERT_FALSE(hasFired);
-//
-//    net().waitForWork();
-//
-//    ASSERT_TRUE(hasFired);
-//}
+TEST_F(NetworkInterfaceASIOIntegrationTest, NoRunnersWorks) {
+    NetworkInterfaceASIO::Options options;
+    options.serviceRunners = 0;
+    startNet(std::move(options));
+
+    std::array<bool, 10> hasFired = {};
+
+    for (size_t i = 0; i < hasFired.size(); i++) {
+        net().startCommand(
+            makeCallbackHandle(),
+            {fixture().getServers()[0], "admin", BSON("ping" << 1), BSONObj(), Milliseconds(100)},
+            [&, i](StatusWith<RemoteCommandResponse> resp) mutable {
+            hasFired[i] = true;
+        });
+    }
+
+    for (auto& x : hasFired) {
+        ASSERT_FALSE(x);
+    }
+
+    while (std::count(hasFired.begin(), hasFired.end(), false)) {
+        net().waitForWork();
+    }
+}
 
 }  // namespace
 }  // namespace executor

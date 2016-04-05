@@ -45,19 +45,21 @@
 namespace mongo {
 namespace executor {
 
-std::unique_ptr<NetworkInterface> makeNetworkInterface(std::string instanceName) {
-    return makeNetworkInterface(std::move(instanceName), nullptr, nullptr);
+std::unique_ptr<NetworkInterface> makeNetworkInterface(std::string instanceName, size_t serviceRunners) {
+    return makeNetworkInterface(std::move(instanceName), nullptr, nullptr, serviceRunners);
 }
 
 std::unique_ptr<NetworkInterface> makeNetworkInterface(
     std::string instanceName,
     std::unique_ptr<NetworkConnectionHook> hook,
-    std::unique_ptr<rpc::EgressMetadataHook> metadataHook) {
+    std::unique_ptr<rpc::EgressMetadataHook> metadataHook,
+    size_t serviceRunners) {
     NetworkInterfaceASIO::Options options{};
     options.instanceName = std::move(instanceName);
     options.networkConnectionHook = std::move(hook);
     options.metadataHook = std::move(metadataHook);
     options.timerFactory = stdx::make_unique<AsyncTimerFactoryASIO>();
+    options.serviceRunners = serviceRunners;
 
 #ifdef MONGO_CONFIG_SSL
     if (SSLManagerInterface* manager = getSSLManager()) {

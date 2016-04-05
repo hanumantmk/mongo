@@ -63,6 +63,13 @@
 #include "mongo/util/scopeguard.h"
 #include "mongo/util/time_support.h"
 
+#include "mongo/rpc/metadata/metadata_hook.h"
+#include "mongo/s/sharding_egress_metadata_hook_for_mongos.h"
+#include "mongo/executor/network_interface_factory.h"
+#include "mongo/executor/network_interface_thread_pool.h"
+#include "mongo/executor/thread_pool_task_executor.h"
+#include "mongo/s/client/sharding_network_connection_hook.h"
+
 namespace mongo {
 
 using std::shared_ptr;
@@ -333,6 +340,21 @@ shared_ptr<Shard> ShardRegistry::getConfigShard() {
     shared_ptr<Shard> shard = _findUsingLookUp("config");
     invariant(shard);
     return shard;
+}
+
+std::unique_ptr<TaskExecutor> ShardRegistry::getStackExecutor() const {
+    std::unique_ptr<rpc::EgressMetadataHook> metadataHook = stdx::make_unique<rpc::ShardingEgressMetadataHookForMongos>();
+    auto net = executor::makeNetworkInterface(
+        "NetworkInterfaceASIO-TaskExecutorPool-Stack",
+        stdx::make_unique<ShardingNetworkConnectionHook>(),
+        std::move(metadataHook),
+        0);
+    auto netPtr = net.get();
+    auto exec = stdx::make_unique<executor::ThreadPoolTaskExecutor>(
+        stdx::make_unique<executor::NetworkInterfaceThreadPool>(netPtr), std::move(net));
+    exec->startup();
+
+    return std::unique_ptr<TaskExecutor>(exec.release());
 }
 
 unique_ptr<Shard> ShardRegistry::createConnection(const ConnectionString& connStr) const {
