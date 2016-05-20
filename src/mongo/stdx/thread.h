@@ -29,12 +29,60 @@
 #pragma once
 
 #include <thread>
+#include <type_traits>
 
 namespace mongo {
 namespace stdx {
 
-using thread = ::std::thread;                // NOLINT
+class thread : private ::std::thread {
+public:
+    using ::std::thread::native_handle_type;
+    using ::std::thread::id;
+
+    thread() noexcept : ::std::thread::thread() {}
+
+    thread(thread&& other) noexcept
+        : ::std::thread::thread(static_cast<::std::thread&&>(std::move(other))) {}
+
+    template <
+        class Function,
+        class... Args,
+        typename std::enable_if<!std::is_same<thread, typename std::decay<Function>::type>::value,
+                                int>::type = 0>
+    explicit thread(Function&& f, Args&&... args) try:
+        ::std::thread::thread(std::forward<Function>(f), std::forward<Args>(args)...) {}
+    catch (...) {
+        std::terminate();
+    }
+
+    thread(const thread&) = delete;
+
+    thread& operator=(thread&& other) noexcept {
+        return static_cast<thread&>(
+            ::std::thread::operator=(static_cast<::std::thread&&>(std::move(other))));
+    };
+
+    using ::std::thread::joinable;
+    using ::std::thread::get_id;
+    using ::std::thread::native_handle;
+    using ::std::thread::hardware_concurrency;
+
+    using ::std::thread::join;
+    using ::std::thread::detach;
+
+    void swap(thread& other) noexcept {
+        ::std::thread::swap(static_cast<::std::thread&>(other));
+    }
+};
+
 namespace this_thread = ::std::this_thread;  // NOLINT
 
 }  // namespace stdx
 }  // namespace mongo
+
+namespace std {
+template <>
+inline void swap<mongo::stdx::thread>(mongo::stdx::thread& lhs, mongo::stdx::thread& rhs) noexcept {
+    lhs.swap(rhs);
+}
+}  // namespace std
