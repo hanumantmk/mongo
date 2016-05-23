@@ -44,6 +44,12 @@ public:
     thread(thread&& other) noexcept
         : ::std::thread::thread(static_cast<::std::thread&&>(std::move(other))) {}
 
+    /**
+     * As of C++14, the Function overload for std::thread requires that this constructor only
+     * participate in overload resolution if std::decay_t<Function> is not the same type as thread.
+     * That prevents this overload from intercepting calls that might generate implicit conversions
+     * before binding to other constructors (specifically move/copy constructors).
+     */
     template <
         class Function,
         class... Args,
