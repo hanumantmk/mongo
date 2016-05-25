@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include <exception>
 #include <thread>
 #include <type_traits>
 
@@ -40,6 +41,8 @@ public:
     using ::std::thread::id;
 
     thread() noexcept : ::std::thread::thread() {}
+
+    thread(const thread&) = delete;
 
     thread(thread&& other) noexcept
         : ::std::thread::thread(static_cast<::std::thread&&>(std::move(other))) {}
@@ -61,7 +64,7 @@ public:
         std::terminate();
     }
 
-    thread(const thread&) = delete;
+    thread& operator=(const thread&) = delete;
 
     thread& operator=(thread&& other) noexcept {
         return static_cast<thread&>(
@@ -81,14 +84,11 @@ public:
     }
 };
 
+inline void swap(thread& lhs, thread& rhs) noexcept {
+    lhs.swap(rhs);
+}
+
 namespace this_thread = ::std::this_thread;  // NOLINT
 
 }  // namespace stdx
 }  // namespace mongo
-
-namespace std {
-template <>
-inline void swap<mongo::stdx::thread>(mongo::stdx::thread& lhs, mongo::stdx::thread& rhs) noexcept {
-    lhs.swap(rhs);
-}
-}  // namespace std
