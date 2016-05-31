@@ -28,68 +28,63 @@
 
 #pragma once
 
-#include <memory>
-
-#include "mongo/base/disallow_copying.h"
+#include "mongo/base/status.h"
+#include "mongo/transport/session.h"
+#include "mongo/transport/ticket.h"
+#include "mongo/transport/ticket_impl.h"
+#include "mongo/transport/transport_layer.h"
+#include "mongo/util/net/message.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
 namespace transport {
 
-class TicketImpl;
-class TransportLayer;
-
 /**
- * A Ticket represents some work to be done within the TransportLayer.
- * Run Tickets by passing them in a call to either TransportLayer::wait()
- * or TransportLayer::asyncWait().
+ * This TransportLayerMock is a noop TransportLayer implementation.
  */
-class Ticket {
-    MONGO_DISALLOW_COPYING(Ticket);
+class TransportLayerMock : public TransportLayer {
+    MONGO_DISALLOW_COPYING(TransportLayerMock);
 
 public:
-    friend class TransportLayer;
+    TransportLayerMock() = default;
 
-    using SessionId = uint64_t;
+    Ticket sourceMessage(const Session& session,
+                         Message* message,
+                         Date_t expiration = Ticket::kNoExpirationDate) override;
+    Ticket sinkMessage(const Session& session,
+                       const Message& message,
+                       Date_t expiration = Ticket::kNoExpirationDate) override;
 
-    /**
-     * Indicates that there is no expiration time by when a ticket needs to complete.
-     */
-    static const Date_t kNoExpirationDate;
+    Status wait(Ticket ticket) override;
+    void asyncWait(Ticket ticket, TicketCallback callback) override;
 
-    Ticket(TransportLayer* tl, std::unique_ptr<TicketImpl> ticket);
-    ~Ticket();
+    std::string getX509SubjectName(const Session& session) override;
+    void registerTags(const Session& session) override;
 
-    /**
-     * Move constructor and assignment operator.
-     */
-    Ticket(Ticket&&);
-    Ticket& operator=(Ticket&&);
+    int numOpenSessions() override;
+    int numAvailableSessions() override;
+    int numCreatedSessions() override;
 
-    /**
-     * Return this ticket's session id.
-     */
-    SessionId sessionId() const;
+    void end(const Session& session) override;
+    void endAllSessions(Session::TagMask tags = Session::kEmptyTagMask) override;
 
-    /**
-     * Return this ticket's expiration date.
-     */
-    Date_t expiration() const;
-
-    /**
-     * Wait for this ticket to be filled.
-     */
-    Status wait() &&;
-
-protected:
-    /**
-     * Return a non-owning pointer to the underlying TicketImpl type
-     */
-    TicketImpl* impl() const;
+    void shutdown() override;
 
 private:
-    TransportLayer* _tl;
-    std::unique_ptr<TicketImpl> _ticket;
+    /**
+     * A class for Tickets issued from the TransportLayerMock. These will
+     * route to the appropriate TransportLayer when run with wait() or
+     * asyncWait().
+     */
+    class MockTicket : public TicketImpl {
+        MONGO_DISALLOW_COPYING(MockTicket);
+
+    public:
+        MockTicket() = default;
+
+        SessionId sessionId() const override;
+        Date_t expiration() const override;
+    };
 };
 
 }  // namespace transport

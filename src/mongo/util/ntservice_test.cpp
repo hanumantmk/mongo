@@ -34,8 +34,8 @@
 #include <string>
 #include <vector>
 
-
 #include "mongo/db/client.h"
+#include "mongo/transport/session.h"
 #include "mongo/unittest/unittest.h"
 #include "mongo/util/ntservice.h"
 #include "mongo/util/text.h"

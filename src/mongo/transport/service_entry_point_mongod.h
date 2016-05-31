@@ -28,69 +28,37 @@
 
 #pragma once
 
-#include <memory>
+#include <vector>
 
 #include "mongo/base/disallow_copying.h"
-#include "mongo/util/time_support.h"
+#include "mongo/transport/service_entry_point.h"
 
 namespace mongo {
-namespace transport {
 
-class TicketImpl;
+namespace transport {
+class Session;
 class TransportLayer;
+}  // namespace transport
 
 /**
- * A Ticket represents some work to be done within the TransportLayer.
- * Run Tickets by passing them in a call to either TransportLayer::wait()
- * or TransportLayer::asyncWait().
+ * The entry point from the TransportLayer into Mongod. startSession() spawns and
+ * detaches a new thread for each incoming connection (transport::Session).
  */
-class Ticket {
-    MONGO_DISALLOW_COPYING(Ticket);
+class ServiceEntryPointMongod : public ServiceEntryPoint {
+    MONGO_DISALLOW_COPYING(ServiceEntryPointMongod);
 
 public:
-    friend class TransportLayer;
+    ServiceEntryPointMongod(transport::TransportLayer* tl);
 
-    using SessionId = uint64_t;
+    virtual ~ServiceEntryPointMongod() = default;
 
-    /**
-     * Indicates that there is no expiration time by when a ticket needs to complete.
-     */
-    static const Date_t kNoExpirationDate;
-
-    Ticket(TransportLayer* tl, std::unique_ptr<TicketImpl> ticket);
-    ~Ticket();
-
-    /**
-     * Move constructor and assignment operator.
-     */
-    Ticket(Ticket&&);
-    Ticket& operator=(Ticket&&);
-
-    /**
-     * Return this ticket's session id.
-     */
-    SessionId sessionId() const;
-
-    /**
-     * Return this ticket's expiration date.
-     */
-    Date_t expiration() const;
-
-    /**
-     * Wait for this ticket to be filled.
-     */
-    Status wait() &&;
-
-protected:
-    /**
-     * Return a non-owning pointer to the underlying TicketImpl type
-     */
-    TicketImpl* impl() const;
+    void startSession(transport::Session&& session) override;
 
 private:
-    TransportLayer* _tl;
-    std::unique_ptr<TicketImpl> _ticket;
+    void _runSession(transport::Session&& session);
+    void _sessionLoop(transport::Session* session);
+
+    transport::TransportLayer* _tl;
 };
 
-}  // namespace transport
 }  // namespace mongo

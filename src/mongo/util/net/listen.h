@@ -66,7 +66,7 @@ public:
     void initAndListen();  // never returns unless error (start a thread)
 
     /* spawn a thread, etc., then return */
-    virtual void accepted(AbstractMessagingPort* mp) = 0;
+    virtual void accepted(std::unique_ptr<AbstractMessagingPort> mp) = 0;
 
     const int _port;
 
@@ -83,6 +83,8 @@ public:
      */
     void waitUntilListening() const;
 
+    void shutdown();
+
 private:
     std::vector<SockAddr> _mine;
     std::vector<SOCKET> _socks;
@@ -94,6 +96,7 @@ private:
     mutable stdx::condition_variable _readyCondition;  // Used to wait for changes to _ready
     // Boolean that indicates whether this Listener is ready to accept incoming network requests
     bool _ready;
+    AtomicBool _finished{false};
 
     ServiceContext* _ctx;
     bool _setAsServiceCtxDecoration;

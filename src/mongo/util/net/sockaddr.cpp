@@ -150,10 +150,19 @@ bool SockAddr::isLocalHost() const {
 }
 
 std::string SockAddr::toString(bool includePort) const {
-    std::string out = getAddr();
-    if (includePort && getType() != AF_UNIX && getType() != AF_UNSPEC)
-        out += mongoutils::str::stream() << ':' << getPort();
-    return out;
+    mongoutils::str::stream ss;
+
+    if (includePort && getType() != AF_UNIX && getType() != AF_UNSPEC) {
+        if (getType() == AF_INET6) {
+            ss << '[' << getAddr() << "]:" << getPort();
+        } else {
+            ss << getAddr() << ':' << getPort();
+        }
+    } else {
+        ss << getAddr();
+    }
+
+    return ss;
 }
 
 sa_family_t SockAddr::getType() const {
