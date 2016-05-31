@@ -111,6 +111,8 @@
 #include "mongo/scripting/engine.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/stdx/thread.h"
+#include "mongo/transport/service_entry_point_mongod.h"
+#include "mongo/transport/transport_layer_legacy.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/cmdline_utils/censor_cmdline.h"
 #include "mongo/util/concurrency/task.h"
@@ -588,6 +590,23 @@ static void _initAndListen(int listenPort) {
 
     getGlobalServiceContext()->initializeGlobalStorageEngine();
 
+    // TransportLayer options
+    transport::TransportLayerLegacy::Options options;
+    options.port = listenPort;
+    options.ipList = serverGlobalParams.bind_ip;
+
+    // Connect the Mongod service entry point to the global transport layer.
+    auto sep =
+        std::make_shared<ServiceEntryPointMongod>(getGlobalServiceContext()->getTransportLayer());
+
+    // Create, start, and attach the TL
+    auto transportLayer = stdx::make_unique<transport::TransportLayerLegacy>(options, "name", sep);
+    auto res = transportLayer->setup();
+    if (!res.isOK()) {
+        error() << "Failed to set up listener: " << res.toString();
+        return;
+    }
+
 #ifdef MONGO_CONFIG_WIREDTIGER_ENABLED
     if (WiredTigerCustomizationHooks::get(getGlobalServiceContext())->restartRequired()) {
         exitCleanly(EXIT_CLEAN);
@@ -782,7 +801,17 @@ static void _initAndListen(int listenPort) {
     // MessageServer::run will return when exit code closes its socket and we don't need the
     // operation context anymore
     startupOpCtx.reset();
-    server->run();
+
+    auto start = transportLayer->start();
+    if (!start.isOK()) {
+        error() << "Failed to start the listener: " << start.toString();
+        return;
+    }
+
+    getGlobalServiceContext()->addTransportLayer(std::move(transportLayer));
+
+    // Block until shutdown.
+    waitForShutdown();
 }
 
 ExitCode initAndListen(int listenPort) {
