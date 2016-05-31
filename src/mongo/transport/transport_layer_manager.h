@@ -28,86 +28,62 @@
 
 #pragma once
 
-#include <memory>
+#include <vector>
 
-#include "mongo/base/disallow_copying.h"
-#include "mongo/stdx/functional.h"
+#include "mongo/base/status.h"
+#include "mongo/stdx/mutex.h"
+#include "mongo/transport/session.h"
+#include "mongo/transport/ticket.h"
 #include "mongo/transport/ticket_impl.h"
+#include "mongo/transport/transport_layer.h"
+#include "mongo/util/net/message.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
 namespace transport {
 
-class TransportLayer;
-
 /**
- * A Ticket represents some work to be done within the TransportLayer.
- * Run Tickets by passing them in a call to either TransportLayer::wait()
- * or TransportLayer::asyncWait().
+ * This TransportLayerManager is a TransportLayer implementation that holds other
+ * TransportLayers. Mongod and Mongos can treat this like the "only" TransportLayer
+ * and not be concerned with which other TransportLayer implementations it holds
+ * underneath.
  */
-class Ticket {
-    MONGO_DISALLOW_COPYING(Ticket);
+class TransportLayerManager final : public TransportLayer {
+    MONGO_DISALLOW_COPYING(TransportLayerManager);
 
 public:
-    using TicketCallback = stdx::function<void(Status)>;
+    TransportLayerManager();
 
-    friend class TransportLayer;
+    Ticket sourceMessage(const Session& session,
+                         Message* message,
+                         Date_t expiration = Ticket::kNoExpirationDate) override;
+    Ticket sinkMessage(const Session& session,
+                       const Message& message,
+                       Date_t expiration = Ticket::kNoExpirationDate) override;
 
-    using SessionId = uint64_t;
+    Status wait(Ticket&& ticket) override;
+    void asyncWait(Ticket&& ticket, TicketCallback callback) override;
 
-    /**
-     * Indicates that there is no expiration time by when a ticket needs to complete.
-     */
-    static const Date_t kNoExpirationDate;
+    std::string getX509SubjectName(const Session& session) override;
+    void registerTags(const Session& session) override;
 
-    Ticket(TransportLayer* tl, std::unique_ptr<TicketImpl> ticket);
-    ~Ticket();
+    Stats sessionStats() override;
 
-    /**
-     * Move constructor and assignment operator.
-     */
-    Ticket(Ticket&&);
-    Ticket& operator=(Ticket&&);
+    void end(const Session& session) override;
+    void endAllSessions(Session::TagMask tags = Session::kEmptyTagMask) override;
 
-    /**
-     * Return this ticket's session id.
-     */
-    SessionId sessionId() const {
-        return _ticket->sessionId();
-    }
+    Status start() override;
 
-    /**
-     * Return this ticket's expiration date.
-     */
-    Date_t expiration() const {
-        return _ticket->expiration();
-    }
+    void shutdown() override;
 
-    /**
-     * Wait for this ticket to be filled.
-     *
-     * This is this-rvalue qualified because it consumes the ticket
-     */
-    Status wait() &&;
-
-    /**
-     * Asynchronously wait for this ticket to be filled.
-     *
-     * This is this-rvalue qualified because it consumes the ticket
-     */
-    void asyncWait(TicketCallback cb) &&;
-
-protected:
-    /**
-     * Return a non-owning pointer to the underlying TicketImpl type
-     */
-    TicketImpl* impl() const {
-        return _ticket.get();
-    }
+    Status addAndStartTransportLayer(std::unique_ptr<TransportLayer> tl);
 
 private:
-    TransportLayer* _tl;
-    std::unique_ptr<TicketImpl> _ticket;
+    template <typename Callable>
+    void _foreach(Callable&& cb);
+
+    stdx::mutex _tlsMutex;
+    std::vector<std::unique_ptr<TransportLayer>> _tls;
 };
 
 }  // namespace transport

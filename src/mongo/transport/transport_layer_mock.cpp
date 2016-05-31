@@ -28,65 +28,68 @@
 
 #include "mongo/platform/basic.h"
 
-#include "mongo/transport/session.h"
+#include <memory>
 
-#include "mongo/platform/atomic_word.h"
-#include "mongo/transport/transport_layer.h"
+#include "mongo/base/status.h"
+#include "mongo/stdx/memory.h"
+#include "mongo/transport/session.h"
+#include "mongo/transport/ticket.h"
+#include "mongo/transport/ticket_impl.h"
+#include "mongo/transport/transport_layer_mock.h"
+#include "mongo/util/time_support.h"
+
+#include "mongo/stdx/memory.h"
 
 namespace mongo {
 namespace transport {
 
-namespace {
-
-AtomicUInt64 sessionIdCounter(0);
-
-}  // namespace
-
-Session::Session(HostAndPort remote, HostAndPort local, TransportLayer* tl)
-    : _id(sessionIdCounter.addAndFetch(1)),
-      _remote(std::move(remote)),
-      _local(std::move(local)),
-      _tags(kEmptyTagMask),
-      _tl(tl) {}
-
-Session::~Session() {
-    if (_tl != nullptr) {
-        invariant(_tl);
-        _tl->end(*this);
-    }
+Session::SessionId TransportLayerMock::MockTicket::sessionId() const {
+    return Session::SessionId{};
 }
 
-Session::Session(Session&& other)
-    : _id(other._id),
-      _remote(std::move(other._remote)),
-      _local(std::move(other._local)),
-      _tl(other._tl) {
-    // We do not want to call tl->end() on moved-from Sessions.
-    other._tl = nullptr;
+Date_t TransportLayerMock::MockTicket::expiration() const {
+    return Date_t::now();
 }
 
-Session& Session::operator=(Session&& other) {
-    _id = other._id;
-    _remote = std::move(other._remote);
-    _local = std::move(other._local);
-    _tl = other._tl;
-    _tl = nullptr;
-
-    return *this;
+Ticket TransportLayerMock::sourceMessage(const Session& session,
+                                         Message* message,
+                                         Date_t expiration) {
+    return Ticket(this, stdx::make_unique<MockTicket>());
 }
 
-void Session::replaceTags(TagMask tags) {
-    _tags = tags;
-    _tl->registerTags(*this);
+Ticket TransportLayerMock::sinkMessage(const Session& session,
+                                       const Message& message,
+                                       Date_t expiration) {
+    return Ticket(this, stdx::make_unique<MockTicket>());
 }
 
-Ticket Session::sourceMessage(Message* message, Date_t expiration) {
-    return _tl->sourceMessage(*this, message, expiration);
+Status TransportLayerMock::wait(Ticket&& ticket) {
+    return Status::OK();
 }
 
-Ticket Session::sinkMessage(const Message& message, Date_t expiration) {
-    return _tl->sinkMessage(*this, message, expiration);
+void TransportLayerMock::asyncWait(Ticket&& ticket, TicketCallback callback) {
+    callback(Status::OK());
 }
+
+std::string TransportLayerMock::getX509SubjectName(const Session& session) {
+    return session.getX509SubjectName();
+}
+
+TransportLayer::Stats TransportLayerMock::sessionStats() {
+    return Stats();
+}
+
+void TransportLayerMock::registerTags(const Session& session) {}
+
+void TransportLayerMock::end(const Session& session) {}
+
+void TransportLayerMock::endAllSessions(Session::TagMask tags) {}
+
+Status TransportLayerMock::start() {
+    return Status::OK();
+}
+
+void TransportLayerMock::shutdown() {}
 
 }  // namespace transport
 }  // namespace mongo

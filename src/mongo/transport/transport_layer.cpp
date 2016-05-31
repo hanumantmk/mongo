@@ -40,5 +40,9 @@ TicketImpl* TransportLayer::getTicketImpl(const Ticket& ticket) {
     return ticket.impl();
 }
 
+TransportLayer* TransportLayer::getTicketTransportLayer(const Ticket& ticket) {
+    return ticket._tl;
+}
+
 }  // namespace transport
 }  // namespace mongo

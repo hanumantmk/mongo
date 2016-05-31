@@ -280,7 +280,7 @@ void Listener::initAndListen() {
     }
 
     struct timeval maxSelectTime;
-    while (!inShutdown()) {
+    while (!inShutdown() && !_finished.load()) {
         fd_set fds[1];
         FD_ZERO(fds);
 
@@ -601,7 +601,7 @@ void Listener::_accepted(const std::shared_ptr<Socket>& psocket, long long conne
         port = stdx::make_unique<MessagingPort>(psocket);
     }
     port->setConnectionId(connectionId);
-    accepted(port.release());
+    accepted(std::move(port));
 }
 
 // ----- ListeningSockets -------
@@ -648,9 +648,8 @@ void Listener::checkTicketNumbers() {
     globalTicketHolder.resize(want);
 }
 
-void Listener::closeMessagingPorts(AbstractMessagingPort::Tag skipMask) {
-    ASIOMessagingPort::closeSockets(skipMask);
-    MessagingPort::closeSockets(skipMask);
+void Listener::shutdown() {
+    _finished.store(true);
 }
 
 TicketHolder Listener::globalTicketHolder(DEFAULT_MAX_CONN);

@@ -75,8 +75,7 @@ protected:
      */
     void setUp() override {
         ShardingCatalogTestFixture::setUp();
-
-        getMessagingPort()->setRemote(HostAndPort("FakeRemoteClient:34567"));
+        setRemote(HostAndPort("FakeRemoteClient:34567"));
 
         configTargeter()->setConnectionStringReturnValue(_configConnStr);
 
