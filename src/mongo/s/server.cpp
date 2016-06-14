@@ -373,18 +373,6 @@ static ExitCode runMongosServer() {
 
     PeriodicTask::startRunningPeriodicTasks();
 
-    {
-        MessageServer::Options opts;
-        opts.port = serverGlobalParams.port;
-        opts.ipList = serverGlobalParams.bind_ip;
-
-        auto handler = std::make_shared<ShardedMessageHandler>();
-        MessageServer* server = createServer(opts, std::move(handler), getGlobalServiceContext());
-        if (!server->setupSockets()) {
-            return EXIT_NET_ERROR;
-        }
-    }
-
     auto start = transportLayer->start();
     if (!start.isOK()) {
         return EXIT_NET_ERROR;

@@ -43,11 +43,11 @@
 #include "mongo/stdx/thread.h"
 #include "mongo/transport/session.h"
 #include "mongo/transport/transport_layer.h"
-#include "mongo/util/concurrency/synchronization.h"
 #include "mongo/util/exit.h"
 #include "mongo/util/log.h"
 #include "mongo/util/net/message.h"
 #include "mongo/util/net/socket_exception.h"
+#include "mongo/util/net/thread_idle_callback.h"
 #include "mongo/util/quick_exit.h"
 
 namespace mongo {

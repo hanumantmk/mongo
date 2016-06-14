@@ -502,22 +502,6 @@ static void _initAndListen(int listenPort) {
 
     checked_cast<ServiceContextMongoD*>(getGlobalServiceContext())->createLockFile();
 
-    // Due to SERVER-15389, we must setupSockets first thing at startup in order to avoid
-    // obtaining too high a file descriptor for our calls to select().
-    MessageServer::Options options;
-    options.port = listenPort;
-    options.ipList = serverGlobalParams.bind_ip;
-
-    auto handler = std::make_shared<MyMessageHandler>();
-    MessageServer* server = createServer(options, std::move(handler), getGlobalServiceContext());
-
-    // This is what actually creates the sockets, but does not yet listen on them because we
-    // do not want connections to just hang if recovery takes a very long time.
-    if (!server->setupSockets()) {
-        error() << "Failed to set up sockets during startup.";
-        return;
-    }
-
     std::shared_ptr<DbWebServer> dbWebServer;
     if (serverGlobalParams.isHttpInterfaceEnabled) {
         dbWebServer.reset(new DbWebServer(serverGlobalParams.bind_ip,

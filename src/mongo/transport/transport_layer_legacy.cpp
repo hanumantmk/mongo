@@ -32,6 +32,7 @@
 
 #include "mongo/transport/transport_layer_legacy.h"
 
+#include "mongo/db/service_context.h"
 #include "mongo/db/stats/counters.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/transport/service_entry_point.h"
@@ -45,7 +46,7 @@ namespace transport {
 
 TransportLayerLegacy::ListenerLegacy::ListenerLegacy(const TransportLayerLegacy::Options& opts,
                                                      NewConnectionCb callback)
-    : Listener("", opts.ipList, opts.port), _accepted(std::move(callback)) {}
+    : Listener("", opts.ipList, opts.port, getGlobalServiceContext(), true), _accepted(std::move(callback)) {}
 
 void TransportLayerLegacy::ListenerLegacy::accepted(std::unique_ptr<AbstractMessagingPort> mp) {
     _accepted(std::move(mp));
@@ -75,7 +76,6 @@ Date_t TransportLayerLegacy::LegacyTicket::expiration() const {
 }
 
 Status TransportLayerLegacy::setup() {
-    _listener->setAsTimeTracker();
     if (!_listener->setupSockets()) {
         error() << "Failed to set up sockets during startup.";
         return {ErrorCodes::InternalError, "Failed to set up sockets"};
@@ -292,10 +292,9 @@ void TransportLayerLegacy::_handleNewConnection(std::unique_ptr<AbstractMessagin
 
     {
         stdx::lock_guard<stdx::mutex> lk(_connectionsMutex);
-        auto conn =
-            _connections.emplace(std::piecewise_construct,
-                                 std::forward_as_tuple(session.id()),
-                                 std::forward_as_tuple(std::move(amp), false, session.getTags()));
+        _connections.emplace(std::piecewise_construct,
+                             std::forward_as_tuple(session.id()),
+                             std::forward_as_tuple(std::move(amp), false, session.getTags()));
     }
 
     invariant(_sep);
