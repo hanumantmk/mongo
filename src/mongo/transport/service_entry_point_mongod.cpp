@@ -99,7 +99,7 @@ void ServiceEntryPointMongod::startSession(Session&& session) {
     t.detach();
 }
 
-void ServiceEntryPointMongod::_runSession(Session&& session) {
+void ServiceEntryPointMongod::_runSession(Session session) {
     Client::initThread("conn", &session);
     setThreadName(std::string(str::stream() << "conn" << session.id()));
 
@@ -137,22 +137,22 @@ void ServiceEntryPointMongod::_sessionLoop(Session* session) {
     int64_t counter = 0;
 
     while (true) {
-        if (inShutdown()) {
-            break;
-        }
-
         // 1. Source a Message from the client (unless we are exhausting)
         if (!inExhaust) {
             inMessage.reset();
-            if (!session->sourceMessage(&inMessage).wait().isOK()) {
+            auto status = session->sourceMessage(&inMessage).wait();
+
+            if (ErrorCodes::isInterruption(status.code())) {
                 break;
             }
+
+            uassertStatusOK(status);
         }
 
         // 2. Pass sourced Message up to mongod
         DbResponse dbresponse;
         {
-            auto opCtx = getGlobalServiceContext()->makeOperationContext(&cc());
+            auto opCtx = cc().makeOperationContext();
             assembleResponse(opCtx.get(), inMessage, dbresponse, session->remote());
 
             // opCtx must go out of scope here so that the operation cannot show
@@ -174,14 +174,11 @@ void ServiceEntryPointMongod::_sessionLoop(Session* session) {
             }
 
             // 4. Sink our response to the client
-            if (!session->sinkMessage(toSink).wait().isOK()) {
-                break;
-            }
+            uassertStatusOK(session->sinkMessage(toSink).wait());
         } else {
             inExhaust = false;
         }
 
-        // Occasionally we want to see if we're using too much memory.
         if ((counter++ & 0xf) == 0) {
             markThreadIdle();
         }

@@ -76,7 +76,7 @@ void ServiceEntryPointMongos::startSession(Session&& session) {
     t.detach();
 }
 
-void ServiceEntryPointMongos::_runSession(Session&& session) {
+void ServiceEntryPointMongos::_runSession(Session session) {
     Client::initThread("conn", getGlobalServiceContext(), &session);
     setThreadName(std::string(str::stream() << "conn" << session.id()));
 
@@ -113,18 +113,20 @@ void ServiceEntryPointMongos::_runSession(Session&& session) {
 
 void ServiceEntryPointMongos::_sessionLoop(Session* session) {
     Message message;
-    int64_t counter;
+    int64_t counter = 0;
 
     while (true) {
-        if (inShutdown()) {
-            break;
-        }
-
         message.reset();
 
         // 1. Source a Message from the client
-        if (!session->sourceMessage(&message).wait().isOK()) {
-            break;
+        {
+            auto status = session->sourceMessage(&message).wait();
+
+            if (ErrorCodes::isInterruption(status.code())) {
+                break;
+            }
+
+            uassertStatusOK(status);
         }
 
         // 2. Build a sharding request
@@ -160,7 +162,6 @@ void ServiceEntryPointMongos::_sessionLoop(Session* session) {
             LastError::get(cc()).setLastError(ex.getCode(), ex.what());
         }
 
-        // Occasionally we want to see if we're using too much memory.
         if ((counter++ & 0xf) == 0) {
             markThreadIdle();
         }

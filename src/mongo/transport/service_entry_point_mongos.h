@@ -55,7 +55,7 @@ public:
     void startSession(transport::Session&& session) override;
 
 private:
-    void _runSession(transport::Session&& session);
+    void _runSession(transport::Session session);
     void _sessionLoop(transport::Session* session);
 
     transport::TransportLayer* _tl;
