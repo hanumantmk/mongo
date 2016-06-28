@@ -978,12 +978,6 @@ static void shutdownTask() {
     // will do it for us when the process terminates.
 
     stdx::packaged_task<void()> dryOutTask([] {
-
-        // Walk all open sockets and close them. This should unblock any that are sitting in
-        // recv. Other sockets on which there are active operations should see the inShutdown flag
-        // as true when they complete the operation.
-        Listener::closeMessagingPorts(0);
-
         // There isn't currently a way to wait on the TicketHolder to have all its tickets back,
         // unfortunately. So, busy wait in this detached thread.
         while (true) {

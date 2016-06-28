@@ -98,9 +98,7 @@ public:
     /**
      * Return the X509 subject name for this connection (SSL only).
      */
-    std::string getX509SubjectName() const {
-        return _x509SubjectName;
-    }
+    std::string getX509SubjectName() const;
 
     /**
      * Set this session's tags. This Session will register
@@ -142,8 +140,6 @@ private:
 
     HostAndPort _remote;
     HostAndPort _local;
-
-    std::string _x509SubjectName;
 
     TagMask _tags;
 

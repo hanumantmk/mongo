@@ -122,13 +122,6 @@ public:
 
     /** makes sure user input is sane */
     static void checkTicketNumbers();
-
-    /**
-     * This will close implementations of AbstractMessagingPort, skipping any that have tags
-     * matching `skipMask`.
-     */
-    static void closeMessagingPorts(
-        AbstractMessagingPort::Tag skipMask = AbstractMessagingPort::kSkipAllMask);
 };
 
 class ListeningSockets {

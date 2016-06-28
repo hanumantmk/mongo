@@ -88,5 +88,9 @@ Ticket Session::sinkMessage(const Message& message, Date_t expiration) {
     return _tl->sinkMessage(*this, message, expiration);
 }
 
+std::string Session::getX509SubjectName() const {
+    return _tl->getX509SubjectName(*this);
+}
+
 }  // namespace transport
 }  // namespace mongo

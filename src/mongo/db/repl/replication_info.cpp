@@ -236,7 +236,8 @@ public:
         if (!hangUpElement.eoo() && !hangUpElement.trueValue()) {
             auto session = txn->getClient()->session();
             if (session) {
-                session->replaceTags(session->getTags() | executor::NetworkInterface::kMessagingPortKeepOpen);
+                session->replaceTags(session->getTags() |
+                                     executor::NetworkInterface::kMessagingPortKeepOpen);
             }
         }
         appendReplicationInfo(txn, result, 0);
