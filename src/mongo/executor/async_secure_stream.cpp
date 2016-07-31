@@ -80,11 +80,11 @@ void AsyncSecureStream::connect(const asio::ip::tcp::resolver::iterator endpoint
 }
 
 void AsyncSecureStream::write(asio::const_buffer buffer, StreamHandler&& streamHandler) {
-    writeStream(&_stream, _strand, _connected, buffer, std::move(streamHandler));
+    writeStream(this, &_stream, _strand, _reactor, _connected, buffer, std::move(streamHandler));
 }
 
 void AsyncSecureStream::read(asio::mutable_buffer buffer, StreamHandler&& streamHandler) {
-    readStream(&_stream, _strand, _connected, buffer, std::move(streamHandler));
+    readStream(this, &_stream, _strand, _reactor, _connected, buffer, std::move(streamHandler));
 }
 
 void AsyncSecureStream::_handleConnect(asio::ip::tcp::resolver::iterator iter) {
@@ -113,6 +113,26 @@ void AsyncSecureStream::cancel() {
 
 bool AsyncSecureStream::isOpen() {
     return checkIfStreamIsOpen(&_stream.next_layer(), _connected);
+}
+
+StatusWith<size_t> AsyncSecureStream::syncRead(DataRange dr) {
+    return syncReadStream(&_stream, _connected, dr);
+}
+
+StatusWith<size_t> AsyncSecureStream::syncWrite(ConstDataRange cdr) {
+    return syncWriteStream(&_stream, _connected, cdr);
+}
+
+int AsyncSecureStream::nativeHandle() {
+    return _stream.lowest_layer().native_handle();
+}
+
+void AsyncSecureStream::setReactor(PollReactor* reactor) {
+    _reactor = reactor;
+}
+
+PollReactor* AsyncSecureStream::getReactor() const {
+    return _reactor;
 }
 
 }  // namespace executor

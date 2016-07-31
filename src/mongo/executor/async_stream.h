@@ -31,6 +31,7 @@
 #include <asio.hpp>
 
 #include "mongo/executor/async_stream_interface.h"
+#include "mongo/executor/poll_reactor.h"
 
 namespace mongo {
 namespace executor {
@@ -51,10 +52,21 @@ public:
 
     bool isOpen() override;
 
+    StatusWith<size_t> syncRead(DataRange) override;
+
+    StatusWith<size_t> syncWrite(ConstDataRange) override;
+
+    int nativeHandle() override;
+
+    void setReactor(PollReactor* reactor) override;
+
+    PollReactor* getReactor() const override;
+
 private:
     asio::io_service::strand* const _strand;
     asio::ip::tcp::socket _stream;
     bool _connected = false;
+    PollReactor* _reactor = nullptr;
 };
 
 }  // namespace executor

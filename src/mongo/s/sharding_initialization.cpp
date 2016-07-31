@@ -145,11 +145,15 @@ Status initializeGlobalShardingState(OperationContext* txn,
         return {ErrorCodes::BadValue, "Unrecognized connection string."};
     }
 
+    auto globalNetwork =
+        executor::makeNetworkInterface("NetworkInterfaceASIO-globalNetwork",
+                                       stdx::make_unique<ShardingNetworkConnectionHook>(),
+                                       hookBuilder());
+
     auto network =
         executor::makeNetworkInterface("NetworkInterfaceASIO-ShardRegistry",
                                        stdx::make_unique<ShardingNetworkConnectionHook>(),
                                        hookBuilder());
-    auto networkPtr = network.get();
     auto executorPool = makeTaskExecutorPool(std::move(network), hookBuilder);
     executorPool->startup();
 
@@ -173,7 +177,7 @@ Status initializeGlobalShardingState(OperationContext* txn,
         stdx::make_unique<ClusterCursorManager>(getGlobalServiceContext()->getPreciseClockSource()),
         stdx::make_unique<BalancerConfiguration>(),
         std::move(executorPool),
-        networkPtr);
+        std::move(globalNetwork));
 
     // must be started once the grid is initialized
     grid.shardRegistry()->startup();

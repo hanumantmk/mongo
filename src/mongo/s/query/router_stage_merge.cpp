@@ -32,13 +32,20 @@
 
 #include "mongo/s/query/router_stage_merge.h"
 
+#include "mongo/db/client.h"
+#include "mongo/executor/poll_reactor_executor_factory.h"
+#include "mongo/s/grid.h"
+#include "mongo/stdx/memory.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
 
-RouterStageMerge::RouterStageMerge(executor::TaskExecutor* executor,
+RouterStageMerge::RouterStageMerge(executor::TaskExecutor* killExecutor,
                                    ClusterClientCursorParams&& params)
-    : _executor(executor), _arm(executor, std::move(params)) {}
+    : _killExecutor(killExecutor),
+      _executor(executor::PollReactorExecutorFactory::get(getGlobalServiceContext())
+                    .getExecutor(grid.getNetwork())),
+      _arm(_executor.get(), killExecutor, std::move(params)) {}
 
 StatusWith<ClusterQueryResult> RouterStageMerge::next() {
     while (!_arm.ready()) {
@@ -49,7 +56,7 @@ StatusWith<ClusterQueryResult> RouterStageMerge::next() {
         auto event = nextEventStatus.getValue();
 
         // Block until there are further results to return.
-        _executor->waitForEvent(event);
+        _executor.get()->waitForEvent(event);
     }
 
     return _arm.nextReady();
@@ -57,7 +64,7 @@ StatusWith<ClusterQueryResult> RouterStageMerge::next() {
 
 void RouterStageMerge::kill() {
     auto killEvent = _arm.kill();
-    _executor->waitForEvent(killEvent);
+    _killExecutor->waitForEvent(killEvent);
 }
 
 bool RouterStageMerge::remotesExhausted() {

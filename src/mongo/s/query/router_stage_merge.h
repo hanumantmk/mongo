@@ -28,6 +28,7 @@
 
 #pragma once
 
+#include "mongo/executor/poll_reactor_executor_factory.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/s/query/async_results_merger.h"
 #include "mongo/s/query/cluster_client_cursor_params.h"
@@ -35,6 +36,9 @@
 #include "mongo/util/net/hostandport.h"
 
 namespace mongo {
+namespace executor {
+class NetworkInterface;
+}
 
 /**
  * Draws results from the AsyncShardResultsMerger, which is the underlying source of the stream of
@@ -43,7 +47,7 @@ namespace mongo {
  */
 class RouterStageMerge final : public RouterExecStage {
 public:
-    RouterStageMerge(executor::TaskExecutor* executor, ClusterClientCursorParams&& params);
+    RouterStageMerge(executor::TaskExecutor* killExecutor, ClusterClientCursorParams&& params);
 
     StatusWith<ClusterQueryResult> next() final;
 
@@ -56,8 +60,8 @@ public:
     void setOperationContext(OperationContext* txn) final;
 
 private:
-    // Not owned here.
-    executor::TaskExecutor* _executor;
+    executor::TaskExecutor* _killExecutor;
+    executor::PollReactorExecutorFactory::Handle _executor;
 
     // Schedules remote work and merges results from 'remotes'.
     AsyncResultsMerger _arm;

@@ -76,11 +76,23 @@ void AsyncStream::connect(tcp::resolver::iterator iter, ConnectHandler&& connect
 }
 
 void AsyncStream::write(asio::const_buffer buffer, StreamHandler&& streamHandler) {
-    writeStream(&_stream, _strand, _connected, buffer, std::move(streamHandler));
+    writeStream(this, &_stream, _strand, _reactor, _connected, buffer, std::move(streamHandler));
 }
 
 void AsyncStream::read(asio::mutable_buffer buffer, StreamHandler&& streamHandler) {
-    readStream(&_stream, _strand, _connected, buffer, std::move(streamHandler));
+    readStream(this, &_stream, _strand, _reactor, _connected, buffer, std::move(streamHandler));
+}
+
+StatusWith<size_t> AsyncStream::syncRead(DataRange dr) {
+    return syncReadStream(&_stream, _connected, dr);
+}
+
+StatusWith<size_t> AsyncStream::syncWrite(ConstDataRange cdr) {
+    return syncWriteStream(&_stream, _connected, cdr);
+}
+
+int AsyncStream::nativeHandle() {
+    return _stream.native_handle();
 }
 
 void AsyncStream::cancel() {
@@ -89,6 +101,14 @@ void AsyncStream::cancel() {
 
 bool AsyncStream::isOpen() {
     return checkIfStreamIsOpen(&_stream, _connected);
+}
+
+void AsyncStream::setReactor(PollReactor* reactor) {
+    _reactor = reactor;
+}
+
+PollReactor* AsyncStream::getReactor() const {
+    return _reactor;
 }
 
 }  // namespace executor

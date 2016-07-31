@@ -54,8 +54,10 @@ const int kMaxNumFailedHostRetryAttempts = 3;
 }  // namespace
 
 AsyncResultsMerger::AsyncResultsMerger(executor::TaskExecutor* executor,
+                                       executor::TaskExecutor* killExecutor,
                                        ClusterClientCursorParams&& params)
     : _executor(executor),
+      _killExecutor(killExecutor),
       _params(std::move(params)),
       _mergeQueue(MergingComparator(_remotes, _params.sort)) {
     for (const auto& remote : _params.remotes) {
@@ -419,7 +421,7 @@ void AsyncResultsMerger::handleBatchResponse(
             // and we can't schedule any more work for it to complete.
             if (_killCursorsScheduledEvent.isValid()) {
                 scheduleKillCursors_inlock();
-                _executor->signalEvent(_killCursorsScheduledEvent);
+                _killExecutor->signalEvent(_killCursorsScheduledEvent);
             }
 
             _lifecycleState = kKillComplete;
@@ -603,7 +605,7 @@ void AsyncResultsMerger::scheduleKillCursors_inlock() {
             executor::RemoteCommandRequest request(
                 remote.getTargetHost(), _params.nsString.db().toString(), cmdObj, _params.txn);
 
-            _executor->scheduleRemoteCommand(
+            _killExecutor->scheduleRemoteCommand(
                 request,
                 stdx::bind(&AsyncResultsMerger::handleKillCursorsResponse, stdx::placeholders::_1));
         }
@@ -626,7 +628,7 @@ executor::TaskExecutor::EventHandle AsyncResultsMerger::kill() {
 
     // Make '_killCursorsScheduledEvent', which we will signal as soon as we have scheduled a
     // killCursors command to run on all the remote shards.
-    auto statusWithEvent = _executor->makeEvent();
+    auto statusWithEvent = _killExecutor->makeEvent();
     if (ErrorCodes::isShutdownError(statusWithEvent.getStatus().code())) {
         // The underlying task executor is shutting down.
         if (!haveOutstandingBatchRequests_inlock()) {
@@ -643,7 +645,7 @@ executor::TaskExecutor::EventHandle AsyncResultsMerger::kill() {
     if (!haveOutstandingBatchRequests_inlock()) {
         scheduleKillCursors_inlock();
         _lifecycleState = kKillComplete;
-        _executor->signalEvent(_killCursorsScheduledEvent);
+        _killExecutor->signalEvent(_killCursorsScheduledEvent);
     }
 
     return _killCursorsScheduledEvent;

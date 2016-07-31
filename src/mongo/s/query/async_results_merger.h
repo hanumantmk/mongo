@@ -77,7 +77,9 @@ public:
      * Constructs a new AsyncResultsMerger. The TaskExecutor* must remain valid for the lifetime of
      * the ARM.
      */
-    AsyncResultsMerger(executor::TaskExecutor* executor, ClusterClientCursorParams&& params);
+    AsyncResultsMerger(executor::TaskExecutor* executor,
+                       executor::TaskExecutor* killExecutor,
+                       ClusterClientCursorParams&& params);
 
     /**
      * In order to be destroyed, either
@@ -345,6 +347,7 @@ private:
 
     // Not owned here.
     executor::TaskExecutor* _executor;
+    executor::TaskExecutor* _killExecutor;
 
     ClusterClientCursorParams _params;
 

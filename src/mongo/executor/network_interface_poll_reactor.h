@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2015 MongoDB Inc.
+ *    Copyright (C) 2016 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,57 +28,57 @@
 
 #pragma once
 
-#include <asio.hpp>
-#include <memory>
-#include <system_error>
-
-#include "mongo/base/data_range.h"
-#include "mongo/base/disallow_copying.h"
-#include "mongo/base/status_with.h"
+#include "mongo/executor/network_interface.h"
+#include "mongo/executor/poll_reactor.h"
 #include "mongo/stdx/functional.h"
+#include "mongo/util/time_support.h"
 
 namespace mongo {
 namespace executor {
 
-class PollReactor;
-
-/**
- * A bidirectional stream supporting asynchronous reads and writes.
- */
-class AsyncStreamInterface {
-    MONGO_DISALLOW_COPYING(AsyncStreamInterface);
-
+class NetworkInterfacePollReactor : public NetworkInterface {
 public:
-    virtual ~AsyncStreamInterface() = default;
+    NetworkInterfacePollReactor(PollReactor* reactor) : _reactor(reactor) {}
 
-    using ConnectHandler = stdx::function<void(std::error_code)>;
+    std::string getDiagnosticString() override {
+        return "";
+    }
+    void appendConnectionStats(ConnectionPoolStats* stats) const override {}
+    std::string getHostName() override {
+        return "";
+    }
+    void startup() override {}
+    void shutdown() override {}
+    bool inShutdown() const override {
+        return false;
+    }
+    void waitForWork() override {}
+    void waitForWorkUntil(Date_t when) override {}
+    void signalWorkAvailable() override {}
+    Date_t now() override {
+        return Date_t::now();
+    }
+    Status startCommand(const TaskExecutor::CallbackHandle& cbHandle,
+                        RemoteCommandRequest& request,
+                        const RemoteCommandCompletionFn& onFinish,
+                        PollReactor* reactor = nullptr) override {
+        return Status::OK();
+    }
+    void cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) override {}
+    void cancelAllCommands() override {}
+    Status setAlarm(Date_t when, const stdx::function<void()>& action) override {
+        _reactor->setTimer(when, action);
+        return Status::OK();
+    }
 
-    using StreamHandler = stdx::function<void(std::error_code, std::size_t)>;
+    bool onNetworkThread() override {
+        return true;
+    }
 
-    virtual void connect(asio::ip::tcp::resolver::iterator endpoints,
-                         ConnectHandler&& connectHandler) = 0;
-
-    virtual void write(asio::const_buffer buf, StreamHandler&& writeHandler) = 0;
-
-    virtual void read(asio::mutable_buffer buf, StreamHandler&& readHandler) = 0;
-
-    virtual void cancel() = 0;
-
-    virtual bool isOpen() = 0;
-
-    virtual StatusWith<size_t> syncRead(DataRange) = 0;
-
-    virtual StatusWith<size_t> syncWrite(ConstDataRange) = 0;
-
-    virtual int nativeHandle() = 0;
-
-    virtual void setReactor(PollReactor*) = 0;
-
-    virtual PollReactor* getReactor() const = 0;
-
-protected:
-    AsyncStreamInterface() = default;
+private:
+    PollReactor* _reactor;
 };
+
 
 }  // namespace executor
 }  // namespace mongo

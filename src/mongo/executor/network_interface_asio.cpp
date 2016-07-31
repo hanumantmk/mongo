@@ -260,7 +260,8 @@ Status attachMetadataIfNeeded(RemoteCommandRequest& request,
 
 Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                           RemoteCommandRequest& request,
-                                          const RemoteCommandCompletionFn& onFinish) {
+                                          const RemoteCommandCompletionFn& onFinish,
+                                          PollReactor* reactor) {
     MONGO_ASIO_INVARIANT(onFinish, "Invalid completion function");
     {
         auto key = GetConnectionMap::HashedKey(&cbHandle);
@@ -283,7 +284,7 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
         return statusMetadata;
     }
 
-    auto nextStep = [this, getConnectionStartTime, cbHandle, request, onFinish](
+    auto nextStep = [this, getConnectionStartTime, cbHandle, request, onFinish, reactor](
         StatusWith<ConnectionPool::ConnectionHandle> swConn) {
 
         if (!swConn.isOK()) {
@@ -328,8 +329,9 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
         op->_onFinish = std::move(onFinish);
         op->_connectionPoolHandle = std::move(swConn.getValue());
         op->startProgress(getConnectionStartTime);
+        op->connection().stream().setReactor(reactor);
 
-        auto next = [this, op, getConnectionStartTime] {
+        auto next = [this, op, getConnectionStartTime, reactor] {
             // Set timeout now that we have the correct request object
             if (op->_request.timeout != RemoteCommandRequest::kNoTimeout) {
                 // Subtract the time it took to get the connection from the pool from the request
@@ -354,7 +356,37 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
                 const auto adjustedTimeout = op->_request.timeout - getConnectionDuration;
                 const auto requestId = op->_request.id;
 
-                op->_timeoutAlarm = op->_owner->_timerFactory->make(&op->_strand, adjustedTimeout);
+                if (reactor) {
+                    class ReactorTimer : public AsyncTimerInterface {
+                    public:
+                        ReactorTimer(PollReactor* reactor,
+                                     asio::io_service::strand* strand,
+                                     Milliseconds timeout)
+                            : reactor(reactor), strand(strand), timeout(timeout) {}
+
+                        void cancel() override {
+                            reactor->cancelTimer(id.get());
+                        }
+
+                        void asyncWait(Handler handler) override {
+                            id = reactor->setTimer(Date_t::now() + timeout, [this, handler] {
+                                handler(asio::error_code{});
+                            });
+                        }
+
+                    private:
+                        PollReactor* reactor;
+                        asio::io_service::strand* strand;
+                        Milliseconds timeout;
+                        boost::optional<size_t> id;
+                    };
+
+                    op->_timeoutAlarm =
+                        stdx::make_unique<ReactorTimer>(reactor, &op->_strand, adjustedTimeout);
+                } else {
+                    op->_timeoutAlarm =
+                        op->_owner->_timerFactory->make(&op->_strand, adjustedTimeout);
+                }
 
                 std::shared_ptr<AsyncOp::AccessControl> access;
                 std::size_t generation;
@@ -418,12 +450,20 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
             _inProgress.splice(_inProgress.begin(), currentOpHolder);
         }
 
-        // This ditches the lock and gets us onto the strand (so we're
-        // threadsafe)
-        op->_strand.post(next);
+        if (op->connection().stream().getReactor()) {
+            next();
+        } else {
+            // This ditches the lock and gets us onto the strand (so we're
+            // threadsafe)
+            op->_strand.post(next);
+        }
     };
 
-    _connectionPool.get(request.target, request.timeout, nextStep);
+    if (reactor) {
+        nextStep(_connectionPool.getSync(request.target, request.timeout));
+    } else {
+        _connectionPool.get(request.target, request.timeout, nextStep);
+    }
 
     return Status::OK();
 }

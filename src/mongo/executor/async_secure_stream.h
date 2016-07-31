@@ -57,6 +57,16 @@ public:
 
     bool isOpen() override;
 
+    StatusWith<size_t> syncRead(DataRange) override;
+
+    StatusWith<size_t> syncWrite(ConstDataRange) override;
+
+    int nativeHandle() override;
+
+    void setReactor(PollReactor* reactor) override;
+
+    PollReactor* getReactor() const override;
+
 private:
     void _handleConnect(asio::ip::tcp::resolver::iterator iter);
 
@@ -66,6 +76,7 @@ private:
     asio::ssl::stream<asio::ip::tcp::socket> _stream;
     ConnectHandler _userHandler;
     bool _connected = false;
+    PollReactor* _reactor = nullptr;
 };
 
 }  // namespace executor

@@ -1,5 +1,5 @@
 /**
- *    Copyright (C) 2015 MongoDB Inc.
+ *    Copyright (C) 2016 MongoDB Inc.
  *
  *    This program is free software: you can redistribute it and/or  modify
  *    it under the terms of the GNU Affero General Public License, version 3,
@@ -28,57 +28,66 @@
 
 #pragma once
 
-#include <asio.hpp>
 #include <memory>
-#include <system_error>
+#include <stack>
 
-#include "mongo/base/data_range.h"
-#include "mongo/base/disallow_copying.h"
-#include "mongo/base/status_with.h"
+#include "mongo/db/service_context.h"
+#include "mongo/executor/network_interface.h"
+#include "mongo/executor/poll_reactor.h"
+#include "mongo/executor/task_executor.h"
+#include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/functional.h"
+#include "mongo/stdx/mutex.h"
+#include "mongo/util/time_support.h"
 
 namespace mongo {
 namespace executor {
 
-class PollReactor;
-
-/**
- * A bidirectional stream supporting asynchronous reads and writes.
- */
-class AsyncStreamInterface {
-    MONGO_DISALLOW_COPYING(AsyncStreamInterface);
+class PollReactorExecutorFactory {
+    class Executor;
 
 public:
-    virtual ~AsyncStreamInterface() = default;
+    class Handle {
+    public:
+        Handle(PollReactorExecutorFactory* factory, Executor* ptr);
 
-    using ConnectHandler = stdx::function<void(std::error_code)>;
+        ~Handle();
 
-    using StreamHandler = stdx::function<void(std::error_code, std::size_t)>;
+        Handle(Handle&&);
+        Handle& operator=(Handle&&);
 
-    virtual void connect(asio::ip::tcp::resolver::iterator endpoints,
-                         ConnectHandler&& connectHandler) = 0;
+        TaskExecutor* get();
 
-    virtual void write(asio::const_buffer buf, StreamHandler&& writeHandler) = 0;
+    private:
+        class Dtor {
+        public:
+            Dtor(PollReactorExecutorFactory* factory) : _factory(factory) {}
 
-    virtual void read(asio::mutable_buffer buf, StreamHandler&& readHandler) = 0;
+            void operator()(Executor* ptr) {
+                if (_factory) {
+                    _factory->returnExecutor(ptr);
+                }
+            }
 
-    virtual void cancel() = 0;
+        private:
+            PollReactorExecutorFactory* _factory;
+        };
 
-    virtual bool isOpen() = 0;
+        std::unique_ptr<Executor, Dtor> data;
+    };
 
-    virtual StatusWith<size_t> syncRead(DataRange) = 0;
+    static const ServiceContext::Decoration<PollReactorExecutorFactory> get;
 
-    virtual StatusWith<size_t> syncWrite(ConstDataRange) = 0;
+    Handle getExecutor(const std::shared_ptr<NetworkInterface>& network);
 
-    virtual int nativeHandle() = 0;
+private:
+    void returnExecutor(Executor* executor);
 
-    virtual void setReactor(PollReactor*) = 0;
-
-    virtual PollReactor* getReactor() const = 0;
-
-protected:
-    AsyncStreamInterface() = default;
+    std::mutex _mutex;
+    std::shared_ptr<NetworkInterface> _network;
+    std::stack<std::unique_ptr<Executor>> _executors;
 };
+
 
 }  // namespace executor
 }  // namespace mongo

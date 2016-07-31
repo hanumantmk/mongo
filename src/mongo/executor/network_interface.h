@@ -32,6 +32,7 @@
 #include <string>
 
 #include "mongo/base/disallow_copying.h"
+#include "mongo/executor/poll_reactor.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/stdx/functional.h"
 
@@ -128,7 +129,8 @@ public:
      */
     virtual Status startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                 RemoteCommandRequest& request,
-                                const RemoteCommandCompletionFn& onFinish) = 0;
+                                const RemoteCommandCompletionFn& onFinish,
+                                PollReactor* reactor = nullptr) = 0;
 
     /**
      * Requests cancelation of the network activity associated with "cbHandle" if it has not yet

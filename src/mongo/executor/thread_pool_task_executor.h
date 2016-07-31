@@ -31,6 +31,7 @@
 #include <memory>
 
 #include "mongo/base/disallow_copying.h"
+#include "mongo/executor/poll_reactor.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/list.h"
@@ -58,7 +59,8 @@ public:
      * for network operations.
      */
     ThreadPoolTaskExecutor(std::unique_ptr<ThreadPoolInterface> pool,
-                           std::unique_ptr<NetworkInterface> net);
+                           std::shared_ptr<NetworkInterface> net,
+                           PollReactor* pr = nullptr);
 
     /**
      * Destroys a ThreadPoolTaskExecutor.
@@ -148,7 +150,7 @@ private:
     void runCallback(std::shared_ptr<CallbackState> cbState);
 
     // The network interface used for remote command execution and waiting.
-    std::unique_ptr<NetworkInterface> _net;
+    std::shared_ptr<NetworkInterface> _net;
 
     // The thread pool that executes scheduled work items.
     std::unique_ptr<ThreadPoolInterface> _pool;
@@ -170,6 +172,8 @@ private:
 
     // Indicates whether or not the executor is shutting down.
     bool _inShutdown = false;
+
+    PollReactor* _reactor;
 };
 
 }  // namespace executor

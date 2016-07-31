@@ -33,6 +33,7 @@
 #include "mongo/s/grid.h"
 
 #include "mongo/db/server_options.h"
+#include "mongo/executor/network_interface.h"
 #include "mongo/executor/task_executor.h"
 #include "mongo/executor/task_executor_pool.h"
 #include "mongo/s/balancer/balancer_configuration.h"
@@ -65,7 +66,7 @@ void Grid::init(std::unique_ptr<ShardingCatalogClient> catalogClient,
                 std::unique_ptr<ClusterCursorManager> cursorManager,
                 std::unique_ptr<BalancerConfiguration> balancerConfig,
                 std::unique_ptr<executor::TaskExecutorPool> executorPool,
-                executor::NetworkInterface* network) {
+                std::shared_ptr<executor::NetworkInterface> network) {
     invariant(!_catalogClient);
     invariant(!_catalogManager);
     invariant(!_catalogCache);
@@ -82,7 +83,7 @@ void Grid::init(std::unique_ptr<ShardingCatalogClient> catalogClient,
     _cursorManager = std::move(cursorManager);
     _balancerConfig = std::move(balancerConfig);
     _executorPool = std::move(executorPool);
-    _network = network;
+    _network = std::move(network);
 
     _shardRegistry->init();
 }

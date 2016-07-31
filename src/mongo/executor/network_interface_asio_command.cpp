@@ -354,6 +354,8 @@ void NetworkInterfaceASIO::_completeOperation(AsyncOp* op, ResponseStatus resp) 
 
     op->finish(resp);
 
+    op->_connection->stream().setReactor(nullptr);
+
     MONGO_ASIO_INVARIANT(static_cast<bool>(ownedOp), "Invalid AsyncOp", op);
 
     auto conn = std::move(op->_connectionPoolHandle);

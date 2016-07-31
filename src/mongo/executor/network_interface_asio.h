@@ -62,7 +62,6 @@
 #include "mongo/util/net/message.h"
 
 namespace mongo {
-
 namespace executor {
 
 namespace connection_pool_asio {
@@ -132,7 +131,8 @@ public:
     Date_t now() override;
     Status startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                         RemoteCommandRequest& request,
-                        const RemoteCommandCompletionFn& onFinish) override;
+                        const RemoteCommandCompletionFn& onFinish,
+                        PollReactor* reactor = nullptr) override;
     void cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) override;
     void cancelAllCommands() override;
     Status setAlarm(Date_t when, const stdx::function<void()>& action) override;

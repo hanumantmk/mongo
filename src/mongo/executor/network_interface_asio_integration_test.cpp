@@ -37,6 +37,7 @@
 #include "mongo/executor/async_stream_factory.h"
 #include "mongo/executor/async_stream_interface.h"
 #include "mongo/executor/async_timer_asio.h"
+#include "mongo/executor/connection_pool_stats.h"
 #include "mongo/executor/network_interface_asio.h"
 #include "mongo/executor/network_interface_asio_test_utils.h"
 #include "mongo/executor/task_executor.h"
@@ -88,11 +89,14 @@ public:
     }
 
     Deferred<RemoteCommandResponse> runCommand(const TaskExecutor::CallbackHandle& cbHandle,
-                                               RemoteCommandRequest& request) {
+                                               RemoteCommandRequest& request,
+                                               PollReactor* reactor = nullptr) {
         Deferred<RemoteCommandResponse> deferred;
-        net().startCommand(cbHandle, request, [deferred](RemoteCommandResponse resp) mutable {
-            deferred.emplace(std::move(resp));
-        });
+        net().startCommand(
+            cbHandle,
+            request,
+            [deferred](RemoteCommandResponse resp) mutable { deferred.emplace(std::move(resp)); },
+            reactor);
         return deferred;
     }
 
@@ -345,6 +349,31 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, HookHangs) {
 
     assertCommandFailsOnClient(
         "admin", BSON("ping" << 1), Seconds(1), ErrorCodes::ExceededTimeLimit);
+}
+
+TEST_F(NetworkInterfaceASIOIntegrationTest, BasicReactor) {
+    NetworkInterfaceASIO::Options options;
+    startNet(std::move(options));
+
+    PollReactor pr;
+
+    TaskExecutor::CallbackHandle cb{};
+
+    RemoteCommandRequest request{
+        fixture().getServers()[0], "admin", BSON("isMaster" << 1), BSONObj(), nullptr, Seconds(2)};
+
+    auto response = runCommand(cb, request, &pr);
+
+    for (ConnectionPoolStats stats; stats.totalCreated == 0; net().appendConnectionStats(&stats)) {
+    }
+
+    ASSERT_FALSE(response.hasCompleted());
+
+    while (!response.hasCompleted()) {
+        pr.run();
+    }
+
+    ASSERT_OK(response.get().getStatus());
 }
 
 }  // namespace

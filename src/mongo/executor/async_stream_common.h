@@ -30,6 +30,9 @@
 #include <system_error>
 #include <utility>
 
+#include "mongo/base/data_range.h"
+#include "mongo/base/system_error.h"
+#include "mongo/executor/poll_reactor.h"
 #include "mongo/util/assert_util.h"
 
 namespace mongo {
@@ -56,28 +59,97 @@ void destroyStream(ASIOStream* stream, bool connected) {
     }
 }
 
-template <typename ASIOStream, typename Buffer, typename Handler>
-void writeStream(ASIOStream* stream,
+template <typename AsyncStream, typename ASIOStream, typename Buffer, typename Handler>
+void writeStream(AsyncStream* thisv,
+                 ASIOStream* stream,
                  asio::io_service::strand* strand,
+                 PollReactor* reactor,
                  bool connected,
                  Buffer&& buffer,
                  Handler&& handler) {
     invariant(connected);
-    asio::async_write(*stream,
-                      asio::buffer(std::forward<Buffer>(buffer)),
-                      strand->wrap(std::forward<Handler>(handler)));
+
+    if (reactor) {
+        auto ptr = asio::buffer_cast<const char*>(buffer);
+        auto len = asio::buffer_size(buffer);
+
+        reactor->asyncWrite(
+            thisv, ConstDataRange(ptr, ptr + len), [strand, handler, len](Status status) {
+                if (status.isOK()) {
+                    handler(asio::error_code{}, len);
+                } else {
+                    handler(asio::error::network_unreachable, 0);
+                }
+            });
+    } else {
+        asio::async_write(*stream,
+                          asio::buffer(std::forward<Buffer>(buffer)),
+                          strand->wrap(std::forward<Handler>(handler)));
+    }
 }
 
-template <typename ASIOStream, typename Buffer, typename Handler>
-void readStream(ASIOStream* stream,
+template <typename AsyncStream, typename ASIOStream, typename Buffer, typename Handler>
+void readStream(AsyncStream* thisv,
+                ASIOStream* stream,
                 asio::io_service::strand* strand,
+                PollReactor* reactor,
                 bool connected,
                 Buffer&& buffer,
                 Handler&& handler) {
     invariant(connected);
-    asio::async_read(*stream,
-                     asio::buffer(std::forward<Buffer>(buffer)),
-                     strand->wrap(std::forward<Handler>(handler)));
+
+    if (reactor) {
+        auto ptr = asio::buffer_cast<char*>(buffer);
+        auto len = asio::buffer_size(buffer);
+
+        reactor->asyncRead(thisv, DataRange(ptr, ptr + len), [strand, handler, len](Status status) {
+            if (status.isOK()) {
+                handler(asio::error_code{}, len);
+            } else {
+                handler(asio::error::network_unreachable, 0);
+            }
+        });
+    } else {
+        asio::async_read(*stream,
+                         asio::buffer(std::forward<Buffer>(buffer)),
+                         strand->wrap(std::forward<Handler>(handler)));
+    }
+}
+
+template <typename ASIOStream>
+StatusWith<size_t> syncWriteStream(ASIOStream* stream, bool connected, ConstDataRange cdr) {
+    invariant(connected);
+
+    asio::error_code ec;
+    auto out = asio::write(*stream, asio::buffer(cdr.data(), cdr.length()), ec);
+
+    if (ec && ec != asio::error::would_block) {
+        if (ec.category() == mongoErrorCategory()) {
+            return Status(ErrorCodes::fromInt(ec.value()), ec.message());
+        } else {
+            return Status(ErrorCodes::HostUnreachable, ec.message());
+        }
+    }
+
+    return out;
+}
+
+template <typename ASIOStream>
+StatusWith<size_t> syncReadStream(ASIOStream* stream, bool connected, DataRange dr) {
+    invariant(connected);
+
+    asio::error_code ec;
+    auto out = asio::read(*stream, asio::buffer(const_cast<char*>(dr.data()), dr.length()), ec);
+
+    if (ec && ec != asio::error::would_block) {
+        if (ec.category() == mongoErrorCategory()) {
+            return Status(ErrorCodes::fromInt(ec.value()), ec.message());
+        } else {
+            return Status(ErrorCodes::HostUnreachable, ec.message());
+        }
+    }
+
+    return out;
 }
 
 template <typename ASIOStream>

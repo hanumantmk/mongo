@@ -76,7 +76,7 @@ public:
               std::unique_ptr<ClusterCursorManager> cursorManager,
               std::unique_ptr<BalancerConfiguration> balancerConfig,
               std::unique_ptr<executor::TaskExecutorPool> executorPool,
-              executor::NetworkInterface* network);
+              std::shared_ptr<executor::NetworkInterface> network);
 
     /**
      * Deprecated. This is only used on mongos, and once addShard is solely handled by the configs,
@@ -124,7 +124,7 @@ public:
         return _executorPool.get();
     }
 
-    executor::NetworkInterface* getNetwork() {
+    const std::shared_ptr<executor::NetworkInterface>& getNetwork() const {
         return _network;
     }
 
@@ -169,9 +169,7 @@ private:
     // contained executor has a connection hook set on it for sending/receiving sharding metadata.
     std::unique_ptr<executor::TaskExecutorPool> _executorPool;
 
-    // Network interface being used by the fixed executor in _executorPool.  Used for asking
-    // questions about the network configuration, such as getting the current server's hostname.
-    executor::NetworkInterface* _network;
+    std::shared_ptr<executor::NetworkInterface> _network;
 
     // Protects _configOpTime.
     mutable stdx::mutex _mutex;

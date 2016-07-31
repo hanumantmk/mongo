@@ -150,6 +150,8 @@ env.Library(
         'async_timer_asio',
         'connection_pool',
         'downconvert_find_and_getmore_commands',
+        'poll_reactor',
+        'poll_reactor_executor_factory',
         'network_interface',
         'task_executor_interface',
     ])
@@ -171,12 +173,45 @@ env.Library(
     ]
 )
 
+env.Library(
+    target='poll_reactor',
+    source=[
+        'poll_reactor.cpp',
+    ],
+)
+
+env.Library(
+    target='poll_reactor_executor_factory',
+    source=[
+        'poll_reactor_executor_factory.cpp',
+    ],
+    LIBDEPS=[
+        'poll_reactor',
+        'network_interface',
+        'network_interface_thread_pool',
+        'task_executor_interface',
+        'thread_pool_task_executor',
+        '$BUILD_DIR/mongo/db/service_context',
+    ]
+)
+
 env.CppUnitTest(
     target='async_stream_test',
     source=[
         'async_stream_test.cpp',
     ],
     LIBDEPS=[
+        'async_stream',
+    ]
+)
+
+env.CppUnitTest(
+    target='poll_reactor_test',
+    source=[
+        'poll_reactor_test.cpp',
+    ],
+    LIBDEPS=[
+        'poll_reactor',
         'async_stream',
     ]
 )

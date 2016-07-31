@@ -123,8 +123,9 @@ public:
 };
 
 ThreadPoolTaskExecutor::ThreadPoolTaskExecutor(std::unique_ptr<ThreadPoolInterface> pool,
-                                               std::unique_ptr<NetworkInterface> net)
-    : _net(std::move(net)), _pool(std::move(pool)) {}
+                                               std::shared_ptr<NetworkInterface> net,
+                                               PollReactor* reactor)
+    : _net(std::move(net)), _pool(std::move(pool)), _reactor(reactor) {}
 
 ThreadPoolTaskExecutor::~ThreadPoolTaskExecutor() {}
 
@@ -169,7 +170,9 @@ void ThreadPoolTaskExecutor::join() {
             lk = stdx::unique_lock<stdx::mutex>(_mutex);
         }
     }
-    _net->shutdown();
+    if (!_reactor) {
+        _net->shutdown();
+    }
 
     stdx::unique_lock<stdx::mutex> lk(_mutex);
     // The _poolInProgressQueue may not be empty if the network interface attempted to schedule work
@@ -182,7 +185,9 @@ void ThreadPoolTaskExecutor::join() {
         runCallback(std::move(cbState));
         lk.lock();
     }
-    invariant(_networkInProgressQueue.empty());
+    if (!_reactor) {
+        invariant(_networkInProgressQueue.empty());
+    }
     invariant(_sleepersQueue.empty());
     invariant(_unsignaledEvents.empty());
 }
@@ -235,7 +240,13 @@ void ThreadPoolTaskExecutor::waitForEvent(const EventHandle& event) {
     auto eventState = checked_cast<EventState*>(getEventFromHandle(event));
     stdx::unique_lock<stdx::mutex> lk(_mutex);
     while (!eventState->isSignaledFlag) {
-        eventState->isSignaledCondition.wait(lk);
+        if (_reactor) {
+            lk.unlock();
+            _reactor->run();
+            lk.lock();
+        } else {
+            eventState->isSignaledCondition.wait(lk);
+        }
     }
 }
 
@@ -346,7 +357,8 @@ StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::scheduleRemoteC
                    << redact(response.isOK() ? response.toString() : response.status.toString());
             swap(cbState->callback, newCb);
             scheduleIntoPool_inlock(&_networkInProgressQueue, cbState->iter, std::move(lk));
-        });
+        },
+        _reactor);
     return cbHandle;
 }
 
@@ -386,7 +398,13 @@ void ThreadPoolTaskExecutor::wait(const CallbackHandle& cbHandle) {
         cbState->finishedCondition.emplace();
     }
     while (!cbState->isFinished.load()) {
-        cbState->finishedCondition->wait(lk);
+        if (_reactor) {
+            lk.unlock();
+            _reactor->run();
+            lk.lock();
+        } else {
+            cbState->finishedCondition->wait(lk);
+        }
     }
 }
 
