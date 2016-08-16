@@ -29,6 +29,8 @@
 
 #pragma once
 
+#include <boost/optional.hpp>
+#include <iterator>
 #include <memory>
 
 #include "mongo/base/disallow_copying.h"
@@ -61,7 +63,7 @@ template <typename K_L,  // key lookup
 class UnorderedFastKeyTable {
 public:
     // Typedefs for compatibility with std::map.
-    using value_type = std::pair<K_S, V>;
+    using value_type = std::pair<const K_S, V>;
     using key_type = K_L;
     using mapped_type = V;
 
@@ -69,12 +71,65 @@ public:
 
 private:
     struct Entry {
-        Entry() : used(false), everUsed(false) {}
+        Entry() : _everUsed(false) {}
 
-        bool used;
-        bool everUsed;
-        uint32_t curHash;
-        value_type data;
+        Entry(const Entry& other) = default;
+
+        Entry& operator=(const Entry& other) {
+            if (this == &other) {
+                return *this;
+            }
+
+            _everUsed = other._everUsed;
+            _curHash = other._curHash;
+
+            if (other.isUsed()) {
+                _data.emplace(other.getData());
+            }
+
+            return *this;
+        }
+
+        template <typename... Args>
+        void emplaceData(const HashedKey& key, Args&&... args) {
+            dassert(!isUsed());
+            _everUsed = true;
+            _curHash = key.hash();
+            _data.emplace(std::forward<Args>(args)...);
+        }
+
+        bool isUsed() const {
+            return static_cast<bool>(_data);
+        }
+
+        bool hasEverUsed() const {
+            return _everUsed;
+        }
+
+        uint32_t getCurHash() const {
+            dassert(isUsed());
+            return _curHash;
+        }
+
+        void unUse() {
+            dassert(isUsed());
+            _data = boost::none;
+        }
+
+        value_type& getData() {
+            dassert(isUsed());
+            return *_data;
+        }
+
+        const value_type& getData() const {
+            dassert(isUsed());
+            return *_data;
+        }
+
+    private:
+        bool _everUsed;
+        uint32_t _curHash;
+        boost::optional<value_type> _data;
     };
 
     struct Area {
@@ -184,13 +239,90 @@ public:
         return erase(HashedKey(key));
     }
 
-    class const_iterator {
+    class const_iterator;
+
+    class iterator : public std::iterator<std::forward_iterator_tag, value_type> {
+        friend class UnorderedFastKeyTable;
+        friend class const_iterator;
+
+    public:
+        iterator() {
+            _position = -1;
+        }
+        iterator(Area* area) {
+            _area = area;
+            _position = 0;
+            _max = _area->capacity() - 1;
+            _skip();
+        }
+        iterator(Area* area, int pos) {
+            _area = area;
+            _position = pos;
+            _max = pos;
+        }
+
+        value_type* operator->() const {
+            return &_area->_entries[_position].getData();
+        }
+
+        value_type& operator*() const {
+            return _area->_entries[_position].getData();
+        }
+
+        iterator& operator++() {
+            if (_position < 0)
+                return *this;
+            _position++;
+            _skip();
+            return *this;
+        }
+
+        iterator operator++(int) {
+            iterator before(*this);
+            operator++();
+            return before;
+        }
+
+        bool operator==(const iterator& other) const {
+            return _position == other._position;
+        }
+        bool operator!=(const iterator& other) const {
+            return _position != other._position;
+        }
+
+    private:
+        void _skip() {
+            while (true) {
+                if (_position > _max) {
+                    _position = -1;
+                    break;
+                }
+                if (_area->_entries[_position].isUsed())
+                    break;
+                ++_position;
+            }
+        }
+
+        Area* _area;
+        int _position;
+        int _max;  // inclusive
+    };
+
+    class const_iterator : public std::iterator<std::forward_iterator_tag,
+                                                value_type,
+                                                std::ptrdiff_t,
+                                                const value_type*,
+                                                const value_type&> {
         friend class UnorderedFastKeyTable;
 
     public:
         const_iterator() {
             _position = -1;
         }
+
+        const_iterator(const iterator& iterator)
+            : _area(iterator._area), _position(iterator._position), _max(iterator._max) {}
+
         const_iterator(const Area* area) {
             _area = area;
             _position = 0;
@@ -204,19 +336,25 @@ public:
         }
 
         const value_type* operator->() const {
-            return &_area->_entries[_position].data;
+            return &_area->_entries[_position].getData();
         }
 
         const value_type& operator*() const {
-            return _area->_entries[_position].data;
+            return _area->_entries[_position].getData();
         }
 
-        const_iterator operator++() {
+        const_iterator& operator++() {
             if (_position < 0)
                 return *this;
             _position++;
             _skip();
             return *this;
+        }
+
+        const_iterator operator++(int) {
+            const_iterator before(*this);
+            operator++();
+            return before;
         }
 
         bool operator==(const const_iterator& other) const {
@@ -233,7 +371,7 @@ public:
                     _position = -1;
                     break;
                 }
-                if (_area->_entries[_position].used)
+                if (_area->_entries[_position].isUsed())
                     break;
                 ++_position;
             }
@@ -261,12 +399,48 @@ public:
         return const_iterator(&_area, _area.find(key, nullptr));
     }
 
+    iterator find(const K_L& key) {
+        if (empty())
+            return end();  // Don't waste time hashing.
+        return find(HashedKey(key));
+    }
+
+    iterator find(const HashedKey& key) {
+        if (empty())
+            return end();
+        return iterator(&_area, _area.find(key, nullptr));
+    }
+
     const_iterator begin() const {
         return const_iterator(&_area);
     }
 
     const_iterator end() const {
         return const_iterator();
+    }
+
+    iterator begin() {
+        return iterator(&_area);
+    }
+
+    iterator end() {
+        return iterator();
+    }
+
+    const_iterator cbegin() const {
+        return const_iterator(&_area);
+    }
+
+    const_iterator cend() const {
+        return const_iterator();
+    }
+
+    template <typename... Args>
+    std::pair<iterator, bool> try_emplace(const HashedKey& key, Args&&... args);
+
+    void swap(UnorderedFastKeyTable& other) {
+        _area.swap(&(other._area));
+        std::swap(_size, other._size);
     }
 
 private:
