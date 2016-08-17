@@ -108,12 +108,20 @@ void ASIOTimer::cancelTimeout() {
     });
 }
 
-ASIOConnection::ASIOConnection(const HostAndPort& hostAndPort, size_t generation, ASIOImpl* global)
+ASIOConnection::ASIOConnection(const HostAndPort& hostAndPort,
+                               size_t generation,
+                               ASIOImpl* global,
+                               ConnectionPool::ConnectionIterator iter)
     : _global(global),
       _hostAndPort(hostAndPort),
       _generation(generation),
-      _impl(makeAsyncOp(this)),
-      _timer(&_impl->strand()) {}
+      _impl(makeAsyncOp(this, iter)),
+      _timer(&_impl->strand()),
+      _iterator(iter) {}
+
+ASIOConnection::~ASIOConnection() {
+    _impl->_connectionPoolHandle.release();
+}
 
 void ASIOConnection::indicateSuccess() {
     _status = Status::OK();
@@ -151,7 +159,8 @@ size_t ASIOConnection::getGeneration() const {
     return _generation;
 }
 
-std::unique_ptr<NetworkInterfaceASIO::AsyncOp> ASIOConnection::makeAsyncOp(ASIOConnection* conn) {
+std::unique_ptr<NetworkInterfaceASIO::AsyncOp> ASIOConnection::makeAsyncOp(
+    ASIOConnection* conn, ConnectionPool::ConnectionIterator iter) {
     return stdx::make_unique<NetworkInterfaceASIO::AsyncOp>(
         conn->_global->_impl,
         TaskExecutor::CallbackHandle(),
@@ -160,9 +169,9 @@ std::unique_ptr<NetworkInterfaceASIO::AsyncOp> ASIOConnection::makeAsyncOp(ASIOC
                              BSON("isMaster" << 1),
                              BSONObj(),
                              nullptr},
-        [conn](const TaskExecutor::ResponseStatus& rs) {
+        [conn, iter](const TaskExecutor::ResponseStatus& rs) {
             auto cb = std::move(conn->_setupCallback);
-            cb(conn, rs.status);
+            cb(iter, rs.status);
         },
         conn->_global->now());
 }
@@ -187,9 +196,9 @@ void ASIOConnection::cancelTimeout() {
 
 void ASIOConnection::setup(Milliseconds timeout, SetupCallback cb) {
     _impl->strand().dispatch([this, timeout, cb] {
-        _setupCallback = [this, cb](ConnectionInterface* ptr, Status status) {
+        _setupCallback = [this, cb](ConnectionPool::ConnectionIterator iter, Status status) {
             cancelTimeout();
-            cb(ptr, status);
+            cb(iter, status);
         };
 
         std::size_t generation;
@@ -235,7 +244,7 @@ void ASIOConnection::refresh(Milliseconds timeout, RefreshCallback cb) {
                                             _hostAndPort);
         if (!beginStatus.isOK()) {
             auto cb = std::move(_refreshCallback);
-            cb(this, beginStatus);
+            cb(this->_iterator, beginStatus);
             return;
         }
 
@@ -247,7 +256,7 @@ void ASIOConnection::refresh(Milliseconds timeout, RefreshCallback cb) {
         op->setOnFinish([this](RemoteCommandResponse failedResponse) {
             invariant(!failedResponse.isOK());
             auto cb = std::move(_refreshCallback);
-            cb(this, failedResponse.status);
+            cb(this->_iterator, failedResponse.status);
         });
 
         op->_inRefresh = true;
@@ -258,10 +267,10 @@ void ASIOConnection::refresh(Milliseconds timeout, RefreshCallback cb) {
             auto cb = std::move(_refreshCallback);
 
             if (ec)
-                return cb(this, Status(ErrorCodes::HostUnreachable, ec.message()));
+                return cb(this->_iterator, Status(ErrorCodes::HostUnreachable, ec.message()));
 
             op->_inRefresh = false;
-            cb(this, Status::OK());
+            cb(this->_iterator, Status::OK());
         });
     });
 }
@@ -284,9 +293,10 @@ std::unique_ptr<ConnectionPool::TimerInterface> ASIOImpl::makeTimer() {
     return stdx::make_unique<ASIOTimer>(&_impl->_strand);
 }
 
-std::unique_ptr<ConnectionPool::ConnectionInterface> ASIOImpl::makeConnection(
-    const HostAndPort& hostAndPort, size_t generation) {
-    return stdx::make_unique<ASIOConnection>(hostAndPort, generation, this);
+void ASIOImpl::makeConnection(const HostAndPort& hostAndPort,
+                              size_t generation,
+                              ConnectionPool::ConnectionIterator iter) {
+    iter->second = stdx::make_unique<ASIOConnection>(hostAndPort, generation, this, iter);
 }
 
 }  // namespace connection_pool_asio

@@ -57,25 +57,35 @@ void TimerImpl::clear() {
 }
 
 void TimerImpl::fireIfNecessary() {
-    auto now = PoolImpl().now();
+    bool done = false;
+    while (!done) {
+        auto now = PoolImpl().now();
 
-    auto timers = _timers;
+        auto timers = _timers;
 
-    for (auto&& x : timers) {
-        if (_timers.count(x) && (x->_expiration <= now)) {
-            x->_cb();
+        done = true;
+
+        for (auto&& x : timers) {
+            if (_timers.count(x) && (x->_expiration <= now)) {
+                done = false;
+                x->_cb();
+            }
         }
     }
 }
 
 std::set<TimerImpl*> TimerImpl::_timers;
 
-ConnectionImpl::ConnectionImpl(const HostAndPort& hostAndPort, size_t generation, PoolImpl* global)
+ConnectionImpl::ConnectionImpl(const HostAndPort& hostAndPort,
+                               size_t generation,
+                               PoolImpl* global,
+                               ConnectionPool::ConnectionIterator iter)
     : _hostAndPort(hostAndPort),
       _timer(global),
       _global(global),
       _id(_idCounter++),
-      _generation(generation) {}
+      _generation(generation),
+      _iter(iter) {}
 
 void ConnectionImpl::indicateUsed() {
     _lastUsed = _global->now();
@@ -116,7 +126,9 @@ void ConnectionImpl::pushSetup(PushSetupCallback status) {
     _pushSetupQueue.push_back(status);
 
     if (_setupQueue.size()) {
-        _setupQueue.front()->_setupCallback(_setupQueue.front(), _pushSetupQueue.front()());
+        _setupQueue.front()->indicateUsed();
+        _setupQueue.front()->indicateSuccess();
+        _setupQueue.front()->_setupCallback(_setupQueue.front()->_iter, _pushSetupQueue.front()());
         _setupQueue.pop_front();
         _pushSetupQueue.pop_front();
     }
@@ -130,7 +142,10 @@ void ConnectionImpl::pushRefresh(PushRefreshCallback status) {
     _pushRefreshQueue.push_back(status);
 
     if (_refreshQueue.size()) {
-        _refreshQueue.front()->_refreshCallback(_refreshQueue.front(), _pushRefreshQueue.front()());
+        _refreshQueue.front()->indicateUsed();
+        _refreshQueue.front()->indicateSuccess();
+        _refreshQueue.front()->_refreshCallback(_refreshQueue.front()->_iter,
+                                                _pushRefreshQueue.front()());
         _refreshQueue.pop_front();
         _pushRefreshQueue.pop_front();
     }
@@ -160,13 +175,15 @@ void ConnectionImpl::setup(Milliseconds timeout, SetupCallback cb) {
     _setupCallback = std::move(cb);
 
     _timer.setTimeout(timeout, [this] {
-        _setupCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
+        _setupCallback(_iter, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
     });
 
     _setupQueue.push_back(this);
 
     if (_pushSetupQueue.size()) {
-        _setupQueue.front()->_setupCallback(_setupQueue.front(), _pushSetupQueue.front()());
+        _setupQueue.front()->indicateUsed();
+        _setupQueue.front()->indicateSuccess();
+        _setupQueue.front()->_setupCallback(_setupQueue.front()->_iter, _pushSetupQueue.front()());
         _setupQueue.pop_front();
         _pushSetupQueue.pop_front();
     }
@@ -176,13 +193,16 @@ void ConnectionImpl::refresh(Milliseconds timeout, RefreshCallback cb) {
     _refreshCallback = std::move(cb);
 
     _timer.setTimeout(timeout, [this] {
-        _refreshCallback(this, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
+        _refreshCallback(_iter, Status(ErrorCodes::ExceededTimeLimit, "timeout"));
     });
 
     _refreshQueue.push_back(this);
 
     if (_pushRefreshQueue.size()) {
-        _refreshQueue.front()->_refreshCallback(_refreshQueue.front(), _pushRefreshQueue.front()());
+        _refreshQueue.front()->indicateUsed();
+        _refreshQueue.front()->indicateSuccess();
+        _refreshQueue.front()->_refreshCallback(_refreshQueue.front()->_iter,
+                                                _pushRefreshQueue.front()());
         _refreshQueue.pop_front();
         _pushRefreshQueue.pop_front();
     }
@@ -198,9 +218,10 @@ std::deque<ConnectionImpl*> ConnectionImpl::_setupQueue;
 std::deque<ConnectionImpl*> ConnectionImpl::_refreshQueue;
 size_t ConnectionImpl::_idCounter = 1;
 
-std::unique_ptr<ConnectionPool::ConnectionInterface> PoolImpl::makeConnection(
-    const HostAndPort& hostAndPort, size_t generation) {
-    return stdx::make_unique<ConnectionImpl>(hostAndPort, generation, this);
+void PoolImpl::makeConnection(const HostAndPort& hostAndPort,
+                              size_t generation,
+                              ConnectionPool::ConnectionIterator iter) {
+    iter->second = stdx::make_unique<ConnectionImpl>(hostAndPort, generation, this, iter);
 }
 
 std::unique_ptr<ConnectionPool::TimerInterface> PoolImpl::makeTimer() {
@@ -208,7 +229,7 @@ std::unique_ptr<ConnectionPool::TimerInterface> PoolImpl::makeTimer() {
 }
 
 Date_t PoolImpl::now() {
-    return _now.get_value_or(Date_t::now());
+    return _now.get();
 }
 
 void PoolImpl::setNow(Date_t now) {

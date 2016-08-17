@@ -73,7 +73,12 @@ private:
  */
 class ASIOConnection final : public ConnectionPool::ConnectionInterface {
 public:
-    ASIOConnection(const HostAndPort& hostAndPort, size_t generation, ASIOImpl* global);
+    ASIOConnection(const HostAndPort& hostAndPort,
+                   size_t generation,
+                   ASIOImpl* global,
+                   ConnectionPool::ConnectionIterator iter);
+
+    ~ASIOConnection();
 
     void indicateSuccess() override;
     void indicateUsed() override;
@@ -98,7 +103,8 @@ private:
 
     size_t getGeneration() const override;
 
-    static std::unique_ptr<NetworkInterfaceASIO::AsyncOp> makeAsyncOp(ASIOConnection* conn);
+    static std::unique_ptr<NetworkInterfaceASIO::AsyncOp> makeAsyncOp(
+        ASIOConnection* conn, ConnectionPool::ConnectionIterator iter);
     static Message makeIsMasterRequest(ASIOConnection* conn);
 
 private:
@@ -111,6 +117,7 @@ private:
     size_t _generation;
     std::unique_ptr<NetworkInterfaceASIO::AsyncOp> _impl;
     ASIOTimer _timer;
+    ConnectionPool::ConnectionIterator _iterator;
 };
 
 /**
@@ -122,8 +129,9 @@ class ASIOImpl final : public ConnectionPool::DependentTypeFactoryInterface {
 public:
     ASIOImpl(NetworkInterfaceASIO* impl);
 
-    std::unique_ptr<ConnectionPool::ConnectionInterface> makeConnection(
-        const HostAndPort& hostAndPort, size_t generation) override;
+    void makeConnection(const HostAndPort& hostAndPort,
+                        size_t generation,
+                        ConnectionPool::ConnectionIterator iter) override;
     std::unique_ptr<ConnectionPool::TimerInterface> makeTimer() override;
 
     Date_t now() override;

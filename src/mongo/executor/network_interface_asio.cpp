@@ -99,11 +99,11 @@ std::string NetworkInterfaceASIO::_getDiagnosticString_inlock(AsyncOp* currentOp
         rows.push_back(AsyncOp::kFieldLabels);
 
         // Push AsyncOps
-        for (auto&& kv : _inProgress) {
-            auto row = kv.first->getStringFields();
+        for (auto&& op : _inProgress) {
+            auto row = op->getStringFields();
             if (currentOp) {
                 // If this is the AsyncOp we blew up on, mark with an asterisk
-                if (*currentOp == *(kv.first)) {
+                if (*currentOp == *op) {
                     row[0] = "*";
                 }
             }
@@ -145,6 +145,14 @@ std::string NetworkInterfaceASIO::getHostName() {
 }
 
 void NetworkInterfaceASIO::startup() {
+    stdx::lock_guard<stdx::mutex> lk(_executorMutex);
+
+    if (_state.load() == State::kRunning) {
+        return;
+    }
+
+    _connectionPool.start();
+
     _serviceRunners.resize(kIOServiceWorkers);
     for (std::size_t i = 0; i < kIOServiceWorkers; ++i) {
         _serviceRunners[i] = stdx::thread([this, i]() {
@@ -165,7 +173,18 @@ void NetworkInterfaceASIO::startup() {
 }
 
 void NetworkInterfaceASIO::shutdown() {
-    _state.store(State::kShutdown);
+    {
+        stdx::lock_guard<stdx::mutex> lk(_executorMutex);
+
+        if (_state.load() == State::kShutdown) {
+            return;
+        }
+
+        _state.store(State::kShutdown);
+    }
+
+    _connectionPool.shutdown();
+
     _io_service.stop();
     for (auto&& worker : _serviceRunners) {
         worker.join();
@@ -244,8 +263,9 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
                                           const RemoteCommandCompletionFn& onFinish) {
     MONGO_ASIO_INVARIANT(onFinish, "Invalid completion function");
     {
+        auto key = GetConnectionMap::HashedKey(&cbHandle);
         stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
-        const auto insertResult = _inGetConnection.emplace(cbHandle);
+        const auto insertResult = _inGetConnection.try_emplace(key, true);
         // We should never see the same CallbackHandle added twice
         MONGO_ASIO_INVARIANT_INLOCK(insertResult.second, "Same CallbackHandle added twice");
     }
@@ -272,8 +292,9 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
 
             bool wasPreviouslyCanceled = false;
             {
+                auto key = GetConnectionMap::HashedKey(&cbHandle);
                 stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
-                wasPreviouslyCanceled = _inGetConnection.erase(cbHandle) == 0;
+                wasPreviouslyCanceled = _inGetConnection.erase(key) == 0;
             }
 
             Status status = wasPreviouslyCanceled
@@ -288,27 +309,6 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
 
         AsyncOp* op = nullptr;
 
-        stdx::unique_lock<stdx::mutex> lk(_inProgressMutex);
-
-        const auto eraseCount = _inGetConnection.erase(cbHandle);
-
-        // If we didn't find the request, we've been canceled
-        if (eraseCount == 0) {
-            lk.unlock();
-
-            onFinish({ErrorCodes::CallbackCanceled,
-                      "Callback canceled",
-                      now() - getConnectionStartTime});
-
-            // Though we were canceled, we know that the stream is fine, so indicate success.
-            conn->indicateSuccess();
-
-            signalWorkAvailable();
-
-            return;
-        }
-
-        // We can't release the AsyncOp until we know we were not canceled.
         auto ownedOp = conn->releaseAsyncOp();
         op = ownedOp.get();
 
@@ -319,9 +319,9 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
         MONGO_ASIO_INVARIANT_INLOCK(!op->timedOut(), "AsyncOp has dirty timeout flag", op);
         op->clearStateTransitions();
 
-        // Now that we're inProgress, an external cancel can touch our op, but
-        // not until we release the inProgressMutex.
-        _inProgress.emplace(op, std::move(ownedOp));
+        std::list<std::unique_ptr<AsyncOp>> currentOpHolder;
+        currentOpHolder.emplace_front(std::move(ownedOp));
+        op->getHandle() = currentOpHolder.begin();
 
         op->_cbHandle = std::move(cbHandle);
         op->_request = std::move(request);
@@ -329,9 +329,7 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
         op->_connectionPoolHandle = std::move(swConn.getValue());
         op->startProgress(getConnectionStartTime);
 
-        // This ditches the lock and gets us onto the strand (so we're
-        // threadsafe)
-        op->_strand.post([this, op, getConnectionStartTime] {
+        auto next = [this, op, getConnectionStartTime] {
             // Set timeout now that we have the correct request object
             if (op->_request.timeout != RemoteCommandRequest::kNoTimeout) {
                 // Subtract the time it took to get the connection from the pool from the request
@@ -391,20 +389,53 @@ Status NetworkInterfaceASIO::startCommand(const TaskExecutor::CallbackHandle& cb
             }
 
             _beginCommunication(op);
-        });
+        };
+
+        {
+            auto key = GetConnectionMap::HashedKey(&cbHandle);
+            stdx::unique_lock<stdx::mutex> lk(_inProgressMutex);
+
+            const auto eraseCount = _inGetConnection.erase(key);
+
+            // If we didn't find the request, we've been canceled
+            if (eraseCount == 0) {
+                lk.unlock();
+
+                onFinish({ErrorCodes::CallbackCanceled,
+                          "Callback canceled",
+                          now() - getConnectionStartTime});
+
+                conn->bindAsyncOp(std::move(currentOpHolder.front()));
+
+                // Though we were canceled, we know that the stream is fine, so indicate success.
+                conn->indicateSuccess();
+
+                signalWorkAvailable();
+
+                return;
+            }
+
+            _inProgress.splice(_inProgress.begin(), currentOpHolder);
+        }
+
+        // This ditches the lock and gets us onto the strand (so we're
+        // threadsafe)
+        op->_strand.post(next);
     };
 
     _connectionPool.get(request.target, request.timeout, nextStep);
+
     return Status::OK();
 }
 
 void NetworkInterfaceASIO::cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) {
+    auto key = GetConnectionMap::HashedKey(&cbHandle);
     stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
 
     // If we found a matching cbHandle in _inGetConnection, then
     // simply removing it has the same effect as cancelling it, so we
     // can just return.
-    if (_inGetConnection.erase(cbHandle) != 0) {
+    if (_inGetConnection.erase(key) != 0) {
         _numCanceledOps.fetchAndAdd(1);
         return;
     }
@@ -414,9 +445,9 @@ void NetworkInterfaceASIO::cancelCommand(const TaskExecutor::CallbackHandle& cbH
     // unordered_map by pointer, but here we only have the
     // callback. We could keep two data structures at the risk of
     // having them diverge.
-    for (auto&& kv : _inProgress) {
-        if (kv.first->cbHandle() == cbHandle) {
-            kv.first->cancel();
+    for (auto&& op : _inProgress) {
+        if (op->cbHandle() == cbHandle) {
+            op->cancel();
             _numCanceledOps.fetchAndAdd(1);
             break;
         }
@@ -428,8 +459,8 @@ void NetworkInterfaceASIO::cancelAllCommands() {
     {
         stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
         _inGetConnection.swap(newInGetConnection);
-        for (auto&& kv : _inProgress) {
-            kv.first->cancel();
+        for (auto&& op : _inProgress) {
+            op->cancel();
         }
         _numCanceledOps.fetchAndAdd(_inProgress.size());
     }

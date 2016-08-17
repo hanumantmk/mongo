@@ -29,10 +29,13 @@
 
 #include "mongo/executor/connection_pool_test_fixture.h"
 
+#include <boost/optional.hpp>
+
 #include "mongo/executor/connection_pool.h"
 #include "mongo/stdx/future.h"
 #include "mongo/stdx/memory.h"
 #include "mongo/unittest/unittest.h"
+#include "mongo/util/scopeguard.h"
 
 namespace mongo {
 namespace executor {
@@ -41,7 +44,10 @@ namespace connection_pool_test_details {
 class ConnectionPoolTest : public unittest::Test {
 public:
 protected:
-    void setUp() override {}
+    void setUp() override {
+        now = Date_t::now();
+        PoolImpl::setNow(now);
+    }
 
     void tearDown() override {
         ConnectionImpl::clear();
@@ -49,8 +55,11 @@ protected:
     }
 
     void doneWith(const ConnectionPool::ConnectionHandle& swConn) {
+        static_cast<ConnectionImpl*>(swConn.get())->indicateUsed();
         static_cast<ConnectionImpl*>(swConn.get())->indicateSuccess();
     }
+
+    Date_t now;
 
 private:
 };
@@ -67,6 +76,8 @@ private:
  */
 TEST_F(ConnectionPoolTest, SameConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Grab and stash an id for the first request
     size_t conn1Id = 0;
@@ -99,6 +110,8 @@ TEST_F(ConnectionPoolTest, SameConn) {
  */
 TEST_F(ConnectionPoolTest, FailedConnDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Grab the first connection and indicate that it failed
     size_t conn1Id = 0;
@@ -132,6 +145,8 @@ TEST_F(ConnectionPoolTest, FailedConnDifferentConn) {
  */
 TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Conn 1 from port 30000
     size_t conn1Id = 0;
@@ -164,6 +179,8 @@ TEST_F(ConnectionPoolTest, DifferentHostDifferentConn) {
  */
 TEST_F(ConnectionPoolTest, DifferentConnWithoutReturn) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Get the first connection, move it out rather than letting it return
     ConnectionPool::ConnectionHandle conn1;
@@ -200,12 +217,10 @@ TEST_F(ConnectionPoolTest, DifferentConnWithoutReturn) {
  */
 TEST_F(ConnectionPoolTest, TimeoutOnSetup) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     bool notOk = false;
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
 
     pool.get(HostAndPort(),
              Milliseconds(5000),
@@ -236,9 +251,8 @@ TEST_F(ConnectionPoolTest, refreshHappens) {
     options.refreshRequirement = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
 
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Get a connection
     ConnectionImpl::pushSetup(Status::OK());
@@ -271,10 +285,8 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     options.refreshRequirement = Milliseconds(1000);
     options.refreshTimeout = Milliseconds(2000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     size_t conn1Id = 0;
 
@@ -301,7 +313,7 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
 
     // This should trigger a refresh, but not time it out. So now we have one
     // connection sitting in refresh.
-    PoolImpl::setNow(now + Milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(2100));
     bool reachedA = false;
 
     // This will wait because we have a refreshing connection, so it'll wait to
@@ -317,7 +329,7 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     ASSERT(!reachedA);
 
     // Let the refresh timeout
-    PoolImpl::setNow(now + Milliseconds(4000));
+    PoolImpl::setNow(now + Milliseconds(4100));
 
     bool reachedB = false;
 
@@ -339,6 +351,8 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
  */
 TEST_F(ConnectionPoolTest, requestsServedByUrgency) {
     ConnectionPool pool(stdx::make_unique<PoolImpl>());
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     bool reachedA = false;
     bool reachedB = false;
@@ -386,6 +400,8 @@ TEST_F(ConnectionPoolTest, maxPoolRespected) {
     options.minConnections = 1;
     options.maxConnections = 2;
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     ConnectionPool::ConnectionHandle conn1;
     ConnectionPool::ConnectionHandle conn2;
@@ -446,10 +462,8 @@ TEST_F(ConnectionPoolTest, minPoolRespected) {
     options.refreshRequirement = Milliseconds(1000);
     options.refreshTimeout = Milliseconds(2000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     ConnectionPool::ConnectionHandle conn1;
     ConnectionPool::ConnectionHandle conn2;
@@ -555,10 +569,8 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappens) {
     options.refreshTimeout = Milliseconds(5000);
     options.hostTimeout = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     size_t connId = 0;
 
@@ -576,7 +588,7 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappens) {
     ASSERT(reachedA);
 
     // Jump pass the hostTimeout
-    PoolImpl::setNow(now + Milliseconds(1000));
+    PoolImpl::setNow(now + Milliseconds(1100));
 
     bool reachedB = false;
 
@@ -604,10 +616,8 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensMoreGetsDelay) {
     options.refreshTimeout = Milliseconds(5000);
     options.hostTimeout = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     size_t connId = 0;
 
@@ -666,10 +676,8 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
     options.refreshTimeout = Milliseconds(5000);
     options.hostTimeout = Milliseconds(1000);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     ConnectionPool::ConnectionHandle conn1;
     size_t conn1Id = 0;
@@ -718,7 +726,7 @@ TEST_F(ConnectionPoolTest, hostTimeoutHappensCheckoutDelays) {
     conn1.reset();
 
     // expire the pool
-    PoolImpl::setNow(now + Milliseconds(2000));
+    PoolImpl::setNow(now + Milliseconds(2100));
 
     bool reachedB = false;
 
@@ -746,9 +754,8 @@ TEST_F(ConnectionPoolTest, dropConnections) {
     options.refreshRequirement = Seconds(1);
     options.refreshTimeout = Seconds(2);
     ConnectionPool pool(stdx::make_unique<PoolImpl>(), options);
-
-    auto now = Date_t::now();
-    PoolImpl::setNow(now);
+    pool.start();
+    auto guard = MakeGuard([&] { return pool.shutdown(); });
 
     // Grab the first connection id
     size_t conn1Id = 0;

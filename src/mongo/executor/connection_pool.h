@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include <list>
 #include <memory>
 #include <queue>
 #include <unordered_map>
@@ -36,6 +37,8 @@
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/net/hostandport.h"
+#include "mongo/util/net/hostandport_map.h"
+#include "mongo/util/string_map.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
@@ -59,12 +62,59 @@ class ConnectionPool {
     class ConnectionHandleDeleter;
     class SpecificPool;
 
+    enum class ConnectionState : uint8_t {
+        Ready,
+        Dropped,
+        Processing,
+        CheckedOut,
+        Unknown,
+    };
+
 public:
     class ConnectionInterface;
+
+    using ConnectionIterator =
+        std::list<std::pair<ConnectionState, std::unique_ptr<ConnectionInterface>>>::iterator;
+
     class DependentTypeFactoryInterface;
     class TimerInterface;
 
-    using ConnectionHandle = std::unique_ptr<ConnectionInterface, ConnectionHandleDeleter>;
+    class ConnectionHandle {
+    public:
+        ConnectionHandle();
+        ConnectionHandle(ConnectionPool* pool, ConnectionIterator conn);
+
+        ~ConnectionHandle();
+
+        ConnectionHandle(const ConnectionHandle&) = delete;
+        ConnectionHandle& operator=(const ConnectionHandle&) = delete;
+
+        ConnectionHandle(ConnectionHandle&&);
+        ConnectionHandle& operator=(ConnectionHandle&&);
+
+        ConnectionInterface* get() const;
+        void reset();
+
+        ConnectionInterface& operator*() const {
+            return *get();
+        }
+
+        ConnectionInterface* operator->() const {
+            return get();
+        }
+
+        explicit operator bool() const {
+            return _pool;
+        }
+
+        void release() {
+            _pool = nullptr;
+        }
+
+    private:
+        ConnectionPool* _pool;
+        ConnectionIterator _conn;
+    };
 
     using GetConnectionCallback = stdx::function<void(StatusWith<ConnectionHandle>)>;
 
@@ -114,14 +164,22 @@ public:
 
     ~ConnectionPool();
 
+    void start();
+
+    void shutdown();
+
     void dropConnections(const HostAndPort& hostAndPort);
 
     void get(const HostAndPort& hostAndPort, Milliseconds timeout, GetConnectionCallback cb);
 
+    StatusWith<ConnectionHandle> getSync(const HostAndPort& hostAndPort, Milliseconds timeout);
+
     void appendConnectionStats(ConnectionPoolStats* stats) const;
 
 private:
-    void returnConnection(ConnectionInterface* connection);
+    void returnConnection(ConnectionIterator connection);
+
+    void handlePeriodicTasks();
 
     // Options are set at startup and never changed at run time, so these are
     // accessed outside the lock
@@ -131,21 +189,10 @@ private:
 
     // The global mutex for specific pool access and the generation counter
     mutable stdx::mutex _mutex;
-    std::unordered_map<HostAndPort, std::unique_ptr<SpecificPool>> _pools;
-};
+    using PoolsMap = HostAndPortMap<SpecificPool*>;
+    PoolsMap _pools;
 
-class ConnectionPool::ConnectionHandleDeleter {
-public:
-    ConnectionHandleDeleter() = default;
-    ConnectionHandleDeleter(ConnectionPool* pool) : _pool(pool) {}
-
-    void operator()(ConnectionInterface* connection) {
-        if (_pool && connection)
-            _pool->returnConnection(connection);
-    }
-
-private:
-    ConnectionPool* _pool = nullptr;
+    std::unique_ptr<TimerInterface> _taskTimer;
 };
 
 /**
@@ -221,8 +268,8 @@ protected:
      * Making these protected makes the definitions available to override in
      * children.
      */
-    using SetupCallback = stdx::function<void(ConnectionInterface*, Status)>;
-    using RefreshCallback = stdx::function<void(ConnectionInterface*, Status)>;
+    using SetupCallback = stdx::function<void(ConnectionIterator, Status)>;
+    using RefreshCallback = stdx::function<void(ConnectionIterator, Status)>;
 
 private:
     /**
@@ -286,8 +333,9 @@ public:
     /**
      * Makes a new connection given a host and port
      */
-    virtual std::unique_ptr<ConnectionInterface> makeConnection(const HostAndPort& hostAndPort,
-                                                                size_t generation) = 0;
+    virtual void makeConnection(const HostAndPort& hostAndPort,
+                                size_t generation,
+                                ConnectionIterator iter) = 0;
 
     /**
      * Makes a new timer

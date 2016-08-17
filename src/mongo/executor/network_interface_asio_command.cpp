@@ -342,13 +342,14 @@ void NetworkInterfaceASIO::_completeOperation(AsyncOp* op, ResponseStatus resp) 
     {
         stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
 
-        auto iter = _inProgress.find(op);
+        auto iter = op->getHandle();
 
         MONGO_ASIO_INVARIANT_INLOCK(
             iter != _inProgress.end(), "Could not find AsyncOp in _inProgress", op);
 
-        ownedOp = std::move(iter->second);
+        ownedOp = std::move(*iter);
         _inProgress.erase(iter);
+        op->getHandle() = _inProgress.end();
     }
 
     op->finish(resp);

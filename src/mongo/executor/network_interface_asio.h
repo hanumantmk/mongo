@@ -49,6 +49,8 @@
 #include "mongo/executor/network_interface.h"
 #include "mongo/executor/remote_command_request.h"
 #include "mongo/executor/remote_command_response.h"
+#include "mongo/executor/task_executor.h"
+#include "mongo/executor/task_executor_callback_handle_map.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/rpc/metadata/metadata_hook.h"
 #include "mongo/rpc/protocol.h"
@@ -71,16 +73,16 @@ class ASIOImpl;
 
 class AsyncStreamInterface;
 
-#define MONGO_ASIO_INVARIANT(_Expression, ...)              \
-    do {                                                    \
-        if (MONGO_unlikely(!(_Expression))) {               \
-            _failWithInfo(__FILE__, __LINE__, __VA_ARGS__); \
-        }                                                   \
+#define MONGO_ASIO_INVARIANT(_Expression, ...)               \
+    do {                                                     \
+        if (kDebugBuild && MONGO_unlikely(!(_Expression))) { \
+            _failWithInfo(__FILE__, __LINE__, __VA_ARGS__);  \
+        }                                                    \
     } while (false)
 
 #define MONGO_ASIO_INVARIANT_INLOCK(_Expression, ...)              \
     do {                                                           \
-        if (MONGO_unlikely(!(_Expression))) {                      \
+        if (kDebugBuild && MONGO_unlikely(!(_Expression))) {       \
             _failWithInfo_inlock(__FILE__, __LINE__, __VA_ARGS__); \
         }                                                          \
     } while (false)
@@ -346,6 +348,10 @@ private:
 
         bool operator==(const AsyncOp& other) const;
 
+        std::list<std::unique_ptr<AsyncOp>>::iterator& getHandle() {
+            return _handle;
+        }
+
     private:
         // Type to represent the internal id of this request.
         using AsyncOpId = uint64_t;
@@ -430,6 +436,7 @@ private:
         std::array<State, kMaxStateTransitions> _states;
 
         BSONObj _responseMetadata{};
+        std::list<std::unique_ptr<AsyncOp>>::iterator _handle;
     };
 
     void _startCommand(AsyncOp* op);
@@ -506,8 +513,10 @@ private:
     // If it is necessary to hold this lock while accessing a particular operation with
     // an AccessControl object, take this lock first, always.
     stdx::mutex _inProgressMutex;
-    std::unordered_map<AsyncOp*, std::unique_ptr<AsyncOp>> _inProgress;
-    std::unordered_set<TaskExecutor::CallbackHandle> _inGetConnection;
+    std::list<std::unique_ptr<AsyncOp>> _inProgress;
+
+    using GetConnectionMap = TaskExecutorCallbackHandleMap<bool>;
+    GetConnectionMap _inGetConnection;
 
     // Operation counters
     AtomicUInt64 _numCanceledOps;
