@@ -48,7 +48,7 @@ inline int UnorderedFastKeyTable<K_L, K_S, V, Traits>::Area::find(const HashedKe
             // space is empty
             if (firstEmpty && *firstEmpty == -1)
                 *firstEmpty = pos;
-            if (!_entries[pos].hasEverUsed())
+            if (!_entries[pos].wasEverUsed())
                 return -1;
             continue;
         }
@@ -106,7 +106,7 @@ inline UnorderedFastKeyTable<K_L, K_S, V, Traits>::UnorderedFastKeyTable(
 }
 
 template <typename K_L, typename K_S, typename V, typename Traits>
-inline auto UnorderedFastKeyTable<K_L, K_S, V, Traits>::get(const HashedKey& key) -> V& {
+inline V& UnorderedFastKeyTable<K_L, K_S, V, Traits>::get(const HashedKey& key) {
     return try_emplace(key).first->second;
 }
 
@@ -148,15 +148,18 @@ inline auto UnorderedFastKeyTable<K_L, K_S, V, Traits>::try_emplace(const Hashed
     for (int numGrowTries = 0; numGrowTries < 5; numGrowTries++) {
         int firstEmpty = -1;
         int pos = _area.find(key, &firstEmpty);
-        if (pos >= 0)
+        if (pos >= 0) {
+            // This is only possible the first pass through the loop, since you're allocating space
+            // for a new element after that.
+            dassert(numGrowTries == 0);
             return {iterator(&_area, pos), false};
+        }
 
         // key not in map
         // need to add
         if (firstEmpty >= 0) {
             _size++;
-            _area._entries[firstEmpty].emplaceData(
-                key, Traits::toStorage(key.key()), V(std::forward<Args>(args)...));
+            _area._entries[firstEmpty].emplaceData(key, std::forward<Args>(args)...);
             return {iterator(&_area, firstEmpty), true};
         }
 
