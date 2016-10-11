@@ -277,15 +277,18 @@ MozJSImplScope::MozRuntime::MozRuntime(const MozJSScriptEngine* engine) {
         uassert(ErrorCodes::JSInterpreterFailure, "Failed to initialize JSRuntime", _runtime);
 
         // We turn on a variety of optimizations if the jit is enabled
-        if (engine->isJITEnabled()) {
-            JS::RuntimeOptionsRef(_runtime)
-                .setAsmJS(true)
-                .setThrowOnAsmJSValidationFailure(true)
-                .setBaseline(true)
-                .setIon(true)
-                .setAsyncStack(false)
-                .setNativeRegExp(true);
-        }
+        bool isJITEnabled = engine->isJITEnabled();
+
+        JS::RuntimeOptionsRef(_runtime)
+            .setAsmJS(isJITEnabled)
+            .setThrowOnAsmJSValidationFailure(isJITEnabled)
+            .setBaseline(isJITEnabled)
+            .setIon(isJITEnabled)
+            .setAsyncStack(true)
+            .setNativeRegExp(true);
+
+        // Disable signals so that interrupts are sane
+        JS_SetGlobalJitCompilerOption(_runtime, JSJITCOMPILER_SIGNALS_ENABLE, 0);
 
         const StackLocator locator;
         const auto available = locator.available();
