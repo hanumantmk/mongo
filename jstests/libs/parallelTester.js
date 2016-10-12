@@ -226,7 +226,11 @@ if (typeof _threadInject != "undefined") {
         // prefix the first thread with the serialTests
         // (which we will exclude from the rest of the threads below)
         params[0] = serialTestsArr;
-        var files = listFiles(parallelFilesDir);
+//        var files = listFiles(parallelFilesDir);
+        var files = [];
+        for (var i = 0; i < 100; i++) {
+            files.push({ name : "jstests/core/mr_killop_" + i + ".js"});
+        }
         files = Array.shuffle(files);
 
         var i = 0;

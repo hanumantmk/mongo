@@ -3,7 +3,7 @@ load('jstests/libs/parallelTester.js');
 
 Random.setRandomSeed();
 
-var params = ParallelTester.createJstestsLists(4);
+var params = ParallelTester.createJstestsLists(100);
 var t = new ParallelTester();
 for (i in params) {
     t.add(ParallelTester.fileTester, params[i]);
