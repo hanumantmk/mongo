@@ -356,6 +356,14 @@ void ConnectionPool::SpecificPool::returnConnection(ConnectionInterface* connPtr
                                  return;
                              }
 
+                             // If we've exceeded the time limit, start a new connect, rather than
+                             // failing all operations.  We do this because the various callers have
+                             // their own time limit which is unrelated to our internal one.
+                             if (status.code() == ErrorCodes::ExceededTimeLimit) {
+                                 fulfillRequests(lk);
+                                 return;
+                             }
+
                              // Otherwise pass the failure on through
                              processFailure(status, std::move(lk));
                          });
@@ -539,6 +547,11 @@ void ConnectionPool::SpecificPool::spawnConnections(stdx::unique_lock<stdx::mute
                                // connection lapse
                            } else if (status.isOK()) {
                                addToReady(lk, std::move(conn));
+                           } else if (status.code() == ErrorCodes::ExceededTimeLimit) {
+                               // If we've exceeded the time limit, restart the connect, rather than
+                               // failing all operations.  We do this because the various callers
+                               // have their own time limit which is unrelated to our internal one.
+                               fulfillRequests(lk);
                            } else {
                                // If the setup failed, cascade the failure edge
                                processFailure(status, std::move(lk));

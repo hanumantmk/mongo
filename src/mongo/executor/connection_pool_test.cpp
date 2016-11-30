@@ -308,7 +308,7 @@ TEST_F(ConnectionPoolTest, refreshTimeoutHappens) {
     // see if that pans out. In this case, we'll get a failure on timeout.
     ConnectionImpl::pushSetup(Status::OK());
     pool.get(HostAndPort(),
-             Milliseconds(10000),
+             Milliseconds(1000),
              [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
                  ASSERT(!swConn.isOK());
 
@@ -828,6 +828,83 @@ TEST_F(ConnectionPoolTest, dropConnections) {
              });
 
     ASSERT(reachedB);
+}
+
+/**
+ * Verify that timeouts during setup don't prematurely time out the request
+ */
+TEST_F(ConnectionPoolTest, SetupTimeoutsDontTimeoutRequests) {
+    ConnectionPool::Options options;
+
+    options.maxConnections = 1;
+    options.refreshTimeout = Seconds(1);
+    ConnectionPool pool(stdx::make_unique<PoolImpl>(), "test pool", options);
+
+    auto now = Date_t::now();
+    PoolImpl::setNow(now);
+
+    boost::optional<StatusWith<ConnectionPool::ConnectionHandle>> conn;
+    pool.get(HostAndPort(), Seconds(10), [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+        conn = std::move(swConn);
+    });
+
+    // initially we haven't called our callback
+    ASSERT(!conn);
+
+    // After 2 seconds (so the setup has failed), we still haven't called our callback
+    PoolImpl::setNow(now + Seconds(2));
+    ASSERT(!conn);
+
+    // Now we've finally timed out
+    PoolImpl::setNow(now + Seconds(11));
+    ASSERT(conn);
+    ASSERT(!conn->isOK());
+    ASSERT(conn->getStatus().code() == ErrorCodes::ExceededTimeLimit);
+}
+
+/**
+ * Verify that timeouts during refresh don't prematurely time out the request
+ */
+TEST_F(ConnectionPoolTest, RefreshTimeoutsDontTimeoutRequests) {
+    ConnectionPool::Options options;
+
+    options.maxConnections = 1;
+    options.refreshTimeout = Seconds(1);
+    options.refreshRequirement = Seconds(2);
+    ConnectionPool pool(stdx::make_unique<PoolImpl>(), "test pool", options);
+
+    auto now = Date_t::now();
+    PoolImpl::setNow(now);
+
+    // Successfully get a new connection
+    size_t conn1Id = 0;
+    ConnectionImpl::pushSetup(Status::OK());
+    pool.get(HostAndPort(), Seconds(1), [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+        conn1Id = CONN2ID(swConn);
+        doneWith(swConn.getValue());
+    });
+    ASSERT(conn1Id);
+
+    // Force it into refresh
+    PoolImpl::setNow(now + Seconds(2));
+
+    boost::optional<StatusWith<ConnectionPool::ConnectionHandle>> conn;
+    pool.get(HostAndPort(), Seconds(10), [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+        conn = std::move(swConn);
+    });
+
+    // initially we haven't called our callback
+    ASSERT(!conn);
+
+    // 3 seconds later we've triggered a refresh and still haven't called the callback
+    PoolImpl::setNow(now + Seconds(5));
+    ASSERT(!conn);
+
+    // Now we've finally timed out
+    PoolImpl::setNow(now + Seconds(13));
+    ASSERT(conn);
+    ASSERT(!conn->isOK());
+    ASSERT(conn->getStatus().code() == ErrorCodes::ExceededTimeLimit);
 }
 
 }  // namespace connection_pool_test_details
