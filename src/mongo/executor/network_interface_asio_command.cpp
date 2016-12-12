@@ -463,6 +463,16 @@ void NetworkInterfaceASIO::_runConnectionHook(AsyncOp* op) {
             *_hook, &NetworkConnectionHook::handleReply, op->request().target, std::move(response));
 
         if (!handleStatus.isOK()) {
+            // We can immediately return ExceededTimeLimit from our network hook in sharding because
+            // of a fail point we set in max_time_ms_sharded.js.  We need to trap it and convert it
+            // to a non-exceeded time limit during connect so that we don't spin on retry.
+            if (handleStatus.code() == ErrorCodes::ExceededTimeLimit) {
+                return _completeOperation(op,
+                                          Status(ErrorCodes::CommandFailed,
+                                                 str::stream() << "Connection hook failed with: "
+                                                               << handleStatus.toString()));
+            }
+
             return _completeOperation(op, handleStatus);
         }
 
