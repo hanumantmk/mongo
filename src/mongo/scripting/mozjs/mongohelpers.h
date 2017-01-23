@@ -48,6 +48,7 @@ struct MongoHelpersInfo : public BaseInfo {
 };
 
 std::string parseJSFunctionOrExpression(JSContext* cx, StringData input);
+std::string transpileJS(JSContext* cx, StringData input);
 
 }  // namespace mozjs
 }  // namespace mongo

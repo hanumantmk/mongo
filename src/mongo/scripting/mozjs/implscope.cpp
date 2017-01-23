@@ -423,6 +423,7 @@ MozJSImplScope::MozJSImplScope(MozJSScriptEngine* engine)
     // install global utility functions
     installGlobalUtils(*this);
     _mongoHelpersProto.install(_global);
+    _hasBabel = true;
 
     // install process-specific utilities in the global scope (dependancy: types.js, assert.js)
     if (_engine->getScopeInitCallback())
@@ -703,6 +704,14 @@ bool MozJSImplScope::exec(StringData code,
     setCompileOptions(&co);
     co.setFileAndLine(name.c_str(), 1);
     JS::RootedScript script(_context);
+
+    std::string codeTmp;
+    if (_hasBabel) {
+        try {
+            codeTmp = transpileJS(_context, code);
+            code = StringData(codeTmp);
+        } catch (...) {}
+    }
 
     bool success = JS::Compile(_context, co, code.rawData(), code.size(), &script);
 

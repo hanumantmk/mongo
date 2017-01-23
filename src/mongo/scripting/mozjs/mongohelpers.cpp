@@ -64,6 +64,18 @@ std::string parseJSFunctionOrExpression(JSContext* cx, const StringData input) {
     return ValueWriter(cx, jsStrOut).toString();
 }
 
+std::string transpileJS(JSContext* cx, const StringData input) {
+    JS::RootedValue jsStrOut(cx);
+    JS::RootedValue jsStrIn(cx);
+
+    ValueReader(cx, &jsStrIn).fromStringData(input);
+    ObjectWrapper helpersWrapper(cx, getScope(cx)->getProto<MongoHelpersInfo>().getProto());
+
+    helpersWrapper.callMethod("ES2015_to_ES5", JS::HandleValueArray(jsStrIn), &jsStrOut);
+
+    return ValueWriter(cx, jsStrOut).toString();
+}
+
 void MongoHelpersInfo::postInstall(JSContext* cx, JS::HandleObject global, JS::HandleObject proto) {
     ObjectWrapper protoWrapper(cx, proto);
     ObjectWrapper globalWrapper(cx, global);

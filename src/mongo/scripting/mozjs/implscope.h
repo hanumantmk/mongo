@@ -382,6 +382,7 @@ private:
     std::string _parentStack;
     std::size_t _generation;
     bool _hasOutOfMemoryException;
+    bool _hasBabel = false;
 
     WrapType<BinDataInfo> _binDataProto;
     WrapType<BSONInfo> _bsonProto;
