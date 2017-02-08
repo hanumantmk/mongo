@@ -300,11 +300,13 @@ mongodLibDeps = [
     'rpc/rpc',
     's/commands/shared_cluster_commands',
     'transport/service_entry_point_utils',
+    'transport/transport_layer_inproc',
     'transport/transport_layer_legacy',
     'util/clock_sources',
     'util/fail_point',
     'util/ntservice',
     'util/version_impl',
+    '$BUILD_DIR/third_party/shim_mongoc',
 ]
 
 if has_option('use-cpu-profiler'):
@@ -319,7 +321,21 @@ mongod = env.Program(
     ] + env.WindowsResourceFile("db/db.rc"),
     LIBDEPS=mongodLibDeps,
 )
+
+env.InjectThirdPartyIncludePaths(libraries=['mongoc'])
+
+libmongod = env.Program(
+    target="libmongod",
+    source=[
+        "db/lib.cpp",
+        "db/mongod_options_init.cpp",
+        "db/service_entry_point_mongod.cpp",
+    ] + env.WindowsResourceFile("db/db.rc"),
+    LIBDEPS=mongodLibDeps,
+)
+
 env.Default(env.Install('#/', mongod))
+env.Default(env.Install('#/', libmongod))
 
 # tools
 rewrittenTools = [ "mongodump", "mongorestore", "mongoexport", "mongoimport", "mongostat", "mongotop", "bsondump", "mongofiles", "mongooplog" ]

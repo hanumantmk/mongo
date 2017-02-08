@@ -373,6 +373,7 @@ Status validateBSONIterative(Buffer* buffer) {
             case ValidationState::EndObj: {
                 int actualLength = buffer->position() - curr->startPosition();
                 if (actualLength != curr->expectedSize) {
+                    invariant(false);
                     return makeError(
                         "bson length doesn't match what we found", idElem, StringData());
                 }

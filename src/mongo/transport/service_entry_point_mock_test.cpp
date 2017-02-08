@@ -41,7 +41,9 @@ namespace mongo {
 namespace {
 
 std::unique_ptr<ServiceEntryPoint> mockSEPFactory(transport::TransportLayer* tl) {
-    return stdx::make_unique<ServiceEntryPointMock>(tl);
+    auto x = stdx::make_unique<ServiceEntryPointMock>();
+    x->setTL(tl);
+    return x;
 }
 
 }  // namespace

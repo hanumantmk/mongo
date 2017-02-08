@@ -55,6 +55,11 @@ if True:
                    '#/src/third_party/mozjs' + mozjsSuffix + '/platform/' + env["TARGET_ARCH"] + "/" + env["TARGET_OS"] + "/include",
         ]))
 
+thirdPartyIncludePathList.append(
+    ('mongoc', ['#/src/third_party/mongo-c-driver-1.6.0/src/mongoc',
+                '#/src/third_party/mongo-c-driver-1.6.0/src/libbson/src/bson',
+    ]))
+
 if not use_system_version_of_library('stemmer'):
     thirdPartyIncludePathList.append(
         ('stemmer', '#/src/third_party/libstemmer_c/include'))
@@ -225,6 +230,19 @@ if usemozjs:
         source=[
             'shim_mozjs.cpp',
         ])
+
+mongocEnv = env.Clone()
+mongocEnv.SConscript('mongo-c-driver-1.6.0/SConscript', exports={'env' : mongocEnv })
+mongocEnv = mongocEnv.Clone(
+    LIBDEPS=[
+        'mongo-c-driver-1.6.0/mongoc',
+    ])
+
+mongocEnv.Library(
+    target="shim_mongoc",
+    source=[
+        'shim_mongoc.cpp',
+    ])
 
 gperftoolsEnv = env
 if (gperftoolsEnv['MONGO_ALLOCATOR'] == "tcmalloc"):

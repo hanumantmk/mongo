@@ -522,6 +522,24 @@ env.Library(
     ],
 )
 
+env.Library(
+    target="inproc_pipe",
+    source=[
+        'inproc_pipe.cpp',
+    ],
+    LIBDEPS=[
+        "$BUILD_DIR/mongo/base",
+    ],
+)
+
+env.CppUnitTest(
+    target='inproc_pipe_test',
+    source=['inproc_pipe_test.cpp'],
+    LIBDEPS=[
+        'inproc_pipe'
+    ],
+)
+
 env.CppUnitTest(
     target='secure_zero_memory_test',
     source=['secure_zero_memory_test.cpp'],

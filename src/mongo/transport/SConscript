@@ -60,6 +60,19 @@ env.Library(
 )
 
 env.Library(
+    target='transport_layer_inproc',
+    source=[
+        'transport_layer_inproc.cpp',
+    ],
+    LIBDEPS=[
+        'transport_layer_common',
+        '$BUILD_DIR/mongo/util/inproc_pipe',
+        '$BUILD_DIR/mongo/db/service_context',
+        '$BUILD_DIR/mongo/db/stats/counters',
+    ],
+)
+
+env.Library(
     target='service_entry_point_test_suite',
     source=[
         'service_entry_point_test_suite.cpp',
@@ -83,12 +96,34 @@ env.Library(
 )
 
 env.CppUnitTest(
-    target='service_entry_point_mock_test',
+    target='transport_layer_inproc_test',
+    source=[
+        'transport_layer_inproc_test.cpp',
+    ],
+    LIBDEPS=[
+        'service_entry_point_mock',
+        'transport_layer_inproc',
+    ],
+)
+
+env.Library(
+    target='service_entry_point_mock',
     source=[
         'service_entry_point_mock.cpp',
+    ],
+    LIBDEPS=[
+        "$BUILD_DIR/mongo/db/service_context",
+        'transport_layer_common',
+    ],
+)
+
+env.CppUnitTest(
+    target='service_entry_point_mock_test',
+    source=[
         'service_entry_point_mock_test.cpp',
     ],
     LIBDEPS=[
+        'service_entry_point_mock',
         'service_entry_point_test_suite',
     ],
 )

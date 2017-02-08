@@ -42,8 +42,8 @@ namespace mongo {
 
 using namespace transport;
 
-ServiceEntryPointMock::ServiceEntryPointMock(transport::TransportLayer* tl)
-    : _tl(tl), _inShutdown(false) {}
+ServiceEntryPointMock::ServiceEntryPointMock()
+    : _tl(nullptr), _inShutdown(false) {}
 
 ServiceEntryPointMock::~ServiceEntryPointMock() {
     {

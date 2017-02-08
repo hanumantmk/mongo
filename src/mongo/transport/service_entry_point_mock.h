@@ -49,7 +49,10 @@ class ServiceEntryPointMock : public ServiceEntryPoint {
     MONGO_DISALLOW_COPYING(ServiceEntryPointMock);
 
 public:
-    ServiceEntryPointMock(transport::TransportLayer* tl);
+    ServiceEntryPointMock();
+    void setTL(transport::TransportLayer* tl) {
+        _tl = tl;
+    }
 
     virtual ~ServiceEntryPointMock();
 
@@ -72,7 +75,7 @@ public:
 private:
     void run(transport::SessionHandle session);
 
-    transport::TransportLayer* _tl;
+    transport::TransportLayer* _tl = nullptr;
 
     stdx::mutex _shutdownLock;
     bool _inShutdown;
