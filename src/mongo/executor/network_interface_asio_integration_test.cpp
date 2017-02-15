@@ -158,6 +158,8 @@ private:
     PseudoRandom* _rng = nullptr;
 };
 
+#if 0
+
 TEST_F(NetworkInterfaceASIOIntegrationTest, Ping) {
     startNet();
     assertCommandOK("admin", BSON("ping" << 1));
@@ -183,6 +185,8 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, Timeouts) {
                                  << 1),
                     Milliseconds(10000000));
 }
+
+#endif
 
 class StressTestOp {
 public:
@@ -258,7 +262,10 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, StressTest) {
     ErrorCodes::Error expectedResults[numOps];
     CountdownLatch cl(numOps);
 
-    startNet();
+    NetworkInterfaceASIO::Options opts;
+    opts.connectionPoolOptions.refreshRequirement = Milliseconds{100};
+
+    startNet(std::move(opts));
 
     std::unique_ptr<SecureRandom> seedSource{SecureRandom::create()};
     auto seed = seedSource->nextInt64();
@@ -268,32 +275,35 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, StressTest) {
     randomNumberGenerator(&rng);
     log() << "Starting stress test...";
 
-    for (std::size_t i = 0; i < numOps; ++i) {
-        // stagger operations slightly to mitigate connection pool contention
-        sleepmillis(rng.nextInt32(50));
+    for (std::size_t t = 0; t < 10; ++t) {
+        for (std::size_t i = 0; i < numOps; ++i) {
+            // stagger operations slightly to mitigate connection pool contention
+    //        sleepmillis(rng.nextInt32(5));
 
-        auto r = rng.nextCanonicalDouble();
+    //        auto r = rng.nextCanonicalDouble();
 
-        auto cb = [&testResults, &cl, i](const RemoteCommandResponse& resp) {
-            testResults[i] = resp;
-            cl.countDown();
+            auto cb = [&testResults, &cl, i](const RemoteCommandResponse& resp) {
+                testResults[i] = resp;
+                cl.countDown();
+            };
+
+    //        if (r < .3) {
+    //            expectedResults[i] = ErrorCodes::CallbackCanceled;
+    //            StressTestOp::runCancelOp(this, cb);
+    //        } else if (r < .7) {
+                expectedResults[i] = ErrorCodes::OK;
+                StressTestOp::runCompleteOp(this, cb);
+    //        } else if (r < .99) {
+    //            expectedResults[i] = ErrorCodes::ExceededTimeLimit;
+    //            StressTestOp::runTimeoutOp(this, cb);
+    //        } else {
+    //            // Just a sprinkling of long ops, to mitigate connection pool contention
+    //            expectedResults[i] = ErrorCodes::OK;
+    //            StressTestOp::runLongOp(this, cb);
+    //        }
         };
-
-        if (r < .3) {
-            expectedResults[i] = ErrorCodes::CallbackCanceled;
-            StressTestOp::runCancelOp(this, cb);
-        } else if (r < .7) {
-            expectedResults[i] = ErrorCodes::OK;
-            StressTestOp::runCompleteOp(this, cb);
-        } else if (r < .99) {
-            expectedResults[i] = ErrorCodes::ExceededTimeLimit;
-            StressTestOp::runTimeoutOp(this, cb);
-        } else {
-            // Just a sprinkling of long ops, to mitigate connection pool contention
-            expectedResults[i] = ErrorCodes::OK;
-            StressTestOp::runLongOp(this, cb);
-        }
-    };
+        sleepmillis(500);
+    }
 
     cl.await();
 
@@ -302,7 +312,11 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, StressTest) {
         auto ec = resp.isOK() ? getStatusFromCommandResult(resp.data) : resp.status;
         ASSERT_EQ(ec, expectedResults[i]);
     }
+
+    sleepmillis(1000);
 }
+
+#if 0
 
 // Hook that intentionally never finishes
 class HangingHook : public executor::NetworkConnectionHook {
@@ -337,6 +351,8 @@ TEST_F(NetworkInterfaceASIOIntegrationTest, HookHangs) {
     assertCommandFailsOnClient(
         "admin", BSON("ping" << 1), Seconds(1), ErrorCodes::ExceededTimeLimit);
 }
+
+#endif
 
 }  // namespace
 }  // namespace executor

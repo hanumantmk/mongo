@@ -38,6 +38,7 @@
 #include "mongo/util/assert_util.h"
 #include "mongo/util/destructor_guard.h"
 #include "mongo/util/log.h"
+#include "mongo/util/pid_controller.h"
 #include "mongo/util/scopeguard.h"
 
 // One interesting implementation note herein concerns how setup() and
@@ -49,6 +50,10 @@
 
 namespace mongo {
 namespace executor {
+
+constexpr double Kp = 1.0;
+constexpr double Ki = 0.0;
+constexpr double Kd = 0.0;
 
 /**
  * A pool for a specific HostAndPort
@@ -127,6 +132,28 @@ private:
 
     void updateStateInLock();
 
+    double target() {
+        double currentValue = _readyPool.size() + _checkedOutPool.size() + _processingPool.size();
+        double setPoint = _requests.size() + _checkedOutPool.size();
+        double delta = _pidController.calculate(setPoint, currentValue, _parent->_factory->now());
+
+        double nt = currentValue + delta;
+
+        if (nt > _parent->_options.maxConnections) {
+            nt = _parent->_options.maxConnections;
+        }
+
+        if (nt < _parent->_options.minConnections) {
+            nt = _parent->_options.minConnections;
+        }
+
+        nt = std::floor(nt);
+
+        log() << "setPoint: " << setPoint << ", current value: " << currentValue << ", control signal: " << delta << ", new target: " << nt;
+
+        return nt;
+    };
+
 private:
     ConnectionPool* const _parent;
 
@@ -146,6 +173,8 @@ private:
     bool _inSpawnConnections;
 
     size_t _created;
+
+    PIDController _pidController;
 
     /**
      * The current state of the pool
@@ -256,6 +285,7 @@ ConnectionPool::SpecificPool::SpecificPool(ConnectionPool* parent, const HostAnd
       _inFulfillRequests(false),
       _inSpawnConnections(false),
       _created(0),
+      _pidController(parent->_options.maxConnections, parent->_options.minConnections, Kp, Kd, Ki),
       _state(State::kRunning) {}
 
 ConnectionPool::SpecificPool::~SpecificPool() {
@@ -324,8 +354,7 @@ void ConnectionPool::SpecificPool::returnConnection(ConnectionInterface* connPtr
     if (needsRefreshTP <= now) {
         // If we need to refresh this connection
 
-        if (_readyPool.size() + _processingPool.size() + _checkedOutPool.size() >=
-            _parent->_options.minConnections) {
+        if (_readyPool.size() + _processingPool.size() + _checkedOutPool.size() > target()) {
             // If we already have minConnections, just let the connection lapse
             return;
         }
@@ -516,13 +545,6 @@ void ConnectionPool::SpecificPool::spawnConnections(stdx::unique_lock<stdx::mute
 
     _inSpawnConnections = true;
     auto guard = MakeGuard([&] { _inSpawnConnections = false; });
-
-    // We want minConnections <= outstanding requests <= maxConnections
-    auto target = [&] {
-        return std::max(
-            _parent->_options.minConnections,
-            std::min(_requests.size() + _checkedOutPool.size(), _parent->_options.maxConnections));
-    };
 
     // While all of our inflight connections are less than our target
     while (_readyPool.size() + _processingPool.size() + _checkedOutPool.size() < target()) {
