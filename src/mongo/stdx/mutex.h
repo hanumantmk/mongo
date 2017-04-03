@@ -30,10 +30,81 @@
 
 #include <mutex>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
+
 namespace mongo {
 namespace stdx {
 
-using ::std::mutex;  // NOLINT
+#ifdef _WIN32
+class mutex {
+public:
+    using native_handle_type = PSRWLOCK;
+
+    constexpr mutex() noexcept = default;
+
+    mutex(const mutex&) = delete;
+    mutex& operator=(const mutex&) = delete;
+
+    void lock() {
+        AcquireSRWLockExclusive(&_impl);
+    }
+
+    bool try_lock() noexcept {
+        return TryAcquireSRWLockExclusive(&_impl);
+    }
+
+    void unlock() {
+        ReleaseSRWLockExclusive(&_impl);
+    }
+
+    native_handle_type native_handle() noexcept {
+        return &_impl;
+    }
+
+private:
+    SRWLock _impl = SRWLOCK_INIT;
+};
+#else
+class mutex {
+public:
+    using native_handle_type = pthread_mutex_t*;
+
+    constexpr mutex() noexcept = default;
+
+    mutex(const mutex&) = delete;
+    mutex& operator=(const mutex&) = delete;
+
+    ~mutex() {
+        pthread_mutex_destroy(&_impl);
+    }
+
+    void lock() {
+        int err = pthread_mutex_lock(&_impl);
+        if (err) {
+            throw std::system_error(err, std::system_category(), "failed mutex lock");
+        }
+    }
+
+    bool try_lock() noexcept {
+        return !pthread_mutex_trylock(&_impl);
+    }
+
+    void unlock() {
+        pthread_mutex_unlock(&_impl);
+    }
+
+    native_handle_type native_handle() noexcept {
+        return &_impl;
+    }
+
+private:
+    pthread_mutex_t _impl = PTHREAD_MUTEX_INITIALIZER;
+};
+#endif
 
 // NOTE: The timed_mutex class is currently banned in our code due to
 // a buggy implementation in GCC older than 4.9.
