@@ -612,6 +612,111 @@ TEST_F(ConnectionPoolTest, maxPoolRespected) {
 }
 
 /**
+ * Verify that we respect maxConnecting
+ */
+TEST_F(ConnectionPoolTest, maxConnectingRespected) {
+    ConnectionPool::Options options;
+    options.minConnections = 1;
+    options.maxConnecting = 2;
+    ConnectionPool pool(stdx::make_unique<PoolImpl>(), "test pool", options);
+
+    ConnectionPool::ConnectionHandle conn1;
+    ConnectionPool::ConnectionHandle conn2;
+    ConnectionPool::ConnectionHandle conn3;
+
+    // Make 3 requests, each which keep their connection (don't return it to
+    // the pool)
+    pool.get(HostAndPort(),
+             Milliseconds(3000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+
+                 conn3 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(2000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+
+                 conn2 = std::move(swConn.getValue());
+             });
+    pool.get(HostAndPort(),
+             Milliseconds(1000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+
+                 conn1 = std::move(swConn.getValue());
+             });
+
+    ASSERT_EQ(ConnectionImpl::setupQueueDepth(), 2u);
+    ConnectionImpl::pushSetup(Status::OK());
+    ASSERT_EQ(ConnectionImpl::setupQueueDepth(), 2u);
+    ConnectionImpl::pushSetup(Status::OK());
+    ASSERT_EQ(ConnectionImpl::setupQueueDepth(), 1u);
+    ConnectionImpl::pushSetup(Status::OK());
+    ASSERT_EQ(ConnectionImpl::setupQueueDepth(), 0u);
+
+    ASSERT(conn1);
+    ASSERT(conn2);
+    ASSERT(conn3);
+
+    ASSERT_NE(conn1.get(), conn2.get());
+    ASSERT_NE(conn2.get(), conn3.get());
+    ASSERT_NE(conn1.get(), conn3.get());
+
+    doneWith(conn1);
+    doneWith(conn2);
+    doneWith(conn3);
+}
+
+/**
+ * Verify that refresh callbacks block new connections, then trigger new connection spawns after
+ * they return
+ */
+TEST_F(ConnectionPoolTest, maxConnectingWithRefresh) {
+    ConnectionPool::Options options;
+    options.maxConnecting = 1;
+    options.refreshRequirement = Milliseconds(1000);
+    ConnectionPool pool(stdx::make_unique<PoolImpl>(), "test pool", options);
+
+    auto now = Date_t::now();
+
+    PoolImpl::setNow(now);
+
+    // Get a connection
+    ConnectionImpl::pushSetup(Status::OK());
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 doneWith(swConn.getValue());
+             });
+
+    ASSERT_EQ(ConnectionImpl::refreshQueueDepth(), 0u);
+
+    // After 1 second, one refresh has queued
+    PoolImpl::setNow(now + Milliseconds(1000));
+    ASSERT_EQ(ConnectionImpl::refreshQueueDepth(), 1u);
+
+    bool reachedA = false;
+
+    // Try to get another connection
+    pool.get(HostAndPort(),
+             Milliseconds(5000),
+             [&](StatusWith<ConnectionPool::ConnectionHandle> swConn) {
+                 ASSERT(swConn.isOK());
+                 doneWith(swConn.getValue());
+                 reachedA = true;
+             });
+
+    ASSERT_EQ(ConnectionImpl::setupQueueDepth(), 0u);
+    ASSERT(!reachedA);
+    ConnectionImpl::pushRefresh(Status::OK());
+    ASSERT_EQ(ConnectionImpl::refreshQueueDepth(), 0u);
+    ASSERT(reachedA);
+}
+
+/**
  * Verify that minConnections is respected
  */
 TEST_F(ConnectionPoolTest, minPoolRespected) {
