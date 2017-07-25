@@ -574,3 +574,7 @@ Mongo.prototype.getClusterTime = function() {
     }
     return this._clusterTime;
 };
+
+Mongo.prototype.startSession = function(opts) {
+    return new DriverSession(this, opts);
+};

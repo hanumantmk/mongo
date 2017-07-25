@@ -119,8 +119,11 @@ LogicalSessionRecord makeLogicalSessionRecord(const LogicalSessionId& lsid, Date
 }
 
 LogicalSessionToClient makeLogicalSessionToClient(const LogicalSessionId& lsid) {
+    LogicalSessionIdToClient lsitc;
+    lsitc.setId(lsid.getId());
+
     LogicalSessionToClient id;
-    id.setId(lsid.getId());
+    id.setId(lsitc);
     id.setTimeoutMinutes(localLogicalSessionTimeoutMinutes);
 
     return id;
@@ -138,6 +141,7 @@ void initializeOperationSessionInfo(OperationContext* opCtx,
 
     if (osi.getSessionId()) {
         opCtx->setLogicalSessionId(makeLogicalSessionId(*(osi.getSessionId()), opCtx));
+        std::cout << "FOUND LSID: " << opCtx->getLogicalSessionId()->toBSON() << "\n";
     }
 
     if (osi.getTxnNumber()) {

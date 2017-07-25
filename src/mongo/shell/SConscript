@@ -24,6 +24,7 @@ js_header = env.JSHeader(
         "error_codes.js",
         "mongo.js",
         "mr.js",
+        "session.js",
         "query.js",
         "types.js",
         "utils.js",
