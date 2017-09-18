@@ -49,6 +49,13 @@ env.CppUnitTest(
         '$BUILD_DIR/mongo/unittest/unittest',
     ])
 
+env.CppUnitTest(
+    target='fifo_semaphore_test',
+    source=['fifo_semaphore_test.cpp'],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/unittest/unittest',
+    ])
+
 env.Library(
     target='spin_lock',
     source=[
