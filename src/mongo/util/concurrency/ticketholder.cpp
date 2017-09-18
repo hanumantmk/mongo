@@ -38,61 +38,7 @@
 
 namespace mongo {
 
-#if defined(__linux__)
-namespace {
-void _check(int ret) {
-    if (ret == 0)
-        return;
-    int err = errno;
-    severe() << "error in Ticketholder: " << errnoWithDescription(err);
-    fassertFailed(28604);
-}
-}
-
-TicketHolder::TicketHolder(int num) : _outof(num) {
-    _check(sem_init(&_sem, 0, num));
-}
-
-TicketHolder::~TicketHolder() {
-    _check(sem_destroy(&_sem));
-}
-
-bool TicketHolder::tryAcquire() {
-    while (0 != sem_trywait(&_sem)) {
-        if (errno == EAGAIN)
-            return false;
-        if (errno != EINTR)
-            _check(-1);
-    }
-    return true;
-}
-
-void TicketHolder::waitForTicket() {
-    while (0 != sem_wait(&_sem)) {
-        if (errno != EINTR)
-            _check(-1);
-    }
-}
-
-bool TicketHolder::waitForTicketUntil(Date_t until) {
-    const long long millisSinceEpoch = until.toMillisSinceEpoch();
-    struct timespec ts;
-
-    ts.tv_sec = millisSinceEpoch / 1000;
-    ts.tv_nsec = (millisSinceEpoch % 1000) * (1000 * 1000);
-    while (0 != sem_timedwait(&_sem, &ts)) {
-        if (errno == ETIMEDOUT)
-            return false;
-
-        if (errno != EINTR)
-            _check(-1);
-    }
-    return true;
-}
-
-void TicketHolder::release() {
-    _check(sem_post(&_sem));
-}
+TicketHolder::TicketHolder(int num) : _fifoSem(num), _outof(num) {}
 
 Status TicketHolder::resize(int newSize) {
     stdx::lock_guard<stdx::mutex> lk(_resizeMutex);
@@ -122,9 +68,7 @@ Status TicketHolder::resize(int newSize) {
 }
 
 int TicketHolder::available() const {
-    int val = 0;
-    _check(sem_getvalue(&_sem, &val));
-    return val;
+    return _fifoSem.value();
 }
 
 int TicketHolder::used() const {
@@ -135,82 +79,4 @@ int TicketHolder::outof() const {
     return _outof.load();
 }
 
-#else
-
-TicketHolder::TicketHolder(int num) : _outof(num), _num(num) {}
-
-TicketHolder::~TicketHolder() = default;
-
-bool TicketHolder::tryAcquire() {
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
-    return _tryAcquire();
-}
-
-void TicketHolder::waitForTicket() {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-    while (!_tryAcquire()) {
-        _newTicket.wait(lk);
-    }
-}
-
-bool TicketHolder::waitForTicketUntil(Date_t until) {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-    return _newTicket.wait_until(lk, until.toSystemTimePoint(), [this] { return _tryAcquire(); });
-}
-
-void TicketHolder::release() {
-    {
-        stdx::lock_guard<stdx::mutex> lk(_mutex);
-        _num++;
-    }
-    _newTicket.notify_one();
-}
-
-Status TicketHolder::resize(int newSize) {
-    stdx::lock_guard<stdx::mutex> lk(_mutex);
-
-    int used = _outof.load() - _num;
-    if (used > newSize) {
-        std::stringstream ss;
-        ss << "can't resize since we're using (" << used << ") "
-           << "more than newSize(" << newSize << ")";
-
-        std::string errmsg = ss.str();
-        log() << errmsg;
-        return Status(ErrorCodes::BadValue, errmsg);
-    }
-
-    _outof.store(newSize);
-    _num = _outof.load() - used;
-
-    // Potentially wasteful, but easier to see is correct
-    _newTicket.notify_all();
-    return Status::OK();
-}
-
-int TicketHolder::available() const {
-    return _num;
-}
-
-int TicketHolder::used() const {
-    return outof() - _num;
-}
-
-int TicketHolder::outof() const {
-    return _outof.load();
-}
-
-bool TicketHolder::_tryAcquire() {
-    if (_num <= 0) {
-        if (_num < 0) {
-            std::cerr << "DISASTER! in TicketHolder" << std::endl;
-        }
-        return false;
-    }
-    _num--;
-    return true;
-}
-#endif
-}
+}  // namespace mongo

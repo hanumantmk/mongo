@@ -26,32 +26,40 @@
  */
 #pragma once
 
-#if defined(__linux__)
-#include <semaphore.h>
-#endif
-
 #include "mongo/base/disallow_copying.h"
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
-#include "mongo/util/concurrency/mutex.h"
+#include "mongo/util/concurrency/fifo_semaphore.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
 
+class ScopedTicket;
+class TicketHolderReleaser;
+
 class TicketHolder {
     MONGO_DISALLOW_COPYING(TicketHolder);
+    friend ScopedTicket;
+    friend TicketHolderReleaser;
 
 public:
     explicit TicketHolder(int num);
-    ~TicketHolder();
 
-    bool tryAcquire();
+    bool tryAcquire() {
+        return _fifoSem.try_lock();
+    }
 
-    void waitForTicket();
+    void waitForTicket() {
+        return _fifoSem.lock();
+    }
 
-    bool waitForTicketUntil(Date_t until);
+    bool waitForTicketUntil(Date_t until) {
+        return _fifoSem.try_lock_until(until.toSystemTimePoint());
+    }
 
-    void release();
+    void release() {
+        return _fifoSem.unlock();
+    }
 
     Status resize(int newSize);
 
@@ -62,66 +70,35 @@ public:
     int outof() const;
 
 private:
-#if defined(__linux__)
-    mutable sem_t _sem;
+    FifoSemaphore _fifoSem;
 
-    // You can read _outof without a lock, but have to hold _resizeMutex to change.
     AtomicInt32 _outof;
     stdx::mutex _resizeMutex;
-#else
-    bool _tryAcquire();
-
-    AtomicInt32 _outof;
-    int _num;
-    stdx::mutex _mutex;
-    stdx::condition_variable _newTicket;
-#endif
 };
 
 class ScopedTicket {
 public:
-    ScopedTicket(TicketHolder* holder) : _holder(holder) {
-        _holder->waitForTicket();
-    }
-
-    ~ScopedTicket() {
-        _holder->release();
-    }
+    ScopedTicket(TicketHolder* holder) : _lk(holder->_fifoSem) {}
 
 private:
-    TicketHolder* _holder;
+    stdx::unique_lock<FifoSemaphore> _lk;
 };
 
 class TicketHolderReleaser {
-    MONGO_DISALLOW_COPYING(TicketHolderReleaser);
-
 public:
-    TicketHolderReleaser() {
-        _holder = NULL;
-    }
+    TicketHolderReleaser() = default;
 
-    explicit TicketHolderReleaser(TicketHolder* holder) {
-        _holder = holder;
-    }
-
-    ~TicketHolderReleaser() {
-        if (_holder) {
-            _holder->release();
-        }
-    }
+    explicit TicketHolderReleaser(TicketHolder* holder) : _lk(holder->_fifoSem, stdx::adopt_lock) {}
 
     bool hasTicket() const {
-        return _holder != NULL;
+        return _lk.owns_lock();
     }
 
     void reset(TicketHolder* holder = NULL) {
-        if (_holder) {
-            _holder->release();
-        }
-        _holder = holder;
+        _lk = holder ? decltype(_lk){holder->_fifoSem, stdx::adopt_lock} : decltype(_lk){};
     }
 
 private:
-    TicketHolder* _holder;
+    stdx::unique_lock<FifoSemaphore> _lk;
 };
 }
