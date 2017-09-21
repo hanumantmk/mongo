@@ -89,6 +89,13 @@ env.CppUnitTest(
 )
 
 env.CppUnitTest(
+    target='enum_bitset_test',
+    source=[
+        'enum_bitset_test.cpp',
+    ],
+)
+
+env.CppUnitTest(
     target='lru_cache_test',
     source=[
         'lru_cache_test.cpp',
