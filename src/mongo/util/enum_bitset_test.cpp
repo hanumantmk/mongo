@@ -35,15 +35,38 @@
 #include "mongo/util/enum_bitset.h"
 
 namespace mongo {
+namespace {
 
 enum class BasicEnumClass {
     Foo,
     Bar,
     Baz,
 };
-constexpr size_t enumBitsetSize(BasicEnumClass) {
-    return 3;
-}
+ENUM_BITSET_GENERATE_CLASS(BasicEnumClassBitset, BasicEnumClass, 3)
+
+enum class FullRestrictionEnumClass {
+    Foo,
+    Bar,
+    Baz,
+};
+ENUM_BITSET_GENERATE_CLASS(FullRestrictionEnumClassBitset,
+                           FullRestrictionEnumClass,
+                           3,
+                           FullRestrictionEnumClass::Foo,
+                           FullRestrictionEnumClass::Bar,
+                           FullRestrictionEnumClass::Baz)
+
+enum class PartialRestrictionEnumClass {
+    Foo = 0,
+    Bar = 3,
+    Baz = 7,
+};
+ENUM_BITSET_GENERATE_CLASS(PartialRestrictionEnumClassBitset,
+                           PartialRestrictionEnumClass,
+                           8,
+                           PartialRestrictionEnumClass::Foo,
+                           PartialRestrictionEnumClass::Bar,
+                           PartialRestrictionEnumClass::Baz)
 
 struct Basic {
     enum Enum {
@@ -52,9 +75,7 @@ struct Basic {
         Baz,
     };
 };
-constexpr size_t enumBitsetSize(Basic::Enum) {
-    return 3;
-}
+ENUM_BITSET_GENERATE_CLASS(BasicEnumBitset, Basic::Enum, 3)
 
 enum class Unannotated {
     Foo,
@@ -92,9 +113,9 @@ ENUM_BITSET_CAN_EVAL(
     canInvokeWith, lhs[rhs], lhs.test(rhs), lhs.set(rhs), lhs.reset(rhs), lhs.flip(rhs))
 
 // Tests for some (C)ontaing type and an (E)num
-template <typename C, typename E, typename OtherC>
+template <typename C, typename EBitSet, typename OtherC>
 void testEB() {
-    using EBitSet = EnumBitset<E>;
+    using Configuration = typename EBitSet::Configuration;
 
     static_assert(canBitOps(C::Foo, C::Bar), "Can bit op annotated");
     static_assert(!canBitOps(C::Foo, OtherC::Foo), "Can't bit ops unrelated");
@@ -107,19 +128,25 @@ void testEB() {
     static_assert(!canInvokeWith(EBitSet{}, 1ul), "Can't invoke non-enum");
     static_assert(!canInvokeWith(EBitSet{}, OtherC::Foo), "Can't invoke unrelated");
 
-    ASSERT_EQUALS((C::Foo | C::Bar).to_ulong(), (1u | 2u));
-    ASSERT_EQUALS((C::Foo & C::Bar).to_ulong(), (1u & 2u));
-    ASSERT_EQUALS((C::Foo ^ C::Bar).to_ulong(), (1u ^ 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} | C::Bar).to_ulong(), (1u | 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} & C::Bar).to_ulong(), (1u & 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} ^ C::Bar).to_ulong(), (1u ^ 2u));
-    ASSERT_EQUALS((C::Foo | EBitSet{C::Bar}).to_ulong(), (1u | 2u));
-    ASSERT_EQUALS((C::Foo & EBitSet{C::Bar}).to_ulong(), (1u & 2u));
-    ASSERT_EQUALS((C::Foo ^ EBitSet{C::Bar}).to_ulong(), (1u ^ 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} | EBitSet{C::Bar}).to_ulong(), (1u | 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} & EBitSet{C::Bar}).to_ulong(), (1u & 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} ^ EBitSet{C::Bar}).to_ulong(), (1u ^ 2u));
-    ASSERT_EQUALS(EBitSet(typename EBitSet::FromRawBytes(7)).to_ulong(), 7u);
+    const size_t foo = 1 << static_cast<size_t>(C::Foo);
+    const size_t bar = 1 << static_cast<size_t>(C::Bar);
+    const size_t baz = 1 << static_cast<size_t>(C::Baz);
+
+    ASSERT_EQUALS((C::Foo | C::Bar).to_ulong(), (foo | bar));
+    ASSERT_EQUALS((C::Foo & C::Bar).to_ulong(), (foo & bar));
+    ASSERT_EQUALS((C::Foo ^ C::Bar).to_ulong(), (foo ^ bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} | C::Bar).to_ulong(), (foo | bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} & C::Bar).to_ulong(), (foo & bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} ^ C::Bar).to_ulong(), (foo ^ bar));
+    ASSERT_EQUALS((C::Foo | EBitSet{C::Bar}).to_ulong(), (foo | bar));
+    ASSERT_EQUALS((C::Foo & EBitSet{C::Bar}).to_ulong(), (foo & bar));
+    ASSERT_EQUALS((C::Foo ^ EBitSet{C::Bar}).to_ulong(), (foo ^ bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} | EBitSet{C::Bar}).to_ulong(), (foo | bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} & EBitSet{C::Bar}).to_ulong(), (foo & bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} ^ EBitSet{C::Bar}).to_ulong(), (foo ^ bar));
+    ASSERT_EQUALS(
+        EBitSet(typename EBitSet::FromRawBytes((1ull << 50) | foo | bar | baz)).to_ulong(),
+        (foo | bar | baz));
 
     ASSERT(EBitSet{C::Foo} == EBitSet{C::Foo});
     ASSERT_FALSE(EBitSet{C::Foo} == EBitSet{C::Bar});
@@ -144,37 +171,49 @@ void testEB() {
     ASSERT_FALSE(EBitSet{C::Foo}.none());
 
     ASSERT_EQUALS(EBitSet{}.count(), 0u);
-    ASSERT_EQUALS(EBitSet{C::Foo}.count(), 1u);
-    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar | C::Baz}.count(), 3u);
+    ASSERT_EQUALS(EBitSet{C::Foo}.count(), foo);
+    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar | C::Baz}.count(), 3ul);
 
-    ASSERT_EQUALS(EBitSet{}.size(), enumBitsetSize(E{}));
+    ASSERT_EQUALS(EBitSet{}.size(), Configuration::size);
 
-    ASSERT_EQUALS((EBitSet{C::Foo} |= EBitSet{C::Bar}).to_ulong(), (1u | 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} &= EBitSet{C::Bar}).to_ulong(), (1u & 2u));
-    ASSERT_EQUALS((EBitSet{C::Foo} ^= EBitSet{C::Bar}).to_ulong(), (1u ^ 2u));
-    ASSERT_EQUALS((~EBitSet{C::Foo | C::Bar}).to_ulong(), 4u);
+    ASSERT_EQUALS((EBitSet{C::Foo} |= EBitSet{C::Bar}).to_ulong(), (foo | bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} &= EBitSet{C::Bar}).to_ulong(), (foo & bar));
+    ASSERT_EQUALS((EBitSet{C::Foo} ^= EBitSet{C::Bar}).to_ulong(), (foo ^ bar));
+    ASSERT_EQUALS((~EBitSet{C::Foo | C::Bar}).to_ulong(), baz);
 
-    ASSERT_EQUALS(EBitSet{}.set(C::Foo).to_ulong(), 1u);
+    ASSERT_EQUALS(EBitSet{}.set(C::Foo).to_ulong(), foo);
     ASSERT_EQUALS(EBitSet{}.set(C::Foo).set(C::Foo, false).to_ulong(), 0u);
     ASSERT_EQUALS(EBitSet{}.set(C::Foo).reset().to_ulong(), 0u);
     ASSERT_EQUALS(EBitSet{}.set(C::Foo).reset(C::Foo).to_ulong(), 0u);
-    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar}.flip().to_ulong(), 4u);
-    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar}.flip(C::Baz).to_ulong(), 7u);
+    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar}.flip().to_ulong(), baz);
+    ASSERT_EQUALS(EBitSet{C::Foo | C::Bar}.flip(C::Baz).to_ulong(), (foo | bar | baz));
 
-    ASSERT_EQUALS(EBitSet{C::Foo}.to_ulong(), 1u);
-    ASSERT_EQUALS(EBitSet{C::Foo}.to_ullong(), 1ull);
-    ASSERT_EQUALS(EBitSet{C::Foo}.to_string(), std::string("001"));
+    ASSERT_EQUALS(EBitSet{C::Foo}.to_ulong(), foo);
+    ASSERT_EQUALS(EBitSet{C::Foo}.to_ullong(), foo);
+    ASSERT_EQUALS(EBitSet{C::Foo}.to_string(), std::string(Configuration::size - 1, '0') + "1");
 }
 
 TEST(EnumBitset, BasicEnumClass) {
     static_assert(!canBitOps(BasicEnumClass::Foo, 1ul), "Can't bit ops non-enum");
-    testEB<BasicEnumClass, BasicEnumClass, Basic>();
+    testEB<BasicEnumClass, BasicEnumClassBitset, Basic>();
+}
+
+TEST(EnumBitset, FullRestrictionEnumClass) {
+    static_assert(!canBitOps(FullRestrictionEnumClass::Foo, 1ul), "Can't bit ops non-enum");
+    testEB<FullRestrictionEnumClass, FullRestrictionEnumClassBitset, Basic>();
+}
+
+TEST(EnumBitset, PartialRestrictionEnumClass) {
+    static_assert(!canBitOps(PartialRestrictionEnumClass::Foo, 1ul), "Can't bit ops non-enum");
+    testEB<PartialRestrictionEnumClass, PartialRestrictionEnumClassBitset, Basic>();
+    using EbitSet = PartialRestrictionEnumClassBitset;
+    ASSERT_EQUALS(EbitSet(EbitSet::FromRawBytes(2ul)).to_ulong(), 0ull);
 }
 
 TEST(EnumBitset, BasicEnum) {
     // Not defending against decay of legacy enum to int
     static_assert(canBitOps(Basic::Foo, 1ul), "Can bit ops non-enum");
-    testEB<Basic, Basic::Enum, BasicEnumClass>();
+    testEB<Basic, BasicEnumBitset, BasicEnumClass>();
 }
 
 TEST(EnumBitset, InversionsOfExpressionSFINAE) {
@@ -183,4 +222,5 @@ TEST(EnumBitset, InversionsOfExpressionSFINAE) {
     static_assert(canInvokeWith(std::bitset<3>{}, 1ul), "Can invoke annotated");
 }
 
+}  // namespace
 }  // namespace mongo

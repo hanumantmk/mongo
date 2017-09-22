@@ -33,34 +33,84 @@
 
 #pragma once
 
+#define ENUM_BITSET_GENERATE_CLASS(name, ...)                          \
+    using name = EnumBitset<enum_bitset_details::Config<__VA_ARGS__>>; \
+    name operator|(typename name::Configuration::type lhs,             \
+                   typename name::Configuration::type rhs) {           \
+        return name(lhs) | name(rhs);                                  \
+    }                                                                  \
+    name operator&(typename name::Configuration::type lhs,             \
+                   typename name::Configuration::type rhs) {           \
+        return name(lhs) & name(rhs);                                  \
+    }                                                                  \
+    name operator^(typename name::Configuration::type lhs,             \
+                   typename name::Configuration::type rhs) {           \
+        return name(lhs) ^ name(rhs);                                  \
+    }
+
 namespace mongo {
 
-template <typename T>
-constexpr std::size_t enumBitsetSize(T) {
-    return 0;
-}
+namespace enum_bitset_details {
+
+template <typename Enum, Enum v>
+struct Wrapper {
+    constexpr static size_t value = static_cast<size_t>(v);
+};
+
+template <typename Head, typename... Tail>
+struct FoldBitOrHelper {
+    constexpr static size_t value = (1ull << Head::value) | FoldBitOrHelper<Tail...>::value;
+};
+
+template <>
+struct FoldBitOrHelper<void> {
+    constexpr static size_t value = 0;
+};
+
+template <typename Enum, Enum... Enums>
+using FoldBitOr = FoldBitOrHelper<Wrapper<Enum, Enums>..., void>;
+
+template <typename Enum, size_t Size, Enum... restrictTo>
+struct Config : public std::true_type {
+    using type = Enum;
+    constexpr static size_t size = Size;
+    constexpr static size_t restrictionMask =
+        sizeof...(restrictTo) ? FoldBitOr<Enum, restrictTo...>::value : ~0ull;
+};
+
+template <typename Enum, size_t Size, Enum... restrictTo>
+constexpr size_t Config<Enum, Size, restrictTo...>::size;
+
+template <typename Enum, size_t Size, Enum... restrictTo>
+constexpr size_t Config<Enum, Size, restrictTo...>::restrictionMask;
+
+}  // namespace enum_bitset_details
 
 /**
  * Provides a std::bitset style interface where the index keys are enum values instead of regular
  * integers.  This provides a type safe way to do bitwise operations amongst that set of offsets.
  *
- * Use of this type requires the existance of a free function enumBitsetSize(Enum), which returns
- * the number of values in the enum.  This free function will be engaged via ADL.
+ * Use of this type requires the existence of a free function enumBitsetSize(Enum), which returns a
+ * config trait (an appropriate type can be made with the enum_bitset_details::Config helper).  This
+ * free function will be engaged via ADL.
  */
-template <typename T>
-class EnumBitset : private std::bitset<enumBitsetSize(T{})> {
-    static_assert((0 < enumBitsetSize(T{})) && (enumBitsetSize(T{}) <= 64),
+template <typename Configuration_>
+class EnumBitset : private std::bitset<Configuration_::size> {
+    using T = typename Configuration_::type;
+    static_assert((0 < Configuration_::size) && (Configuration_::size <= 64),
                   "EnumBitsets must have between 0 and 64 members");
     static_assert(std::is_enum<T>::value, "EnumBitset is only compatible with enums");
 
-    using Super = std::bitset<enumBitsetSize(T{})>;
+    using Super = std::bitset<Configuration_::size>;
     using Underlying = std::underlying_type_t<T>;
+    static constexpr Super allRestrictedOff = Super{~Configuration_::restrictionMask};
 
     static constexpr Underlying fromEnum(T t) {
         return static_cast<Underlying>(t);
     }
 
 public:
+    using Configuration = Configuration_;
     using typename Super::reference;
 
     /**
@@ -74,16 +124,17 @@ public:
 
     constexpr EnumBitset() = default;
 
-    explicit constexpr EnumBitset(FromRawBytes rawBytes) : Super(rawBytes.val) {}
+    explicit constexpr EnumBitset(FromRawBytes rawBytes)
+        : Super(rawBytes.val & Configuration::restrictionMask) {}
 
     constexpr EnumBitset(T pos) : EnumBitset(FromRawBytes{1ull << fromEnum(pos)}) {}
 
-    bool operator==(const EnumBitset& rhs) const {
-        return static_cast<const Super&>(*this) == static_cast<const Super&>(rhs);
+    friend bool operator==(const EnumBitset& lhs, const EnumBitset& rhs) {
+        return static_cast<const Super&>(lhs) == static_cast<const Super&>(rhs);
     };
 
-    bool operator!=(const EnumBitset& rhs) const {
-        return static_cast<const Super&>(*this) != static_cast<const Super&>(rhs);
+    friend bool operator!=(const EnumBitset& lhs, const EnumBitset& rhs) {
+        return static_cast<const Super&>(lhs) != static_cast<const Super&>(rhs);
     };
 
     constexpr bool operator[](T pos) const {
@@ -98,7 +149,10 @@ public:
         return Super::test(fromEnum(pos));
     }
 
-    using Super::all;
+    bool all() const {
+        return (allRestrictedOff | *this).Super::all();
+    }
+
     using Super::any;
     using Super::none;
     using Super::count;
@@ -144,6 +198,7 @@ public:
     }
 
     EnumBitset& flip() noexcept {
+        static_cast<Super&>(*this) |= allRestrictedOff;
         Super::flip();
         return *this;
     }
@@ -170,22 +225,7 @@ public:
     using Super::to_ullong;
 };
 
-// We additionally provide support for bit operations on top of enum values, which allows easy
-// composition of enum bitsets at a callsite.
-
-template <typename T>
-std::enable_if_t<enumBitsetSize(T{}) != 0, EnumBitset<T>> operator|(T lhs, T rhs) {
-    return EnumBitset<T>(lhs) | EnumBitset<T>(rhs);
-}
-
-template <typename T>
-std::enable_if_t<enumBitsetSize(T{}) != 0, EnumBitset<T>> operator&(T lhs, T rhs) {
-    return EnumBitset<T>(lhs) & EnumBitset<T>(rhs);
-}
-
-template <typename T>
-std::enable_if_t<enumBitsetSize(T{}) != 0, EnumBitset<T>> operator^(T lhs, T rhs) {
-    return EnumBitset<T>(lhs) ^ EnumBitset<T>(rhs);
-}
+template <typename Configuration>
+constexpr std::bitset<Configuration::size> EnumBitset<Configuration>::allRestrictedOff;
 
 }  // namespace mongo
