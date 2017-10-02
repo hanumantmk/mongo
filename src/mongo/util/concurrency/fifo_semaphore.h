@@ -90,7 +90,7 @@ public:
 
 private:
     bool _tryLock(WithLock) {
-        if (_value) {
+        if (_value && _waiters.empty()) {
             _value--;
             return true;
         }
@@ -127,6 +127,7 @@ private:
     }
 
     size_t _value;
+    size_t _counter = 0;
     mutable stdx::mutex _mutex;
     stdx::list<stdx::condition_variable> _waiters;
 };
