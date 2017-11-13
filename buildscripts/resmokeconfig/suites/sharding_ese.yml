@@ -11,8 +11,6 @@ selector:
   # TODO: SERVER-31916
   - jstests/sharding/aggregation_currentop.js
   - jstests/sharding/auth_slaveok_routing.js
-  # TODO: SERVER-31937
-  - jstests/sharding/kill_sessions.js
 
 executor:
   config:
