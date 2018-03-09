@@ -77,13 +77,13 @@ public:
      * pool.runWithActiveClient([](stdx::unique_lock<stdx::mutex> lk){ codeToBeProtected(); });
      */
     template <typename Callback>
-    void runWithActiveClient(Callback&& cb) {
-        runWithActiveClient(stdx::unique_lock<stdx::mutex>(_parent->_mutex),
+    auto runWithActiveClient(Callback&& cb) {
+        return runWithActiveClient(stdx::unique_lock<stdx::mutex>(_parent->_mutex),
                             std::forward<Callback>(cb));
     }
 
     template <typename Callback>
-    void runWithActiveClient(stdx::unique_lock<stdx::mutex> lk, Callback&& cb) {
+    auto runWithActiveClient(stdx::unique_lock<stdx::mutex> lk, Callback&& cb) {
         invariant(lk.owns_lock());
 
         _activeClients++;
@@ -96,7 +96,7 @@ public:
 
         {
             decltype(lk) localLk(std::move(lk));
-            cb(std::move(localLk));
+            return cb(std::move(localLk));
         }
     }
 
@@ -107,10 +107,9 @@ public:
      * Gets a connection from the specific pool. Sinks a unique_lock from the
      * parent to preserve the lock on _mutex
      */
-    void getConnection(const HostAndPort& hostAndPort,
+    Future<ConnectionHandle> getConnection(const HostAndPort& hostAndPort,
                        Milliseconds timeout,
-                       stdx::unique_lock<stdx::mutex> lk,
-                       GetConnectionCallback cb);
+                       stdx::unique_lock<stdx::mutex> lk);
 
     /**
      * Cascades a failure across existing connections and requests. Invoking
@@ -185,7 +184,7 @@ private:
     using OwnedConnection = std::unique_ptr<ConnectionInterface>;
     using OwnershipPool = stdx::unordered_map<ConnectionInterface*, OwnedConnection>;
     using LRUOwnershipPool = LRUCache<OwnershipPool::key_type, OwnershipPool::mapped_type>;
-    using Request = std::pair<Date_t, GetConnectionCallback>;
+    using Request = std::pair<Date_t, SharedPromise<ConnectionHandle>>;
     struct RequestComparator {
         bool operator()(const Request& a, const Request& b) {
             return a.first > b.first;
@@ -218,7 +217,7 @@ private:
     OwnershipPool _droppedProcessingPool;
     OwnershipPool _checkedOutPool;
 
-    std::priority_queue<Request, std::vector<Request>, RequestComparator> _requests;
+    std::vector<Request> _requests;
 
     std::unique_ptr<TimerInterface> _requestTimer;
     Date_t _requestTimerExpiration;
@@ -351,6 +350,11 @@ void ConnectionPool::mutateTags(
 void ConnectionPool::get(const HostAndPort& hostAndPort,
                          Milliseconds timeout,
                          GetConnectionCallback cb) {
+    return get(hostAndPort, timeout).getAsync(std::move(cb));
+}
+
+Future<ConnectionPool::ConnectionHandle> ConnectionPool::get(const HostAndPort& hostAndPort,
+                         Milliseconds timeout) {
     SpecificPool* pool;
 
     stdx::unique_lock<stdx::mutex> lk(_mutex);
@@ -367,8 +371,8 @@ void ConnectionPool::get(const HostAndPort& hostAndPort,
 
     invariant(pool);
 
-    pool->runWithActiveClient(std::move(lk), [&](decltype(lk) lk) {
-        pool->getConnection(hostAndPort, timeout, std::move(lk), std::move(cb));
+    return pool->runWithActiveClient(std::move(lk), [&](decltype(lk) lk) {
+        return pool->getConnection(hostAndPort, timeout, std::move(lk));
     });
 }
 
@@ -449,22 +453,27 @@ size_t ConnectionPool::SpecificPool::openConnections(const stdx::unique_lock<std
     return _checkedOutPool.size() + _readyPool.size() + _processingPool.size();
 }
 
-void ConnectionPool::SpecificPool::getConnection(const HostAndPort& hostAndPort,
+Future<ConnectionPool::ConnectionHandle> ConnectionPool::SpecificPool::getConnection(const HostAndPort& hostAndPort,
                                                  Milliseconds timeout,
-                                                 stdx::unique_lock<stdx::mutex> lk,
-                                                 GetConnectionCallback cb) {
+                                                 stdx::unique_lock<stdx::mutex> lk) {
     if (timeout < Milliseconds(0) || timeout > _parent->_options.refreshTimeout) {
         timeout = _parent->_options.refreshTimeout;
     }
 
     const auto expiration = _parent->_factory->now() + timeout;
 
-    _requests.push(make_pair(expiration, std::move(cb)));
+    Promise<ConnectionHandle> promise;
+    auto future = promise.getFuture();
+
+    _requests.push_back(make_pair(expiration, promise.share()));
+    std::push_heap(begin(_requests), end(_requests), RequestComparator{});
 
     updateStateInLock();
 
     spawnConnections(lk);
     fulfillRequests(lk);
+
+    return future;
 }
 
 void ConnectionPool::SpecificPool::returnConnection(ConnectionInterface* connPtr,
@@ -632,9 +641,8 @@ void ConnectionPool::SpecificPool::processFailure(const Status& status,
     // with the same failed status
     lk.unlock();
 
-    while (requestsToFail.size()) {
-        requestsToFail.top().second(status);
-        requestsToFail.pop();
+    for (auto& request : requestsToFail) {
+        request.second.setError(status);
     }
 }
 
@@ -676,8 +684,9 @@ void ConnectionPool::SpecificPool::fulfillRequests(stdx::unique_lock<stdx::mutex
         }
 
         // Grab the request and callback
-        auto cb = std::move(_requests.top().second);
-        _requests.pop();
+        auto promise = std::move(_requests.front().second);
+        std::pop_heap(begin(_requests), end(_requests), RequestComparator{});
+        _requests.pop_back();
 
         auto connPtr = conn.get();
 
@@ -689,7 +698,7 @@ void ConnectionPool::SpecificPool::fulfillRequests(stdx::unique_lock<stdx::mutex
         // pass it to the user
         connPtr->resetToUnknown();
         lk.unlock();
-        cb(ConnectionHandle(connPtr, ConnectionHandleDeleter(_parent)));
+        promise.emplaceValue(ConnectionHandle(connPtr, ConnectionHandleDeleter(_parent)));
         lk.lock();
     }
 }
@@ -829,16 +838,16 @@ void ConnectionPool::SpecificPool::updateStateInLock() {
 
         // If we were already running and the timer is the same as it was
         // before, nothing to do
-        if (_state == State::kRunning && _requestTimerExpiration == _requests.top().first)
+        if (_state == State::kRunning && _requestTimerExpiration == _requests.front().first)
             return;
 
         _state = State::kRunning;
 
         _requestTimer->cancelTimeout();
 
-        _requestTimerExpiration = _requests.top().first;
+        _requestTimerExpiration = _requests.front().first;
 
-        auto timeout = _requests.top().first - _parent->_factory->now();
+        auto timeout = _requests.front().first - _parent->_factory->now();
 
         // We set a timer for the most recent request, then invoke each timed
         // out request we couldn't service
@@ -847,14 +856,15 @@ void ConnectionPool::SpecificPool::updateStateInLock() {
                 auto now = _parent->_factory->now();
 
                 while (_requests.size()) {
-                    auto& x = _requests.top();
+                    auto& x = _requests.front();
 
                     if (x.first <= now) {
-                        auto cb = std::move(x.second);
-                        _requests.pop();
+                        auto promise = std::move(x.second);
+                        std::pop_heap(begin(_requests), end(_requests), RequestComparator{});
+                        _requests.pop_back();
 
                         lk.unlock();
-                        cb(Status(ErrorCodes::NetworkInterfaceExceededTimeLimit,
+                        promise.setError(Status(ErrorCodes::NetworkInterfaceExceededTimeLimit,
                                   "Couldn't get a connection within the time limit"));
                         lk.lock();
                     } else {
