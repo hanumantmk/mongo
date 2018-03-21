@@ -894,7 +894,6 @@ StatusWith<NamespaceString> DatabaseImpl::makeUniqueCollectionNamespace(
     }
 
     if (!_uniqueCollectionNamespacePseudoRandom) {
-        Timestamp ts;
         _uniqueCollectionNamespacePseudoRandom =
             stdx::make_unique<PseudoRandom>(Date_t::now().asInt64());
     }
