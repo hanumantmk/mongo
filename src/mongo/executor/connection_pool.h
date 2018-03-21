@@ -60,10 +60,10 @@ struct ConnectionPoolStats;
  * HostAndPort. See comments on the various Options for how the pool operates.
  */
 class ConnectionPool : public EgressTagCloser {
-    class ConnectionHandleDeleter;
     class SpecificPool;
 
 public:
+    class ConnectionHandleDeleter;
     class ConnectionInterface;
     class DependentTypeFactoryInterface;
     class TimerInterface;
@@ -137,6 +137,8 @@ public:
 
     ~ConnectionPool();
 
+    void shutdown();
+
     void dropConnections(const HostAndPort& hostAndPort);
 
     void dropConnections(transport::Session::TagMask tags) override;
@@ -175,7 +177,7 @@ public:
     ConnectionHandleDeleter() = default;
     ConnectionHandleDeleter(ConnectionPool* pool) : _pool(pool) {}
 
-    void operator()(ConnectionInterface* connection) {
+    void operator()(ConnectionInterface* connection) const {
         if (_pool && connection)
             _pool->returnConnection(connection);
     }

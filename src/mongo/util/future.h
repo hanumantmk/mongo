@@ -1008,6 +1008,10 @@ public:
                        [](Func && func, const Status& status) noexcept { call(func, status); });
     }
 
+    bool isReady() const {
+        return immediate || shared->state.load(std::memory_order_acquire) == SSBState::kFinished;
+    }
+
 private:
     template <typename T2>
     friend class Future;
@@ -1201,6 +1205,10 @@ public:
     template <typename Func>  // Status -> void
         Future<void> tapAll(Func&& func) && noexcept {
         return std::move(inner).tapAll(std::forward<Func>(func));
+    }
+
+    bool isReady() const {
+        return inner.isReady();
     }
 
 private:
