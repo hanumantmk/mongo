@@ -284,37 +284,6 @@ ConnectionPool::~ConnectionPool() {
     if (hasGlobalServiceContext() && _manager) {
         _manager->remove(this);
     }
-
-    std::vector<SpecificPool*> pools;
-
-    // Ensure we decrement active clients for all pools that we inc on (because we intend to process
-    // failures)
-    const auto guard = MakeGuard([&] {
-        stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-        for (const auto& pool : pools) {
-            pool->decActiveClients(lk);
-        }
-    });
-
-    // Grab all current pools that don't match tags (under the lock)
-    {
-        stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-        for (auto& pair : _pools) {
-            pools.push_back(pair.second.get());
-            pair.second->incActiveClients(lk);
-        }
-    }
-
-    // Reacquire the lock per pool and process failures.  We'll dec active clients when we're all
-    // through in the guard
-    for (const auto& pool : pools) {
-        stdx::unique_lock<stdx::mutex> lk(_mutex);
-        pool->processFailure(
-            Status(ErrorCodes::ShutdownInProgress, "Shuting down the connection pool"),
-            std::move(lk));
-    }
 }
 
 void ConnectionPool::dropConnections(const HostAndPort& hostAndPort) {

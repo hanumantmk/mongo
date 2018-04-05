@@ -33,16 +33,22 @@
 #include "mongo/s/async_requests_sender.h"
 
 #include "mongo/client/remote_command_targeter.h"
+#include "mongo/db/server_parameters.h"
 #include "mongo/executor/remote_command_request.h"
 #include "mongo/rpc/get_status_from_command_result.h"
 #include "mongo/s/client/shard_registry.h"
 #include "mongo/s/grid.h"
 #include "mongo/stdx/memory.h"
+#include "mongo/transport/baton.h"
+#include "mongo/transport/transport_layer.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
+
+MONGO_EXPORT_SERVER_PARAMETER(UseBatonARS, bool, true);
+
 namespace {
 
 // Maximum number of retries for network and replication notMaster errors (per host).
@@ -58,6 +64,8 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
                                          Shard::RetryPolicy retryPolicy)
     : _opCtx(opCtx),
       _executor(executor),
+      _baton(UseBatonARS.load() ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
+                                : nullptr),
       _db(dbName.toString()),
       _readPreference(readPreference),
       _retryPolicy(retryPolicy) {
@@ -78,6 +86,12 @@ AsyncRequestsSender::~AsyncRequestsSender() {
     while (!done()) {
         next();
     }
+
+    // The baton can live past us in lambda captures. Detaching indicates that opCtx related
+    // interruption is no longer relevant.
+    if (_baton) {
+        _baton->detach();
+    }
 }
 
 AsyncRequestsSender::Response AsyncRequestsSender::next() {
@@ -90,7 +104,15 @@ AsyncRequestsSender::Response AsyncRequestsSender::next() {
         // Otherwise, wait for some response to be received.
         if (_interruptStatus.isOK()) {
             try {
-                _handleResponse(_responseQueue.pop(_opCtx));
+                if (_baton) {
+                    if (auto job = _responseQueue.tryPop()) {
+                        _handleResponse(std::move(*job));
+                    } else {
+                        _baton->run(boost::none);
+                    }
+                } else {
+                    _handleResponse(_responseQueue.pop(_opCtx));
+                }
             } catch (const AssertionException& ex) {
                 // If the operation is interrupted, we cancel outstanding requests and switch to
                 // waiting for the (canceled) callbacks to finish without checking for interrupts.

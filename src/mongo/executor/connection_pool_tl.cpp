@@ -49,8 +49,8 @@ struct TimeoutHandler {
 }  // namespace
 
 void TLTimer::setTimeout(Milliseconds timeoutVal, TimeoutCallback cb) {
-    _timer->waitFor(timeoutVal).getAsync([cb = std::move(cb)](Status status) {
-        if (status == ErrorCodes::CallbackCanceled) {
+    _timer->waitFor(timeoutVal, nullptr).getAsync([cb = std::move(cb)](Status status) {
+        if (status == ErrorCodes::CallbackCanceled || status == ErrorCodes::BrokenPromise) {
             return;
         }
 
@@ -61,7 +61,7 @@ void TLTimer::setTimeout(Milliseconds timeoutVal, TimeoutCallback cb) {
 }
 
 void TLTimer::cancelTimeout() {
-    _timer->cancel();
+    _timer->cancel(nullptr);
 }
 
 void TLConnection::indicateSuccess() {
@@ -125,10 +125,9 @@ void TLConnection::setup(Milliseconds timeout, SetupCallback cb) {
     });
 
     AsyncDBClient::connect(_peer, transport::kGlobalSSLMode, _serviceContext, _reactor)
-        .onError(
-            [this](StatusWith<AsyncDBClient::Handle> swc) -> StatusWith<AsyncDBClient::Handle> {
-                return Status(ErrorCodes::HostUnreachable, swc.getStatus().reason());
-            })
+        .onError([](StatusWith<AsyncDBClient::Handle> swc) -> StatusWith<AsyncDBClient::Handle> {
+            return Status(ErrorCodes::HostUnreachable, swc.getStatus().reason());
+        })
         .then([this](AsyncDBClient::Handle client) {
             _client = std::move(client);
             return _client->initWireVersion("NetworkInterfaceTL", _onConnectHook);
@@ -142,7 +141,7 @@ void TLConnection::setup(Milliseconds timeout, SetupCallback cb) {
             if (!connectHookRequest) {
                 return Future<void>::makeReady();
             }
-            return _client->runCommandRequest(*connectHookRequest)
+            return _client->runCommandRequest(*connectHookRequest, nullptr)
                 .then([this](RemoteCommandResponse response) {
                     return _onConnectHook->handleReply(_peer, std::move(response));
                 });
@@ -178,15 +177,15 @@ void TLConnection::refresh(Milliseconds timeout, RefreshCallback cb) {
         }
 
         _status = {ErrorCodes::HostUnreachable, "Timed out refreshing host"};
-        _client->cancel();
+        _client->cancel(nullptr);
 
         handler->promise.setError(_status);
     });
 
     _client
         ->runCommandRequest(
-            {_peer, std::string("admin"), BSON("isMaster" << 1), BSONObj(), nullptr})
-        .then([this](executor::RemoteCommandResponse response) {
+            {_peer, std::string("admin"), BSON("isMaster" << 1), BSONObj(), nullptr}, nullptr)
+        .then([](executor::RemoteCommandResponse response) {
             return Future<void>::makeReady(response.status);
         })
         .getAsync([this, handler](Status status) {

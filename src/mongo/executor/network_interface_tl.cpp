@@ -70,6 +70,9 @@ std::string NetworkInterfaceTL::getHostName() {
 }
 
 void NetworkInterfaceTL::startup() {
+    if (_pool) {
+        return;
+    }
     if (_svcCtx) {
         _tl = _svcCtx->getTransportLayer();
     }
@@ -94,9 +97,14 @@ void NetworkInterfaceTL::startup() {
 }
 
 void NetworkInterfaceTL::shutdown() {
+    if (!_pool) {
+        return;
+    }
+
     _inShutdown.store(true);
     _reactor->stop();
     _ioThread.join();
+    _pool.reset();
     LOG(2) << "NetworkInterfaceTL shutdown successfully";
 }
 
@@ -136,7 +144,8 @@ Date_t NetworkInterfaceTL::now() {
 
 Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                         RemoteCommandRequest& request,
-                                        const RemoteCommandCompletionFn& onFinish) {
+                                        const RemoteCommandCompletionFn& onFinish,
+                                        const transport::BatonHandle& baton) {
     if (inShutdown()) {
         return {ErrorCodes::ShutdownInProgress, "NetworkInterface shutdown in progress"};
     }
@@ -166,13 +175,30 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
         state->deadline = state->start + state->request.timeout;
     }
 
-    _pool->get(request.target, request.timeout)
+    [&] {
+        return _reactor->execute(
+            [this, state, request] { return _pool->get(request.target, request.timeout); });
+    }()
         .tapError([state](Status error) {
             LOG(2) << "Failed to get connection from pool for request " << state->request.id << ": "
                    << error;
         })
-        .then([this, state](ConnectionPool::ConnectionHandle conn) mutable {
-            return _onAcquireConn(state, std::move(conn));
+        .then([this, baton](ConnectionPool::ConnectionHandle conn) {
+            auto connPtr = conn.get();
+
+            auto reactorConn = std::make_shared<CommandState::ConnHandle>(
+                connPtr, CommandState::Dtor{conn.get_deleter(), _reactor});
+            conn.release();
+
+            if (baton) {
+                return baton->execute([reactorConn]() mutable { return reactorConn; });
+            } else {
+                return Future<std::shared_ptr<CommandState::ConnHandle>>::makeReady(
+                    std::move(reactorConn));
+            }
+        })
+        .then([this, state, baton](std::shared_ptr<CommandState::ConnHandle> conn) {
+            return _onAcquireConn(state, std::move(*conn), baton);
         })
         .onError([](Status error) -> StatusWith<RemoteCommandResponse> {
             // The TransportLayer has, for historical reasons returned SocketException for
@@ -199,7 +225,9 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
 // This is only called from within a then() callback on a future, so throwing is equivalent to
 // returning a ready Future with a not-OK status.
 Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
-    std::shared_ptr<CommandState> state, ConnectionPool::ConnectionHandle conn) {
+    std::shared_ptr<CommandState> state,
+    CommandState::ConnHandle conn,
+    const transport::BatonHandle& baton) {
     if (state->done.load()) {
         conn->indicateSuccess();
         uasserted(ErrorCodes::CallbackCanceled, "Command was canceled");
@@ -222,7 +250,7 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
         }
 
         state->timer = _reactor->makeTimer();
-        state->timer->waitUntil(state->deadline).getAsync([client, state](Status status) {
+        state->timer->waitUntil(state->deadline, baton).getAsync([client, state, baton](Status status) {
             if (status == ErrorCodes::CallbackCanceled) {
                 invariant(state->done.load());
                 return;
@@ -238,28 +266,33 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
             state->promise.setError(
                 Status(ErrorCodes::NetworkInterfaceExceededTimeLimit, "timed out"));
 
-            client->cancel();
+            client->cancel(baton);
         });
     }
 
-    client->runCommandRequest(state->request)
-        .then([this, state](RemoteCommandResponse response) {
+    client->runCommandRequest(state->request, baton)
+        .then([this, state, baton](RemoteCommandResponse response) {
             if (state->done.load()) {
                 uasserted(ErrorCodes::CallbackCanceled, "Callback was canceled");
             }
 
-            // TODO Investigate whether this is necessary here.
-            return _reactor->execute([ this, state, response = std::move(response) ]() mutable {
+            auto cb = [ this, state, response = std::move(response) ]() mutable {
                 if (_metadataHook && response.status.isOK()) {
                     auto target = state->conn->getHostAndPort().toString();
                     response.status = _metadataHook->readReplyMetadata(
                         nullptr, std::move(target), response.metadata);
                 }
 
-                return std::move(response);
-            });
+                return Future<RemoteCommandResponse>::makeReady(std::move(response));
+            };
+
+            if (baton) {
+                return baton->execute(std::move(cb));
+            } else {
+                return _reactor->execute(std::move(cb));
+            }
         })
-        .getAsync([this, state](StatusWith<RemoteCommandResponse> swr) {
+        .getAsync([this, state, baton](StatusWith<RemoteCommandResponse> swr) {
             _eraseInUseConn(state->cbHandle);
             if (!swr.isOK()) {
                 state->conn->indicateFailure(swr.getStatus());
@@ -273,7 +306,7 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
                 return;
 
             if (state->timer) {
-                state->timer->cancel();
+                state->timer->cancel(baton);
             }
 
             state->promise.setWith([&] { return std::move(swr); });
@@ -287,7 +320,8 @@ void NetworkInterfaceTL::_eraseInUseConn(const TaskExecutor::CallbackHandle& cbH
     _inProgress.erase(cbHandle);
 }
 
-void NetworkInterfaceTL::cancelCommand(const TaskExecutor::CallbackHandle& cbHandle) {
+void NetworkInterfaceTL::cancelCommand(const TaskExecutor::CallbackHandle& cbHandle,
+                                       const transport::BatonHandle& baton) {
     stdx::unique_lock<stdx::mutex> lk(_inProgressMutex);
     auto it = _inProgress.find(cbHandle);
     if (it == _inProgress.end()) {
@@ -307,17 +341,23 @@ void NetworkInterfaceTL::cancelCommand(const TaskExecutor::CallbackHandle& cbHan
                                            << redact(state->request.toString())});
     if (state->conn) {
         auto client = checked_cast<connection_pool_tl::TLConnection*>(state->conn.get());
-        client->client()->cancel();
+        client->client()->cancel(baton);
     }
 }
 
-Status NetworkInterfaceTL::setAlarm(Date_t when, const stdx::function<void()>& action) {
+Status NetworkInterfaceTL::setAlarm(Date_t when,
+                                    const stdx::function<void()>& action,
+                                    const transport::BatonHandle& baton) {
     if (inShutdown()) {
         return {ErrorCodes::ShutdownInProgress, "NetworkInterface shutdown in progress"};
     }
 
     if (when <= now()) {
-        _reactor->schedule(transport::Reactor::kPost, std::move(action));
+        if (baton) {
+            baton->schedule(std::move(action));
+        } else {
+            _reactor->schedule(transport::Reactor::kPost, std::move(action));
+        }
         return Status::OK();
     }
 
@@ -329,7 +369,7 @@ Status NetworkInterfaceTL::setAlarm(Date_t when, const stdx::function<void()>& a
         _inProgressAlarms.insert(alarmTimer);
     }
 
-    alarmTimer->waitUntil(when).getAsync([this, weakTimer, action, when](Status status) {
+    alarmTimer->waitUntil(when, baton).getAsync([this, weakTimer, action, when, baton](Status status) {
         auto alarmTimer = weakTimer.lock();
         if (!alarmTimer) {
             return;
@@ -341,16 +381,20 @@ Status NetworkInterfaceTL::setAlarm(Date_t when, const stdx::function<void()>& a
         auto nowVal = now();
         if (nowVal < when) {
             warning() << "Alarm returned early. Expected at: " << when << ", fired at: " << nowVal;
-            const auto status = setAlarm(when, std::move(action));
+            const auto status = setAlarm(when, std::move(action), baton);
             if ((!status.isOK()) && (status != ErrorCodes::ShutdownInProgress)) {
                 fassertFailedWithStatus(50785, status);
             }
 
-            return;
-        }
+                return;
+            }
 
         if (status.isOK()) {
-            _reactor->schedule(transport::Reactor::kPost, std::move(action));
+            if (baton) {
+                baton->schedule(std::move(action));
+            } else {
+                _reactor->schedule(transport::Reactor::kPost, std::move(action));
+            }
         } else if (status != ErrorCodes::CallbackCanceled) {
             warning() << "setAlarm() received an error: " << status;
         }

@@ -37,6 +37,7 @@
 #include "mongo/db/service_context.h"
 #include "mongo/platform/random.h"
 #include "mongo/stdx/mutex.h"
+#include "mongo/transport/baton.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/clock_source.h"
 #include "mongo/util/fail_point_service.h"
@@ -342,6 +343,9 @@ StatusWith<stdx::cv_status> OperationContext::waitForConditionOrInterruptNoAsser
 void OperationContext::markKilled(ErrorCodes::Error killCode) {
     invariant(killCode != ErrorCodes::OK);
     stdx::unique_lock<stdx::mutex> lkWaitMutex;
+    if (_baton) {
+        _baton->schedule([this] { this->checkForInterrupt(); });
+    }
     if (_waitMutex) {
         invariant(++_numKillers > 0);
         getClient()->unlock();

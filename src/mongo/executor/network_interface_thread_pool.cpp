@@ -137,7 +137,8 @@ void NetworkInterfaceThreadPool::consumeTasks(stdx::unique_lock<stdx::mutex> lk)
                                stdx::unique_lock<stdx::mutex> lk(_mutex);
                                _registeredAlarm = false;
                                consumeTasks(std::move(lk));
-                           })
+                           },
+                           nullptr)
                 .transitional_ignore();
         }
 

@@ -257,6 +257,7 @@ private:
     OperationContext* _opCtx;
 
     executor::TaskExecutor* _executor;
+    transport::BatonHandle _baton;
 
     // The metadata obj to pass along with the command remote. Used to indicate that the command is
     // ok to run on secondaries.

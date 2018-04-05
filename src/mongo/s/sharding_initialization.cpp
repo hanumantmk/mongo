@@ -129,12 +129,14 @@ std::unique_ptr<TaskExecutorPool> makeShardingTaskExecutorPool(
 
     const auto poolSize = taskExecutorPoolSize.value_or(TaskExecutorPool::getSuggestedPoolSize());
 
+    std::shared_ptr<NetworkInterface> ni =
+        executor::makeNetworkInterface("NetworkInterfaceASIO-TaskExecutorPool",
+                                       stdx::make_unique<ShardingNetworkConnectionHook>(),
+                                       metadataHookBuilder(),
+                                       connPoolOptions);
+
     for (size_t i = 0; i < poolSize; ++i) {
-        auto exec = makeShardingTaskExecutor(executor::makeNetworkInterface(
-            "NetworkInterfaceASIO-TaskExecutorPool-" + std::to_string(i),
-            stdx::make_unique<ShardingNetworkConnectionHook>(),
-            metadataHookBuilder(),
-            connPoolOptions));
+        auto exec = makeShardingTaskExecutor(ni);
 
         executors.emplace_back(std::move(exec));
     }
@@ -150,7 +152,7 @@ std::unique_ptr<TaskExecutorPool> makeShardingTaskExecutorPool(
 }  // namespace
 
 std::unique_ptr<executor::TaskExecutor> makeShardingTaskExecutor(
-    std::unique_ptr<NetworkInterface> net) {
+    std::shared_ptr<NetworkInterface> net) {
     auto netPtr = net.get();
     auto executor = stdx::make_unique<ThreadPoolTaskExecutor>(
         stdx::make_unique<NetworkInterfaceThreadPool>(netPtr), std::move(net));

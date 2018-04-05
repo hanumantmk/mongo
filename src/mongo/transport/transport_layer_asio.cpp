@@ -56,10 +56,13 @@
 #endif
 
 // session_asio.h has some header dependencies that require it to be the last header.
+#include "mongo/transport/baton_asio.h"
 #include "mongo/transport/session_asio.h"
 
 namespace mongo {
 namespace transport {
+
+AtomicWord<uint64_t> timersOutstanding;
 
 class ASIOReactorTimer final : public ReactorTimer {
 public:
@@ -69,10 +72,15 @@ public:
     ~ASIOReactorTimer() {
         // The underlying timer won't get destroyed until the last promise from _asyncWait
         // has been filled, so cancel the timer so call callbacks get run
-        cancel();
+        cancel(nullptr);
     }
 
-    void cancel() override {
+    void cancel(const BatonHandle& baton) override {
+        if (baton) {
+            baton->cancelTimer(*this);
+            return;
+        }
+
         auto promise = [&] {
             stdx::lock_guard<stdx::mutex> lk(_timerState->mutex);
             _timerState->generation++;
@@ -89,19 +97,29 @@ public:
         _timerState->timer.cancel();
     }
 
-    Future<void> waitFor(Milliseconds timeout) override {
-        return _asyncWait([&] { _timerState->timer.expires_after(timeout.toSystemDuration()); });
+    Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton) override {
+        if (baton) {
+            return baton->waitFor(*this, timeout);
+        } else {
+            return _asyncWait(
+                [&] { _timerState->timer.expires_after(timeout.toSystemDuration()); });
+        }
     }
 
-    Future<void> waitUntil(Date_t expiration) override {
-        return _asyncWait([&] { _timerState->timer.expires_at(expiration.toSystemTimePoint()); });
+    Future<void> waitUntil(Date_t expiration, const BatonHandle& baton) override {
+        if (baton) {
+            return baton->waitUntil(*this, expiration);
+        } else {
+            return _asyncWait(
+                [&] { _timerState->timer.expires_at(expiration.toSystemTimePoint()); });
+        }
     }
 
 private:
     template <typename ArmTimerCb>
     Future<void> _asyncWait(ArmTimerCb&& armTimer) {
         try {
-            cancel();
+            cancel(nullptr);
 
             Future<void> ret;
             uint64_t id;
@@ -728,6 +746,18 @@ SSLParams::SSLModes TransportLayerASIO::_sslMode() const {
     return static_cast<SSLParams::SSLModes>(getSSLGlobalParams().sslMode.load());
 }
 #endif
+
+BatonHandle TransportLayerASIO::makeBaton(OperationContext* opCtx) {
+    auto baton = std::make_shared<BatonASIO>(opCtx);
+
+    {
+        stdx::lock_guard<Client> lk(*opCtx->getClient());
+        invariant(!opCtx->getBaton());
+        opCtx->setBaton(baton);
+    }
+
+    return baton;
+}
 
 }  // namespace transport
 }  // namespace mongo

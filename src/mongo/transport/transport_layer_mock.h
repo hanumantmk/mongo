@@ -71,6 +71,10 @@ public:
     // Set to a factory function to use your own session type.
     std::function<SessionHandle(TransportLayer*)> createSessionHook;
 
+    BatonHandle makeBaton() override {
+        return nullptr;
+    }
+
 private:
     friend class MockSession;
 

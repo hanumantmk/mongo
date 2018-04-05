@@ -88,6 +88,11 @@ public:
 
     static std::unique_ptr<TransportLayer> makeAndStartDefaultEgressTransportLayer();
 
+    BatonHandle makeBaton(OperationContext* opCtx) override {
+        stdx::lock_guard<stdx::mutex> lk(_tlsMutex);
+        return _tls[0]->makeBaton(opCtx);
+    }
+
 private:
     template <typename Callable>
     void _foreach(Callable&& cb) const;

@@ -43,6 +43,7 @@ namespace rpc {
 
 void ShardingEgressMetadataHookForMongos::_saveGLEStats(const BSONObj& metadata,
                                                         StringData hostString) {
+    return;
     if (!haveClient()) {
         // Client will be present only when write commands are used.
         return;
