@@ -153,15 +153,14 @@ Future<void> AsyncDBClient::authenticate(const BSONObj& params) {
     auto doAuthCb = [this](executor::RemoteCommandRequest request,
                            auth::AuthCompletionHandler handler) {
 
-        runCommandRequest(request, nullptr)
-            .getAsync([handler = std::move(handler)](
-                StatusWith<executor::RemoteCommandResponse> response) {
-                if (!response.isOK()) {
-                    handler(executor::RemoteCommandResponse(response.getStatus()));
-                } else {
-                    handler(std::move(response.getValue()));
-                }
-            });
+        runCommandRequest(request).getAsync([handler = std::move(handler)](
+            StatusWith<executor::RemoteCommandResponse> response) {
+            if (!response.isOK()) {
+                handler(executor::RemoteCommandResponse(response.getStatus()));
+            } else {
+                handler(std::move(response.getValue()));
+            }
+        });
     };
 
     auth::authenticateClient(
@@ -221,9 +220,10 @@ Future<rpc::UniqueReply> AsyncDBClient::runCommand(OpMsgRequest request,
                                                    const transport::BatonHandle& baton) {
     invariant(_negotiatedProtocol);
     auto requestMsg = rpc::messageFromOpMsgRequest(*_negotiatedProtocol, std::move(request));
-    return _call(std::move(requestMsg), baton).then([this](Message response) -> Future<rpc::UniqueReply> {
-        return rpc::UniqueReply(response, rpc::makeReply(&response));
-    });
+    return _call(std::move(requestMsg), baton)
+        .then([this](Message response) -> Future<rpc::UniqueReply> {
+            return rpc::UniqueReply(response, rpc::makeReply(&response));
+        });
 }
 
 Future<executor::RemoteCommandResponse> AsyncDBClient::runCommandRequest(

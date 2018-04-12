@@ -976,7 +976,7 @@ Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
     _session = std::move(sws.getValue());
     _sessionCreationMicros = curTimeMicros64();
     _lastConnectivityCheck = Date_t::now();
-    _session->setTimeout(_socketTimeout, nullptr);
+    _session->setTimeout(_socketTimeout);
     _session->setTags(_tagMask);
     _failed = false;
     LOG(1) << "connected to server " << toString();
@@ -1126,7 +1126,7 @@ void DBClientConnection::setSoTimeout(double timeout) {
     }
 
     if (_session) {
-        _session->setTimeout(_socketTimeout, nullptr);
+        _session->setTimeout(_socketTimeout);
     }
 }
 

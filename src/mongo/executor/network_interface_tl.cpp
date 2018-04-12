@@ -250,24 +250,25 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
         }
 
         state->timer = _reactor->makeTimer();
-        state->timer->waitUntil(state->deadline, baton).getAsync([client, state, baton](Status status) {
-            if (status == ErrorCodes::CallbackCanceled) {
-                invariant(state->done.load());
-                return;
-            }
+        state->timer->waitUntil(state->deadline, baton)
+            .getAsync([client, state, baton](Status status) {
+                if (status == ErrorCodes::CallbackCanceled) {
+                    invariant(state->done.load());
+                    return;
+                }
 
-            if (state->done.swap(true)) {
-                return;
-            }
+                if (state->done.swap(true)) {
+                    return;
+                }
 
-            LOG(2) << "Request " << state->request.id << " timed out"
-                   << ", deadline was " << state->deadline << ", op was "
-                   << redact(state->request.toString());
-            state->promise.setError(
-                Status(ErrorCodes::NetworkInterfaceExceededTimeLimit, "timed out"));
+                LOG(2) << "Request " << state->request.id << " timed out"
+                       << ", deadline was " << state->deadline << ", op was "
+                       << redact(state->request.toString());
+                state->promise.setError(
+                    Status(ErrorCodes::NetworkInterfaceExceededTimeLimit, "timed out"));
 
-            client->cancel(baton);
-        });
+                client->cancel(baton);
+            });
     }
 
     client->runCommandRequest(state->request, baton)
@@ -369,36 +370,38 @@ Status NetworkInterfaceTL::setAlarm(Date_t when,
         _inProgressAlarms.insert(alarmTimer);
     }
 
-    alarmTimer->waitUntil(when, baton).getAsync([this, weakTimer, action, when, baton](Status status) {
-        auto alarmTimer = weakTimer.lock();
-        if (!alarmTimer) {
-            return;
-        } else {
-            stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
-            _inProgressAlarms.erase(alarmTimer);
-        }
-
-        auto nowVal = now();
-        if (nowVal < when) {
-            warning() << "Alarm returned early. Expected at: " << when << ", fired at: " << nowVal;
-            const auto status = setAlarm(when, std::move(action), baton);
-            if ((!status.isOK()) && (status != ErrorCodes::ShutdownInProgress)) {
-                fassertFailedWithStatus(50785, status);
+    alarmTimer->waitUntil(when, baton)
+        .getAsync([this, weakTimer, action, when, baton](Status status) {
+            auto alarmTimer = weakTimer.lock();
+            if (!alarmTimer) {
+                return;
+            } else {
+                stdx::lock_guard<stdx::mutex> lk(_inProgressMutex);
+                _inProgressAlarms.erase(alarmTimer);
             }
+
+            auto nowVal = now();
+            if (nowVal < when) {
+                warning() << "Alarm returned early. Expected at: " << when
+                          << ", fired at: " << nowVal;
+                const auto status = setAlarm(when, std::move(action), baton);
+                if ((!status.isOK()) && (status != ErrorCodes::ShutdownInProgress)) {
+                    fassertFailedWithStatus(50785, status);
+                }
 
                 return;
             }
 
-        if (status.isOK()) {
-            if (baton) {
-                baton->schedule(std::move(action));
-            } else {
-                _reactor->schedule(transport::Reactor::kPost, std::move(action));
+            if (status.isOK()) {
+                if (baton) {
+                    baton->schedule(std::move(action));
+                } else {
+                    _reactor->schedule(transport::Reactor::kPost, std::move(action));
+                }
+            } else if (status != ErrorCodes::CallbackCanceled) {
+                warning() << "setAlarm() received an error: " << status;
             }
-        } else if (status != ErrorCodes::CallbackCanceled) {
-            warning() << "setAlarm() received an error: " << status;
-        }
-    });
+        });
     return Status::OK();
 }
 

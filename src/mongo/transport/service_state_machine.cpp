@@ -247,7 +247,7 @@ void ServiceStateMachine::_sourceMessage(ThreadGuard guard) {
             return Future<Message>::makeReady(_session()->sourceMessage());
         } else {
             invariant(_transportMode == transport::Mode::kAsynchronous);
-            return _session()->asyncSourceMessage(nullptr);
+            return _session()->asyncSourceMessage();
         }
     };
 
@@ -274,7 +274,7 @@ void ServiceStateMachine::_sinkMessage(ThreadGuard guard, Message toSink) {
             return Future<void>::makeReady(_session()->sinkMessage(std::move(toSink)));
         } else {
             invariant(_transportMode == transport::Mode::kAsynchronous);
-            return _session()->asyncSinkMessage(std::move(toSink), nullptr);
+            return _session()->asyncSinkMessage(std::move(toSink));
         }
     };
 

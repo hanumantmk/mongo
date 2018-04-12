@@ -62,8 +62,6 @@
 namespace mongo {
 namespace transport {
 
-AtomicWord<uint64_t> timersOutstanding;
-
 class ASIOReactorTimer final : public ReactorTimer {
 public:
     explicit ASIOReactorTimer(asio::io_context& ctx)
@@ -72,10 +70,10 @@ public:
     ~ASIOReactorTimer() {
         // The underlying timer won't get destroyed until the last promise from _asyncWait
         // has been filled, so cancel the timer so call callbacks get run
-        cancel(nullptr);
+        cancel();
     }
 
-    void cancel(const BatonHandle& baton) override {
+    void cancel(const BatonHandle& baton = nullptr) override {
         if (baton) {
             baton->cancelTimer(*this);
             return;
@@ -97,7 +95,7 @@ public:
         _timerState->timer.cancel();
     }
 
-    Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton) override {
+    Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton = nullptr) override {
         if (baton) {
             return baton->waitFor(*this, timeout);
         } else {
@@ -106,7 +104,7 @@ public:
         }
     }
 
-    Future<void> waitUntil(Date_t expiration, const BatonHandle& baton) override {
+    Future<void> waitUntil(Date_t expiration, const BatonHandle& baton = nullptr) override {
         if (baton) {
             return baton->waitUntil(*this, expiration);
         } else {
@@ -119,7 +117,7 @@ private:
     template <typename ArmTimerCb>
     Future<void> _asyncWait(ArmTimerCb&& armTimer) {
         try {
-            cancel(nullptr);
+            cancel();
 
             Future<void> ret;
             uint64_t id;

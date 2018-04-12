@@ -130,14 +130,14 @@ public:
     virtual Status startCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                 RemoteCommandRequest& request,
                                 const RemoteCommandCompletionFn& onFinish,
-                                const transport::BatonHandle& baton) = 0;
+                                const transport::BatonHandle& baton = nullptr) = 0;
 
     /**
      * Requests cancelation of the network activity associated with "cbHandle" if it has not yet
      * completed.
      */
     virtual void cancelCommand(const TaskExecutor::CallbackHandle& cbHandle,
-                               const transport::BatonHandle& baton) = 0;
+                               const transport::BatonHandle& baton = nullptr) = 0;
 
     /**
      * Sets an alarm, which schedules "action" to run no sooner than "when".
@@ -155,7 +155,7 @@ public:
      */
     virtual Status setAlarm(Date_t when,
                             const stdx::function<void()>& action,
-                            const transport::BatonHandle& baton) = 0;
+                            const transport::BatonHandle& baton = nullptr) = 0;
 
     /**
      * Returns true if called from a thread dedicated to networking. I.e. not a

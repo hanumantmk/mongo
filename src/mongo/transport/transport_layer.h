@@ -129,7 +129,7 @@ public:
      *
      * If no future is outstanding, then this is a noop.
      */
-    virtual void cancel(const BatonHandle& baton) = 0;
+    virtual void cancel(const BatonHandle& baton = nullptr) = 0;
 
     /*
      * Returns a future that will be filled with Status::OK after the timeout has ellapsed.
@@ -137,8 +137,8 @@ public:
      * Calling this implicitly calls cancel().
      */
 
-    virtual Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton) = 0;
-    virtual Future<void> waitUntil(Date_t timeout, const BatonHandle& baton) = 0;
+    virtual Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton = nullptr) = 0;
+    virtual Future<void> waitUntil(Date_t timeout, const BatonHandle& baton = nullptr) = 0;
 };
 
 class Reactor {

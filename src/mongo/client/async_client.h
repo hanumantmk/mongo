@@ -58,15 +58,16 @@ public:
                                   transport::ReactorHandle reactor);
 
     Future<executor::RemoteCommandResponse> runCommandRequest(
-        executor::RemoteCommandRequest request, const transport::BatonHandle& baton);
-    Future<rpc::UniqueReply> runCommand(OpMsgRequest request, const transport::BatonHandle& baton);
+        executor::RemoteCommandRequest request, const transport::BatonHandle& baton = nullptr);
+    Future<rpc::UniqueReply> runCommand(OpMsgRequest request,
+                                        const transport::BatonHandle& baton = nullptr);
 
     Future<void> authenticate(const BSONObj& params);
 
     Future<void> initWireVersion(const std::string& appName,
                                  executor::NetworkConnectionHook* const hook);
 
-    void cancel(const transport::BatonHandle& baton);
+    void cancel(const transport::BatonHandle& baton = nullptr);
 
     bool isStillConnected();
 

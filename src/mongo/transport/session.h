@@ -105,7 +105,7 @@ public:
      * Source (receive) a new Message from the remote host for this Session.
      */
     virtual StatusWith<Message> sourceMessage() = 0;
-    virtual Future<Message> asyncSourceMessage(const transport::BatonHandle& handle) = 0;
+    virtual Future<Message> asyncSourceMessage(const transport::BatonHandle& handle = nullptr) = 0;
 
     /**
      * Sink (send) a Message to the remote host for this Session.
@@ -114,14 +114,14 @@ public:
      */
     virtual Status sinkMessage(Message message) = 0;
     virtual Future<void> asyncSinkMessage(Message message,
-                                          const transport::BatonHandle& handle) = 0;
+                                          const transport::BatonHandle& handle = nullptr) = 0;
 
     /**
      * Cancel any outstanding async operations. There is no way to cancel synchronous calls.
      * Futures will finish with an ErrorCodes::CallbackCancelled error if they haven't already
      * completed.
      */
-    virtual void cancelAsyncOperations(const transport::BatonHandle& handle) = 0;
+    virtual void cancelAsyncOperations(const transport::BatonHandle& handle = nullptr) = 0;
 
     /**
     * This should only be used to detect when the remote host has disappeared without
@@ -132,7 +132,7 @@ public:
     * currently support timeouts.
     */
     virtual void setTimeout(boost::optional<Milliseconds> timeout,
-                            const transport::BatonHandle& handle) = 0;
+                            const transport::BatonHandle& handle = nullptr) = 0;
 
     /**
      * This will return whether calling sourceMessage()/sinkMessage() will fail with an EOF error.
