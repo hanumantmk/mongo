@@ -152,7 +152,11 @@ public:
 
     void cancelAsyncOperations(const transport::BatonHandle& baton = nullptr) override {
         LOG(3) << "Cancelling outstanding I/O operations on connection to " << _remote;
-        getSocket().cancel();
+        if (baton) {
+            baton->cancelSession(*this);
+        } else {
+            getSocket().cancel();
+        }
     }
 
     void setTimeout(boost::optional<Milliseconds> timeout,
@@ -415,9 +419,9 @@ private:
                     .then([&stream, asyncBuffers, baton, this]() {
                         return opportunisticRead(stream, asyncBuffers, baton);
                     });
-            } else {
-                return asio::async_read(stream, asyncBuffers, UseFuture{}).then([](auto) {});
             }
+
+            return asio::async_read(stream, asyncBuffers, UseFuture{}).ignoreValue();
         } else {
             return futurize(ec);
         }
@@ -478,9 +482,9 @@ private:
                     .then([&stream, asyncBuffers, baton, this]() {
                         return opportunisticWrite(stream, asyncBuffers, baton);
                     });
-            } else {
-                return asio::async_write(stream, asyncBuffers, UseFuture{}).then([](auto) {});
             }
+
+            return asio::async_write(stream, asyncBuffers, UseFuture{}).ignoreValue();
         } else {
             return futurize(ec);
         }

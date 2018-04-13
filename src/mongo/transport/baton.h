@@ -47,21 +47,16 @@ class ReactorTimer;
 
 /**
  * A Baton is basically a networking reactor, with limited functionality and no forward progress
- * guarantees.  Rather than asynchronously running tasks through one, instead the baton records the
- * intent of those tasks and defers waiting and execution to a later call to run();
+ * guarantees.  Rather than asynchronously running tasks through one, the baton records the intent
+ * of those tasks and defers waiting and execution to a later call to run();
  *
- * Baton's provide a mechanism to allow consumers of a transport layer to execute io themselves,
+ * Baton's provide a mechanism to allow consumers of a transport layer to execute IO themselves,
  * rather than having this occur on another thread.  This can improve performance by minimizing
  * context switches, as well as improving the readability of stack traces by grounding async
  * execution on top of a regular client call stack.
  */
-class Baton : public std::enable_shared_from_this<Baton> {
+class Baton {
 public:
-    enum class Type {
-        In,
-        Out,
-    };
-
     virtual ~Baton() = default;
 
     /**
@@ -93,6 +88,10 @@ public:
     /**
      * Adds a session, returning a future which activates on read/write-ability of the session.
      */
+    enum class Type {
+        In,
+        Out,
+    };
     virtual Future<void> addSession(Session& session, Type type) = 0;
 
     /**
@@ -118,6 +117,8 @@ public:
     /**
      * Runs the baton.  This blocks, waiting for networking events or timeouts, and fulfills
      * promises and executes scheduled work.
+     *
+     * Returns a bool which indicates if the optional deadline has passed.
      */
     virtual bool run(boost::optional<Date_t> deadline) = 0;
 };

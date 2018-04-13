@@ -137,8 +137,6 @@ public:
 
     ~ConnectionPool();
 
-    void shutdown();
-
     void dropConnections(const HostAndPort& hostAndPort);
 
     void dropConnections(transport::Session::TagMask tags) override;

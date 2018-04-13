@@ -284,24 +284,7 @@ ConnectionPool::~ConnectionPool() {
     if (hasGlobalServiceContext() && _manager) {
         _manager->remove(this);
     }
-}
 
-void ConnectionPool::dropConnections(const HostAndPort& hostAndPort) {
-    stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-    auto iter = _pools.find(hostAndPort);
-
-    if (iter == _pools.end())
-        return;
-
-    iter->second->runWithActiveClient(std::move(lk), [&](decltype(lk) lk) {
-        iter->second->processFailure(
-            Status(ErrorCodes::PooledConnectionsDropped, "Pooled connections dropped"),
-            std::move(lk));
-    });
-}
-
-void ConnectionPool::shutdown() {
     std::vector<SpecificPool*> pools;
 
     // Ensure we decrement active clients for all pools that we inc on (because we intend to process
@@ -332,6 +315,21 @@ void ConnectionPool::shutdown() {
             Status(ErrorCodes::ShutdownInProgress, "Shuting down the connection pool"),
             std::move(lk));
     }
+}
+
+void ConnectionPool::dropConnections(const HostAndPort& hostAndPort) {
+    stdx::unique_lock<stdx::mutex> lk(_mutex);
+
+    auto iter = _pools.find(hostAndPort);
+
+    if (iter == _pools.end())
+        return;
+
+    iter->second->runWithActiveClient(std::move(lk), [&](decltype(lk) lk) {
+        iter->second->processFailure(
+            Status(ErrorCodes::PooledConnectionsDropped, "Pooled connections dropped"),
+            std::move(lk));
+    });
 }
 
 void ConnectionPool::dropConnections(transport::Session::TagMask tags) {

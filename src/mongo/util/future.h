@@ -1008,6 +1008,13 @@ public:
                        [](Func && func, const Status& status) noexcept { call(func, status); });
     }
 
+    /**
+     * Ignores the return value of a future, transforming it down into a Future<void>.
+     *
+     * Equivalent to then([](auto){});
+     */
+    Future<void> ignoreValue() && noexcept;
+
 private:
     template <typename T2>
     friend class Future;
@@ -1203,6 +1210,10 @@ public:
         return std::move(inner).tapAll(std::forward<Func>(func));
     }
 
+    Future<void> ignoreValue() && noexcept {
+        return std::move(*this);
+    }
+
 private:
     template <typename T>
     friend class Future;
@@ -1224,6 +1235,11 @@ private:
 
     Future<FakeVoid> inner;
 };
+
+template <typename T>
+    Future<void> Future<T>::ignoreValue() && noexcept {
+    return std::move(*this).then([](auto) {});
+}
 
 /**
  * Makes a ready Future with the return value of a nullary function. This has the same semantics as

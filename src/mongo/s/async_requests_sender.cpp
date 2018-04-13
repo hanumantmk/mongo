@@ -64,8 +64,11 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
                                          Shard::RetryPolicy retryPolicy)
     : _opCtx(opCtx),
       _executor(executor),
-      _baton(UseBatonARS.load() ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
-                                : nullptr),
+      _baton(UseBatonARS.load()
+                 ? (opCtx->getServiceContext()->getTransportLayer()
+                        ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
+                        : nullptr)
+                 : nullptr),
       _db(dbName.toString()),
       _readPreference(readPreference),
       _retryPolicy(retryPolicy) {
@@ -87,8 +90,6 @@ AsyncRequestsSender::~AsyncRequestsSender() {
         next();
     }
 
-    // The baton can live past us in lambda captures. Detaching indicates that opCtx related
-    // interruption is no longer relevant.
     if (_baton) {
         _baton->detach();
     }
@@ -248,7 +249,7 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
         request,
         [remoteIndex, this](const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
             _responseQueue.push(Job{cbData, remoteIndex});
-        });
+        }, _baton);
     if (!callbackStatus.isOK()) {
         return callbackStatus.getStatus();
     }

@@ -394,19 +394,14 @@ void remoteCommandFailedEarly(const TaskExecutor::CallbackArgs& cbData,
 }  // namespace
 
 StatusWith<TaskExecutor::CallbackHandle> ThreadPoolTaskExecutor::scheduleRemoteCommand(
-    const RemoteCommandRequest& request, const RemoteCommandCallbackFn& cb) {
+    const RemoteCommandRequest& request,
+    const RemoteCommandCallbackFn& cb,
+    const transport::BatonHandle& baton) {
     RemoteCommandRequest scheduledRequest = request;
     if (request.timeout == RemoteCommandRequest::kNoTimeout) {
         scheduledRequest.expirationDate = RemoteCommandRequest::kNoExpirationDate;
     } else {
         scheduledRequest.expirationDate = _net->now() + scheduledRequest.timeout;
-    }
-
-    transport::BatonHandle baton;
-
-    if (request.opCtx) {
-        stdx::lock_guard<Client> lk(*request.opCtx->getClient());
-        baton = request.opCtx->getBaton();
     }
 
     // In case the request fails to even get a connection from the pool,

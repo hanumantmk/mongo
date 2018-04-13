@@ -30,16 +30,18 @@
 
 #include <memory>
 #include <set>
-#include <unordered_map>
 #include <vector>
 
 #include <poll.h>
 #include <sys/eventfd.h>
 
+#include "mongo/base/checked_cast.h"
 #include "mongo/db/operation_context.h"
 #include "mongo/stdx/mutex.h"
+#include "mongo/stdx/unordered_map.h"
 #include "mongo/transport/baton.h"
 #include "mongo/transport/session_asio.h"
+#include "mongo/util/errno_util.h"
 #include "mongo/util/future.h"
 #include "mongo/util/time_support.h"
 
@@ -68,6 +70,13 @@ public:
     }
 
     void detach() override {
+        {
+            stdx::lock_guard<stdx::mutex> lk(_mutex);
+            invariant(_promises.size() == 1);
+            invariant(_scheduled.empty());
+            invariant(_timers.empty());
+        }
+
         stdx::lock_guard<Client> lk(*_opCtx->getClient());
         invariant(_opCtx->getBaton().get() == this);
         _opCtx->setBaton(nullptr);
@@ -75,7 +84,7 @@ public:
 
     Future<void> addSession(Session& session, Type type) override {
         auto fd =
-            static_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
+            checked_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
 
         Promise<void> promise;
         auto out = promise.getFuture();
@@ -83,6 +92,7 @@ public:
         _safeExecute([ fd, type, sp = promise.share(), this ] {
             _pollSet.push_back({fd, static_cast<short>(type == Type::In ? POLLIN : POLLOUT), 0});
             _promises.push_back(sp);
+            _idxById[fd] = _pollSet.size() - 1;
         });
 
         return out;
@@ -93,12 +103,10 @@ public:
     }
 
     Future<void> waitUntil(const ReactorTimer& timer, Date_t expiration) override {
-        const ReactorTimer* timerPtr = &timer;
-
         Promise<void> promise;
         auto out = promise.getFuture();
 
-        _safeExecute([ timerPtr, expiration, sp = promise.share(), this ] {
+        _safeExecute([ timerPtr = &timer, expiration, sp = promise.share(), this ] {
             auto pair = _timers.insert({
                 timerPtr, expiration, sp,
             });
@@ -111,22 +119,20 @@ public:
 
     void cancelSession(Session& session) override {
         auto fd =
-            static_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
+            checked_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
 
         _safeExecute([fd, this] {
-            for (size_t i = 1; i < _pollSet.size(); ++i) {
-                if (_pollSet[i].fd == fd) {
-                    _removePollItem(i);
-                    return;
-                }
+            auto iter = _idxById.find(fd);
+
+            if (iter != _idxById.end()) {
+                _removePollItem(iter->second);
+                _idxById.erase(iter);
             }
         });
     }
 
     void cancelTimer(const ReactorTimer& timer) override {
-        const ReactorTimer* timerPtr = &timer;
-
-        _safeExecute([timerPtr, this] {
+        _safeExecute([ timerPtr = &timer, this ] {
             auto iter = _timersById.find(timerPtr);
 
             if (iter != _timersById.end()) {
@@ -137,21 +143,31 @@ public:
     }
 
     void schedule(stdx::function<void()> func) override {
-        _safeExecute([func, this] { _scheduled.push_back(std::move(func)); });
+        _safeExecute([ func = std::move(func), this ] { _scheduled.push_back(std::move(func)); });
     }
 
     bool run(boost::optional<Date_t> deadline) override {
         std::vector<SharedPromise<void>> toFulfill;
-        std::vector<stdx::function<void()>> toRun;
 
         // We'll fulfill promises and run jobs on the way out, ensuring we don't hold any locks
         const auto guard = MakeGuard([&] {
-            for (auto& job : toRun) {
-                job();
-            }
-
             for (auto& promise : toFulfill) {
                 promise.emplaceValue();
+            }
+
+            stdx::unique_lock<stdx::mutex> lk(_mutex);
+            while (_scheduled.size()) {
+                decltype(_scheduled) toRun;
+                {
+                    using std::swap;
+                    swap(_scheduled, toRun);
+                }
+
+                lk.unlock();
+                for (auto& job : toRun) {
+                    job();
+                }
+                lk.lock();
             }
         });
 
@@ -169,36 +185,43 @@ public:
 
             // If anything was scheduled, run it now.  No need to poll
             if (_scheduled.size()) {
-                using std::swap;
-                swap(_scheduled, toRun);
                 return true;
             }
 
             boost::optional<Milliseconds> timeout;
 
-            // If we have timers, or the caller passed a deadline, we'll work that into our call to
-            // poll
-            if (_timers.size() || deadline) {
-                timeout = std::min(_timers.size() ? _timers.begin()->expiration : Date_t::max(),
-                                   deadline.value_or(Date_t::max())) -
-                    now;
+            // If we have a timer, poll no longer than that
+            if (_timers.size()) {
+                timeout = _timers.begin()->expiration - now;
+            }
+
+            // If we have a deadline
+            if (deadline) {
+                auto deadlineTimeout = *deadline - now;
+                // If we didn't have a timer with a deadline, or our deadline is sooner than that
+                // timer
+                if (!timeout || (deadlineTimeout < *timeout)) {
+                    // use the deadline timeout
+                    timeout = deadlineTimeout;
+                }
             }
 
             int rval = 0;
-            // If we don't have a timeout, or we have a timeout but it's already expired, skip poll
-            // and let the timer logic kick in
-            if (!timeout || (timeout && *timeout > Milliseconds(0))) {
+            // If we don't have a timeout, or we have a timeout that's unexpired, run poll.
+            if (!timeout || (*timeout > Milliseconds(0))) {
                 _inPoll = true;
                 lk.unlock();
                 rval = ::poll(
                     _pollSet.data(), _pollSet.size(), timeout.value_or(Milliseconds(-1)).count());
+
+                // If poll failed, it better be in EINTR
+                if (rval < 0) {
+                    severe() << "error in poll: " << errnoWithDescription(errno);
+                    fassertFailed(50788);
+                }
+
                 lk.lock();
                 _inPoll = false;
-            }
-
-            // If poll failed, it better be in EINTR
-            if (rval < 0) {
-                invariant(errno == EINTR);
             }
 
             now = Date_t::now();
@@ -209,14 +232,10 @@ public:
             }
 
             // Fire expired timers
-            for (auto iter = _timers.begin(); iter != _timers.end();) {
-                if (iter->expiration < now) {
-                    toFulfill.push_back(std::move(iter->promise));
-                    _timersById.erase(iter->id);
-                    iter = _timers.erase(iter);
-                } else {
-                    break;
-                }
+            for (auto iter = _timers.begin(); iter != _timers.end() && iter->expiration < now;) {
+                toFulfill.push_back(std::move(iter->promise));
+                _timersById.erase(iter->id);
+                iter = _timers.erase(iter);
             }
 
             // If poll found some activity
@@ -224,34 +243,30 @@ public:
                 size_t remaining = rval;
 
                 // Walk from right to left, to simplify our swap strategy
-                for (ssize_t n = _promises.size() - 1; n >= 0; n--) {
+                for (ssize_t n = _promises.size() - 1; n >= 0 && remaining; n--) {
                     auto& pollSet = _pollSet[n];
-                    if (pollSet.events | pollSet.revents) {
+                    if (pollSet.revents) {
                         if (n == 0) {
                             // If we have activity on the eventfd, pull the count out
                             uint64_t u;
-                            size_t r = ::read(_pollSet[0].fd, &u, sizeof(u));
-                            invariant(r == sizeof(u));
+                            invariant(0 == ::eventfd_read(_pollSet[0].fd, &u));
                             eventfdFired = true;
                         } else {
                             // fulfill the promise
                             toFulfill.push_back(std::move(_promises[n]));
                             _removePollItem(n);
                         }
-                    }
 
-                    remaining--;
-                    if (remaining == 0) {
-                        break;
+                        remaining--;
                     }
                 }
 
                 invariant(remaining == 0);
             }
-        }
 
-        // If we got here, we should have done something
-        invariant(toFulfill.size() || toRun.size() || eventfdFired);
+            // If we got here, we should have done something
+            invariant(toFulfill.size() || _scheduled.size() || eventfdFired);
+        }
 
         return true;
     }
@@ -283,8 +298,7 @@ private:
                 cb();
             });
 
-            uint64_t u = 1;
-            invariant(::write(_pollSet[0].fd, &u, sizeof(u)) == sizeof(u));
+            invariant(0 == eventfd_write(_pollSet[0].fd, 1));
         } else {
             cb();
         }
@@ -304,6 +318,7 @@ private:
         // removing with the last item
         if (_promises.size() > 2 && (idx != _promises.size() - 1)) {
             using std::swap;
+            swap(_idxById[_pollSet[idx].fd], _idxById[_pollSet[_pollSet.size() - 1].fd]);
             swap(_promises[idx], _promises[_promises.size() - 1]);
             swap(_pollSet[idx], _pollSet[_pollSet.size() - 1]);
         }
@@ -322,11 +337,12 @@ private:
     // These index the same request.  I.e. activation on _pollSet[n] should fulfill _promises[n]
     std::vector<pollfd> _pollSet;
     std::vector<SharedPromise<void>> _promises;
+    stdx::unordered_map<int, size_t> _idxById;
 
     // The set is used to find the next timer which will fire.  The unordered_map looks up the
     // timers so we can remove them in O(1)
     std::set<Timer, Timer::LessThan> _timers;
-    std::unordered_map<const ReactorTimer*, decltype(_timers)::const_iterator> _timersById;
+    stdx::unordered_map<const ReactorTimer*, decltype(_timers)::const_iterator> _timersById;
 
     // For tasks that come in via schedule.  Or that were deferred because we were in poll
     std::vector<std::function<void()>> _scheduled;
