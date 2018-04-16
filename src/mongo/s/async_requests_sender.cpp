@@ -47,7 +47,7 @@
 
 namespace mongo {
 
-MONGO_EXPORT_SERVER_PARAMETER(UseBatonARS, bool, true);
+MONGO_EXPORT_SERVER_PARAMETER(AsyncRequestsSenderUseBaton, bool, true);
 
 namespace {
 
@@ -64,7 +64,7 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
                                          Shard::RetryPolicy retryPolicy)
     : _opCtx(opCtx),
       _executor(executor),
-      _baton(UseBatonARS.load()
+      _baton(AsyncRequestsSenderUseBaton.load()
                  ? (opCtx->getServiceContext()->getTransportLayer()
                         ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
                         : nullptr)
@@ -97,6 +97,7 @@ AsyncRequestsSender::~AsyncRequestsSender() {
 
 AsyncRequestsSender::Response AsyncRequestsSender::next() {
     invariant(!done());
+
 
     // If needed, schedule requests for all remotes which had retriable errors.
     // If some remote had success or a non-retriable error, return it.
@@ -226,6 +227,9 @@ void AsyncRequestsSender::_scheduleRequests() {
                 // Push a noop response to the queue to indicate that a remote is ready for
                 // re-processing due to failure.
                 _responseQueue.push(boost::none);
+                if (_baton) {
+                    _baton->schedule([] {});
+                }
             }
         }
     }
@@ -237,7 +241,7 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
     invariant(!remote.cbHandle.isValid());
     invariant(!remote.swResponse);
 
-    Status resolveStatus = remote.resolveShardIdToHostAndPort(_readPreference);
+    Status resolveStatus = remote.resolveShardIdToHostAndPort(_readPreference, _baton);
     if (!resolveStatus.isOK()) {
         return resolveStatus;
     }
@@ -249,7 +253,11 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
         request,
         [remoteIndex, this](const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
             _responseQueue.push(Job{cbData, remoteIndex});
-        }, _baton);
+            if (_baton) {
+                _baton->schedule([] {});
+            }
+        },
+        _baton);
     if (!callbackStatus.isOK()) {
         return callbackStatus.getStatus();
     }
@@ -297,14 +305,54 @@ AsyncRequestsSender::RemoteData::RemoteData(ShardId shardId, BSONObj cmdObj)
     : shardId(std::move(shardId)), cmdObj(std::move(cmdObj)) {}
 
 Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
-    const ReadPreferenceSetting& readPref) {
+    const ReadPreferenceSetting& readPref, const transport::BatonHandle& baton) {
     const auto shard = getShard();
     if (!shard) {
         return Status(ErrorCodes::ShardNotFound,
                       str::stream() << "Could not find shard " << shardId);
     }
 
-    auto findHostStatus = shard->getTargeter()->findHostWithMaxWait(readPref, Seconds{20});
+    auto deadline = Date_t::now() + Seconds(20);
+
+    auto targeter = shard->getTargeter();
+
+    auto findHostStatus = [&] {
+        if (baton) {
+            auto findHostStatus = targeter->findHostNoWait(readPref);
+            if (!findHostStatus.isOK()) {
+                auto newTimeout = deadline - Date_t::now();
+                Promise<HostAndPort> promise;
+                auto future = promise.getFuture();
+                stdx::thread bgChecker([&] {
+                    try {
+                        auto sw = targeter->findHostWithMaxWait(readPref, newTimeout);
+                        promise.setFromStatusWith(std::move(sw));
+                    } catch (DBException& ex) {
+                        promise.setError(ex.toStatus());
+                    }
+
+                    if (baton) {
+                        baton->schedule([] {});
+                    }
+                });
+
+                const auto guard = MakeGuard([&] { bgChecker.join(); });
+
+                while (!future.isReady()) {
+                    if (!baton->run(deadline)) {
+                        break;
+                    }
+                }
+
+                findHostStatus = future.getNoThrow();
+            }
+
+            return findHostStatus;
+        } else {
+            return targeter->findHostWithMaxWait(readPref, Seconds{20});
+        }
+    }();
+
     if (!findHostStatus.isOK()) {
         return findHostStatus.getStatus();
     }

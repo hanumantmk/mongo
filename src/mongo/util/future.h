@@ -537,6 +537,10 @@ public:
         setImpl([&] { sharedState->setError(std::move(status)); });
     }
 
+    void setFromStatusWith(StatusWith<T> sw) noexcept {
+        setImpl([&] { sharedState->setFromStatusWith(std::move(sw)); });
+    }
+
     /**
      * Get a copyable SharedPromise that can be used to complete this Promise's Future.
      *
@@ -1011,7 +1015,9 @@ public:
     /**
      * Ignores the return value of a future, transforming it down into a Future<void>.
      *
-     * Equivalent to then([](auto){});
+     * This only ignores values, not errors.  Those remain propogated until an onError handler.
+     *
+     * Equivalent to then([](auto&&){});
      */
     Future<void> ignoreValue() && noexcept;
 
@@ -1238,7 +1244,7 @@ private:
 
 template <typename T>
     Future<void> Future<T>::ignoreValue() && noexcept {
-    return std::move(*this).then([](auto) {});
+    return std::move(*this).then([](auto&&) {});
 }
 
 /**

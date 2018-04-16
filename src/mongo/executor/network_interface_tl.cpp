@@ -175,10 +175,17 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
         state->deadline = state->start + state->request.timeout;
     }
 
-    [&] {
-        return _reactor->execute(
-            [this, state, request] { return _pool->get(request.target, request.timeout); });
-    }()
+    auto begin = Future<void>::makeReady();
+
+    if (baton) {
+        begin = baton->execute([] {});
+    }
+
+    std::move(begin)
+        .then([this, state, request] {
+            return _reactor->execute(
+                [this, state, request] { return _pool->get(request.target, request.timeout); });
+        })
         .tapError([state](Status error) {
             LOG(2) << "Failed to get connection from pool for request " << state->request.id << ": "
                    << error;

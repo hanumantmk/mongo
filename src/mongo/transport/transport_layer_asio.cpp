@@ -108,7 +108,6 @@ public:
 
     Future<void> waitUntil(Date_t expiration, const BatonHandle& baton = nullptr) override {
         if (baton) {
-            return baton->waitUntil(*this, expiration);
             return _asyncWait([&] { return baton->waitUntil(*this, expiration); }, baton);
         } else {
             return _asyncWait(
@@ -777,7 +776,7 @@ SSLParams::SSLModes TransportLayerASIO::_sslMode() const {
 #endif
 
 BatonHandle TransportLayerASIO::makeBaton(OperationContext* opCtx) {
-#ifdef __linux
+#ifdef __linux__
     auto baton = std::make_shared<BatonASIO>(opCtx);
 
     {
@@ -786,7 +785,7 @@ BatonHandle TransportLayerASIO::makeBaton(OperationContext* opCtx) {
         opCtx->setBaton(baton);
     }
 
-    return baton;
+    return std::move(baton);
 #else
     return nullptr;
 #endif

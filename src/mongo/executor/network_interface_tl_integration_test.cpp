@@ -62,13 +62,14 @@ public:
 };
 
 TEST(NetworkInterfaceTLIntegrationTest, Ping) {
-    return;
+    //    return;
     ConnectionPool::Options opts;
     auto svcContext = std::make_unique<ServiceContextNoop>();
 
     transport::TransportLayerASIO::Options tlasioOpts;
     tlasioOpts.mode = transport::TransportLayerASIO::kEgress;
     auto tl = std::make_unique<transport::TransportLayerASIO>(tlasioOpts, nullptr);
+    auto tlPtr = tl.get();
     svcContext->setTransportLayer(std::move(tl));
 
     auto net = std::make_unique<NetworkInterfaceTL>(
@@ -80,11 +81,11 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
     std::array<stdx::thread, nThreads> threads;
 
     for (auto& thread : threads) {
-        thread = stdx::thread([&net, &tl, &svcContext] {
+        thread = stdx::thread([&net, tlPtr, &svcContext] {
             auto client = svcContext->makeClient("Ping");
             auto opCtx = client->makeOperationContext();
 
-            auto baton = tl->makeBaton(opCtx.get());
+            auto baton = tlPtr->makeBaton(opCtx.get());
             //            baton.reset();
 
             stdx::mutex mutex;
@@ -148,6 +149,8 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
                     condvar.wait(lk, [&] { return todo.size() || !remaining; });
                 }
             }
+
+            baton->detach();
         });
     }
 

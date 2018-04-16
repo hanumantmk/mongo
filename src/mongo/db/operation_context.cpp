@@ -343,9 +343,6 @@ StatusWith<stdx::cv_status> OperationContext::waitForConditionOrInterruptNoAsser
 void OperationContext::markKilled(ErrorCodes::Error killCode) {
     invariant(killCode != ErrorCodes::OK);
     stdx::unique_lock<stdx::mutex> lkWaitMutex;
-    if (_baton) {
-        _baton->schedule([this] { this->checkForInterrupt(); });
-    }
     if (_waitMutex) {
         invariant(++_numKillers > 0);
         getClient()->unlock();
@@ -359,6 +356,9 @@ void OperationContext::markKilled(ErrorCodes::Error killCode) {
     if (lkWaitMutex && _numKillers == 0) {
         invariant(_waitCV);
         _waitCV->notify_all();
+    }
+    if (_baton) {
+        _baton->schedule([] {});
     }
 }
 

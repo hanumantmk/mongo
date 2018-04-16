@@ -171,7 +171,8 @@ private:
         /**
          * Given a read preference, selects a host on which the command should be run.
          */
-        Status resolveShardIdToHostAndPort(const ReadPreferenceSetting& readPref);
+        Status resolveShardIdToHostAndPort(const ReadPreferenceSetting& readPref,
+                                           const transport::BatonHandle& baton);
 
         /**
          * Returns the Shard object associated with this remote.
