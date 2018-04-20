@@ -175,7 +175,7 @@ public:
         }
     }
 
-    bool run(boost::optional<Date_t> deadline) override {
+    bool run(boost::optional<Date_t> deadline, OperationContext* opCtx) override {
         std::vector<SharedPromise<void>> toFulfill;
 
         // We'll fulfill promises and run jobs on the way out, ensuring we don't hold any locks
@@ -203,7 +203,9 @@ public:
         bool eventfdFired = false;
 
         stdx::unique_lock<stdx::mutex> lk(_mutex);
-        _opCtx->checkForInterrupt();
+        if (opCtx) {
+            opCtx->checkForInterrupt();
+        }
 
         auto now = Date_t::now();
 
@@ -265,7 +267,9 @@ public:
 
             lk.lock();
             _inPoll = false;
-            _opCtx->checkForInterrupt();
+            if (opCtx) {
+                opCtx->checkForInterrupt();
+            }
         }
 
         now = Date_t::now();

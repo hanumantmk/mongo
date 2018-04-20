@@ -62,7 +62,7 @@ public:
 };
 
 TEST(NetworkInterfaceTLIntegrationTest, Ping) {
-    //    return;
+    return;
     ConnectionPool::Options opts;
     auto svcContext = std::make_unique<ServiceContextNoop>();
 
@@ -142,7 +142,7 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
                 }
 
                 if (baton) {
-                    invariant(baton->run(boost::none));
+                    invariant(baton->run(boost::none, opCtx.get()));
                     lk.lock();
                 } else {
                     lk.lock();

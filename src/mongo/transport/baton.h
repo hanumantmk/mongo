@@ -124,7 +124,7 @@ public:
      *
      * Returns false if the optional deadline has passed
      */
-    virtual bool run(boost::optional<Date_t> deadline) = 0;
+    virtual bool run(boost::optional<Date_t> deadline, OperationContext* opCtx) = 0;
 };
 
 using BatonHandle = std::shared_ptr<Baton>;

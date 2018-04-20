@@ -171,8 +171,8 @@ private:
         /**
          * Given a read preference, selects a host on which the command should be run.
          */
-        Status resolveShardIdToHostAndPort(const ReadPreferenceSetting& readPref,
-                                           const transport::BatonHandle& baton);
+        Status resolveShardIdToHostAndPort(AsyncRequestsSender* thisv,
+                                           const ReadPreferenceSetting& readPref);
 
         /**
          * Returns the Shard object associated with this remote.
@@ -204,7 +204,7 @@ private:
     };
 
     /**
-     * Job for _handleResponse. We use a producer consumer queue to coordinate with TaskExecutors
+     * Job for _makeProgress. We use a producer consumer queue to coordinate with TaskExecutors
      * off thread, and this wraps up the arguments for that call.
      */
     struct Job {
@@ -247,18 +247,19 @@ private:
     Status _scheduleRequest(size_t remoteIndex);
 
     /**
-     * The callback for a remote command.
+     * Waits for forward progress in gathering responses from a remote.
      *
-     * If the job is not set, we've failed targeting and calling this function is a noop.
+     * If the opCtx is non-null, use it while waiting on completion.
      *
      * Stores the response or error in the remote.
      */
-    void _handleResponse(boost::optional<Job> job);
+    void _makeProgress(OperationContext* opCtx);
 
     OperationContext* _opCtx;
 
     executor::TaskExecutor* _executor;
     transport::BatonHandle _baton;
+    size_t _batonRequests = 0;
 
     // The metadata obj to pass along with the command remote. Used to indicate that the command is
     // ok to run on secondaries.
