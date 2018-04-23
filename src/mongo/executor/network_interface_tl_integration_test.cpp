@@ -62,7 +62,7 @@ public:
 };
 
 TEST(NetworkInterfaceTLIntegrationTest, Ping) {
-    return;
+    //    return;
     ConnectionPool::Options opts;
     auto svcContext = std::make_unique<ServiceContextNoop>();
 
@@ -80,8 +80,10 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
 
     std::array<stdx::thread, nThreads> threads;
 
+    std::string padding(1 << 24, 'x');
+
     for (auto& thread : threads) {
-        thread = stdx::thread([&net, tlPtr, &svcContext] {
+        thread = stdx::thread([&net, tlPtr, &svcContext, &padding] {
             auto client = svcContext->makeClient("Ping");
             auto opCtx = client->makeOperationContext();
 
@@ -95,7 +97,7 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
 
             RemoteCommandRequest request{unittest::getFixtureConnectionString().getServers()[0],
                                          "admin",
-                                         BSON("ping" << 1),
+                                         BSON("ping" << 1 << "ignored" << padding),
                                          BSONObj(),
                                          nullptr,
                                          Seconds(30)};
@@ -123,7 +125,7 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
             };
 
             for (size_t idx = 0; idx != remaining; ++idx) {
-                todo.push_back(std::make_pair(idx, 1000));
+                todo.push_back(std::make_pair(idx, 10));
             }
 
             stdx::unique_lock<stdx::mutex> lk(mutex);
@@ -150,7 +152,9 @@ TEST(NetworkInterfaceTLIntegrationTest, Ping) {
                 }
             }
 
-            baton->detach();
+            if (baton) {
+                baton->detach();
+            }
         });
     }
 

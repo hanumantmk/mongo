@@ -58,7 +58,7 @@ class TransportLayerASIO::BatonASIO : public Baton {
         EventFDHolder() : fd(::eventfd(0, 0)) {
             if (fd < 0) {
                 severe() << "error in eventfd: " << errnoWithDescription(errno);
-                fassertFailed(50797);
+                fassertFailed(50808);
             }
         }
 
