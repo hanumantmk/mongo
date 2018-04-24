@@ -429,8 +429,8 @@ private:
 
     template <typename ConstBufferSequence>
     boost::optional<Future<void>> moreToSend(GenericSocket& socket,
-                                               const ConstBufferSequence& buffers,
-                                               const BatonHandle& baton) {
+                                             const ConstBufferSequence& buffers,
+                                             const transport::BatonHandle& baton) {
         return boost::none;
     }
 
@@ -442,14 +442,13 @@ private:
      */
     template <typename ConstBufferSequence>
     boost::optional<Future<void>> moreToSend(asio::ssl::stream<GenericSocket>& socket,
-                                               const ConstBufferSequence& buffers,
-                                               const BatonHandle& baton) {
+                                             const ConstBufferSequence& buffers,
+                                             const BatonHandle& baton) {
         if (_sslSocket->core_.output_.size()) {
             return opportunisticWrite(getSocket(), _sslSocket->core_.output_, baton)
                 .then([this, &socket, buffers, baton] {
                     return opportunisticWrite(socket, buffers, baton);
                 });
-            ;
         }
 
         return boost::none;

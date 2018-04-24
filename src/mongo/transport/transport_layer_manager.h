@@ -90,6 +90,8 @@ public:
 
     BatonHandle makeBaton(OperationContext* opCtx) override {
         stdx::lock_guard<stdx::mutex> lk(_tlsMutex);
+        // TODO: figure out what to do about managers with more than one transport layer.
+        invariant(_tls.size() == 1);
         return _tls[0]->makeBaton(opCtx);
     }
 

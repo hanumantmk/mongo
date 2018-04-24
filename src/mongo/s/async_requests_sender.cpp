@@ -47,7 +47,7 @@
 
 namespace mongo {
 
-MONGO_EXPORT_SERVER_PARAMETER(UseBatonARS, bool, true);
+MONGO_EXPORT_SERVER_PARAMETER(AsyncRequestsSenderUseBaton, bool, true);
 
 namespace {
 
@@ -64,7 +64,7 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
                                          Shard::RetryPolicy retryPolicy)
     : _opCtx(opCtx),
       _executor(executor),
-      _baton(UseBatonARS.load()
+      _baton(AsyncRequestsSenderUseBaton.load()
                  ? (opCtx->getServiceContext()->getTransportLayer()
                         ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
                         : nullptr)
@@ -105,15 +105,7 @@ AsyncRequestsSender::Response AsyncRequestsSender::next() {
         // Otherwise, wait for some response to be received.
         if (_interruptStatus.isOK()) {
             try {
-                if (_baton) {
-                    if (auto job = _responseQueue.tryPop()) {
-                        _handleResponse(std::move(*job));
-                    } else {
-                        _baton->run(boost::none);
-                    }
-                } else {
-                    _handleResponse(_responseQueue.pop(_opCtx));
-                }
+                _makeProgress(_opCtx);
             } catch (const AssertionException& ex) {
                 // If the operation is interrupted, we cancel outstanding requests and switch to
                 // waiting for the (canceled) callbacks to finish without checking for interrupts.
@@ -122,7 +114,7 @@ AsyncRequestsSender::Response AsyncRequestsSender::next() {
                 continue;
             }
         } else {
-            _handleResponse(_responseQueue.pop());
+            _makeProgress(nullptr);
         }
     }
     return *readyResponse;
@@ -151,6 +143,11 @@ void AsyncRequestsSender::_cancelPendingRequests() {
 boost::optional<AsyncRequestsSender::Response> AsyncRequestsSender::_ready() {
     if (!_stopRetrying) {
         _scheduleRequests();
+    }
+
+    // If we have baton requests, we want to process those before proceeding
+    if (_batonRequests) {
+        return boost::none;
     }
 
     // Check if any remote is ready.
@@ -226,6 +223,10 @@ void AsyncRequestsSender::_scheduleRequests() {
                 // Push a noop response to the queue to indicate that a remote is ready for
                 // re-processing due to failure.
                 _responseQueue.push(boost::none);
+                if (_baton) {
+                    _batonRequests++;
+                    _baton->schedule([this] { _batonRequests--; });
+                }
             }
         }
     }
@@ -237,7 +238,7 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
     invariant(!remote.cbHandle.isValid());
     invariant(!remote.swResponse);
 
-    Status resolveStatus = remote.resolveShardIdToHostAndPort(_readPreference);
+    Status resolveStatus = remote.resolveShardIdToHostAndPort(this, _readPreference);
     if (!resolveStatus.isOK()) {
         return resolveStatus;
     }
@@ -249,7 +250,12 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
         request,
         [remoteIndex, this](const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
             _responseQueue.push(Job{cbData, remoteIndex});
-        }, _baton);
+            if (_baton) {
+                _batonRequests++;
+                _baton->schedule([this] { _batonRequests--; });
+            }
+        },
+        _baton);
     if (!callbackStatus.isOK()) {
         return callbackStatus.getStatus();
     }
@@ -258,7 +264,21 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
     return Status::OK();
 }
 
-void AsyncRequestsSender::_handleResponse(boost::optional<Job> job) {
+void AsyncRequestsSender::_makeProgress(OperationContext* opCtx) {
+    boost::optional<Job> job;
+
+    if (_baton) {
+        // If we're using a baton, we peek the queue, and block on the baton if it's empty
+        if (auto tryJob = _responseQueue.tryPop()) {
+            job = std::move(*tryJob);
+        } else {
+            _baton->run(boost::none, _opCtx);
+        }
+    } else {
+        // Otherwise we block on the queue
+        job = _opCtx ? _responseQueue.pop(_opCtx) : _responseQueue.pop();
+    }
+
     if (!job) {
         return;
     }
@@ -297,14 +317,59 @@ AsyncRequestsSender::RemoteData::RemoteData(ShardId shardId, BSONObj cmdObj)
     : shardId(std::move(shardId)), cmdObj(std::move(cmdObj)) {}
 
 Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
-    const ReadPreferenceSetting& readPref) {
+    AsyncRequestsSender* thisv, const ReadPreferenceSetting& readPref) {
     const auto shard = getShard();
     if (!shard) {
         return Status(ErrorCodes::ShardNotFound,
                       str::stream() << "Could not find shard " << shardId);
     }
 
-    auto findHostStatus = shard->getTargeter()->findHostWithMaxWait(readPref, Seconds{20});
+    auto clock = thisv->_opCtx->getServiceContext()->getFastClockSource();
+
+    auto deadline = clock->now() + Seconds(20);
+
+    auto targeter = shard->getTargeter();
+
+    auto findHostStatus = [&] {
+        if (thisv->_baton) {
+            // If we're using a baton, we spin up a background thread to do our targeting, while
+            // running the baton on the calling thread.  This allows us to make forward progress on
+            // previous requests.
+            auto findHostStatus = targeter->findHostNoWait(readPref);
+            if (!findHostStatus.isOK()) {
+                auto newTimeout = deadline - clock->now();
+
+                Promise<HostAndPort> promise;
+                auto future = promise.getFuture();
+
+                stdx::thread bgChecker([&] {
+                    try {
+                        auto sw = targeter->findHostWithMaxWait(readPref, newTimeout);
+                        promise.setFromStatusWith(std::move(sw));
+                    } catch (DBException& ex) {
+                        promise.setError(ex.toStatus());
+                    }
+
+                    thisv->_batonRequests++;
+                    thisv->_baton->schedule([thisv] { thisv->_batonRequests--; });
+                });
+                const auto guard = MakeGuard([&] { bgChecker.join(); });
+
+                while (!future.isReady()) {
+                    if (!thisv->_baton->run(deadline, nullptr)) {
+                        break;
+                    }
+                }
+
+                findHostStatus = future.getNoThrow();
+            }
+
+            return findHostStatus;
+        } else {
+            return targeter->findHostWithMaxWait(readPref, Seconds{20});
+        }
+    }();
+
     if (!findHostStatus.isOK()) {
         return findHostStatus.getStatus();
     }

@@ -66,27 +66,6 @@ public:
                         const RemoteCommandCompletionFn& onFinish,
                         const transport::BatonHandle& baton) override;
 
-    Future<TaskExecutor::ResponseStatus> startCommand(const TaskExecutor::CallbackHandle& cbHandle,
-                                                      RemoteCommandRequest& request,
-                                                      const transport::BatonHandle& baton) {
-        Promise<TaskExecutor::ResponseStatus> promise;
-        auto future = promise.getFuture();
-
-        auto status = startCommand(
-            cbHandle,
-            request,
-            [sp = promise.share()](StatusWith<TaskExecutor::ResponseStatus> sw) mutable {
-                if (sw.isOK()) {
-                    sp.emplaceValue(std::move(sw.getValue()));
-                } else {
-                    sp.setError(sw.getStatus());
-                }
-            },
-            baton);
-
-        return future;
-    }
-
     void cancelCommand(const TaskExecutor::CallbackHandle& cbHandle,
                        const transport::BatonHandle& baton) override;
     Status setAlarm(Date_t when,
@@ -107,7 +86,7 @@ private:
         Date_t deadline = RemoteCommandRequest::kNoExpirationDate;
         Date_t start;
 
-        struct Dtor {
+        struct Deleter {
             ConnectionPool::ConnectionHandleDeleter returner;
             transport::ReactorHandle reactor;
 
@@ -116,7 +95,7 @@ private:
                                   [ ret = returner, ptr ] { ret(ptr); });
             }
         };
-        using ConnHandle = std::unique_ptr<ConnectionPool::ConnectionInterface, Dtor>;
+        using ConnHandle = std::unique_ptr<ConnectionPool::ConnectionInterface, Deleter>;
 
         ConnHandle conn;
         std::unique_ptr<transport::ReactorTimer> timer;

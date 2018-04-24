@@ -105,22 +105,26 @@ public:
     virtual Future<void> waitUntil(const ReactorTimer& timer, Date_t expiration) = 0;
 
     /**
-     * Cancels waiting on a session
+     * Cancels waiting on a session.
+     *
+     * Returns true if the session was in the baton to be cancelled.
      */
-    virtual void cancelSession(Session& session) = 0;
+    virtual bool cancelSession(Session& session) = 0;
 
     /**
      * Cancels waiting on a timer
+     *
+     * Returns true if the timer was in the baton to be cancelled.
      */
-    virtual void cancelTimer(const ReactorTimer& timer) = 0;
+    virtual bool cancelTimer(const ReactorTimer& timer) = 0;
 
     /**
      * Runs the baton.  This blocks, waiting for networking events or timeouts, and fulfills
      * promises and executes scheduled work.
      *
-     * Returns a bool which indicates if the optional deadline has passed.
+     * Returns false if the optional deadline has passed
      */
-    virtual bool run(boost::optional<Date_t> deadline) = 0;
+    virtual bool run(boost::optional<Date_t> deadline, OperationContext* opCtx) = 0;
 };
 
 using BatonHandle = std::shared_ptr<Baton>;

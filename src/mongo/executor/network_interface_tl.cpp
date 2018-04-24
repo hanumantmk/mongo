@@ -70,9 +70,6 @@ std::string NetworkInterfaceTL::getHostName() {
 }
 
 void NetworkInterfaceTL::startup() {
-    if (_pool) {
-        return;
-    }
     if (_svcCtx) {
         _tl = _svcCtx->getTransportLayer();
     }
@@ -97,10 +94,6 @@ void NetworkInterfaceTL::startup() {
 }
 
 void NetworkInterfaceTL::shutdown() {
-    if (!_pool) {
-        return;
-    }
-
     _inShutdown.store(true);
     _reactor->stop();
     _ioThread.join();
@@ -175,50 +168,71 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
         state->deadline = state->start + state->request.timeout;
     }
 
-    [&] {
-        return _reactor->execute(
-            [this, state, request] { return _pool->get(request.target, request.timeout); });
-    }()
-        .tapError([state](Status error) {
-            LOG(2) << "Failed to get connection from pool for request " << state->request.id << ": "
-                   << error;
-        })
-        .then([this, baton](ConnectionPool::ConnectionHandle conn) {
-            auto connPtr = conn.get();
+    // We always get connections on the reactor thread
+    auto connFuture = _reactor->execute([this, state, request, baton] {
+        return Future<void>::makeReady()
+            .then([this, request] { return _pool->get(request.target, request.timeout); })
+            .tapError([state](Status error) {
+                LOG(2) << "Failed to get connection from pool for request " << state->request.id
+                       << ": " << error;
+            })
+            .then([this, baton](ConnectionPool::ConnectionHandle conn) {
+                auto connPtr = conn.get();
+                auto deleter = conn.get_deleter();
+                conn.release();
 
-            auto reactorConn = std::make_shared<CommandState::ConnHandle>(
-                connPtr, CommandState::Dtor{conn.get_deleter(), _reactor});
-            conn.release();
+                // TODO: drop out this shared_ptr once we have a unique_function capable future
+                return std::make_shared<CommandState::ConnHandle>(
+                    connPtr, CommandState::Deleter{deleter, _reactor});
+            });
+    });
 
-            if (baton) {
-                return baton->execute([reactorConn]() mutable { return reactorConn; });
-            } else {
-                return Future<std::shared_ptr<CommandState::ConnHandle>>::makeReady(
-                    std::move(reactorConn));
-            }
-        })
-        .then([this, state, baton](std::shared_ptr<CommandState::ConnHandle> conn) {
-            return _onAcquireConn(state, std::move(*conn), baton);
-        })
-        .onError([](Status error) -> StatusWith<RemoteCommandResponse> {
-            // The TransportLayer has, for historical reasons returned SocketException for
-            // network errors, but sharding assumes HostUnreachable on network errors.
-            if (error == ErrorCodes::SocketException) {
-                error = Status(ErrorCodes::HostUnreachable, error.reason());
-            }
-            return error;
-        })
-        .getAsync([this, state, onFinish](StatusWith<RemoteCommandResponse> response) {
-            auto duration = now() - state->start;
-            if (!response.isOK()) {
-                onFinish(RemoteCommandResponse(response.getStatus(), duration));
-            } else {
-                auto rs = std::move(response.getValue());
-                LOG(2) << "Request " << state->request.id << " finished with response: "
-                       << redact(rs.isOK() ? rs.data.toString() : rs.status.toString());
-                onFinish(rs);
-            }
-        });
+    auto remainingWork = [this, state, baton, onFinish](
+        StatusWith<std::shared_ptr<CommandState::ConnHandle>> swConn) {
+        Future<void>::makeReady()
+            .then([ this, state, swConn = std::move(swConn), baton ]() mutable {
+                return _onAcquireConn(state, std::move(*uassertStatusOK(swConn)), baton);
+            })
+            .onError([](Status error) -> StatusWith<RemoteCommandResponse> {
+                // The TransportLayer has, for historical reasons returned SocketException for
+                // network errors, but sharding assumes HostUnreachable on network errors.
+                if (error == ErrorCodes::SocketException) {
+                    error = Status(ErrorCodes::HostUnreachable, error.reason());
+                }
+                return error;
+            })
+            .getAsync([this, state, onFinish](StatusWith<RemoteCommandResponse> response) {
+                auto duration = now() - state->start;
+                if (!response.isOK()) {
+                    onFinish(RemoteCommandResponse(response.getStatus(), duration));
+                } else {
+                    auto rs = std::move(response.getValue());
+                    LOG(2) << "Request " << state->request.id << " finished with response: "
+                           << redact(rs.isOK() ? rs.data.toString() : rs.status.toString());
+                    onFinish(rs);
+                }
+            });
+    };
+
+    if (baton) {
+        // If we have a baton, we want to get back to the baton thread immediately after we get a
+        // connection
+        std::move(connFuture)
+            .getAsync([baton, remainingWork](
+                StatusWith<std::shared_ptr<CommandState::ConnHandle>> swConn) mutable {
+                baton->schedule([ remainingWork, swConn = std::move(swConn) ]() mutable {
+                    remainingWork(std::move(swConn));
+                });
+            });
+    } else {
+        // otherwise we're happy to run inline
+        std::move(connFuture)
+            .getAsync([remainingWork](
+                StatusWith<std::shared_ptr<CommandState::ConnHandle>> swConn) mutable {
+                remainingWork(std::move(swConn));
+            });
+    }
+
     return Status::OK();
 }
 
@@ -277,21 +291,13 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
                 uasserted(ErrorCodes::CallbackCanceled, "Callback was canceled");
             }
 
-            auto cb = [ this, state, response = std::move(response) ]() mutable {
-                if (_metadataHook && response.status.isOK()) {
-                    auto target = state->conn->getHostAndPort().toString();
-                    response.status = _metadataHook->readReplyMetadata(
-                        nullptr, std::move(target), response.metadata);
-                }
-
-                return Future<RemoteCommandResponse>::makeReady(std::move(response));
-            };
-
-            if (baton) {
-                return baton->execute(std::move(cb));
-            } else {
-                return _reactor->execute(std::move(cb));
+            if (_metadataHook && response.status.isOK()) {
+                auto target = state->conn->getHostAndPort().toString();
+                response.status =
+                    _metadataHook->readReplyMetadata(nullptr, std::move(target), response.metadata);
             }
+
+            return RemoteCommandResponse(std::move(response));
         })
         .getAsync([this, state, baton](StatusWith<RemoteCommandResponse> swr) {
             _eraseInUseConn(state->cbHandle);
@@ -310,7 +316,7 @@ Future<RemoteCommandResponse> NetworkInterfaceTL::_onAcquireConn(
                 state->timer->cancel(baton);
             }
 
-            state->promise.setWith([&] { return std::move(swr); });
+            state->promise.setFromStatusWith(std::move(swr));
         });
 
     return std::move(state->mergedFuture);

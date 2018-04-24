@@ -35,6 +35,7 @@
 #include "mongo/executor/task_executor.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/transport/baton.h"
+#include "mongo/util/future.h"
 
 namespace mongo {
 
@@ -131,6 +132,28 @@ public:
                                 RemoteCommandRequest& request,
                                 const RemoteCommandCompletionFn& onFinish,
                                 const transport::BatonHandle& baton = nullptr) = 0;
+
+    Future<TaskExecutor::ResponseStatus> startCommand(
+        const TaskExecutor::CallbackHandle& cbHandle,
+        RemoteCommandRequest& request,
+        const transport::BatonHandle& baton = nullptr) {
+        Promise<TaskExecutor::ResponseStatus> promise;
+        auto future = promise.getFuture();
+
+        auto status = startCommand(
+            cbHandle,
+            request,
+            [sp = promise.share()](StatusWith<TaskExecutor::ResponseStatus> sw) mutable {
+                if (sw.isOK()) {
+                    sp.emplaceValue(std::move(sw.getValue()));
+                } else {
+                    sp.setError(sw.getStatus());
+                }
+            },
+            baton);
+
+        return future;
+    }
 
     /**
      * Requests cancelation of the network activity associated with "cbHandle" if it has not yet

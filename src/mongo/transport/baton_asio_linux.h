@@ -54,25 +54,34 @@ namespace transport {
  * We implement our networking reactor on top of poll + eventfd for wakeups
  */
 class TransportLayerASIO::BatonASIO : public Baton {
+    struct EventFDHolder {
+        EventFDHolder() : fd(::eventfd(0, 0)) {
+            if (fd < 0) {
+                severe() << "error in eventfd: " << errnoWithDescription(errno);
+                fassertFailed(50808);
+            }
+        }
+
+        ~EventFDHolder() {
+            invariant(::close(fd) == 0);
+        }
+
+        int fd;
+    };
+
 public:
-    BatonASIO(OperationContext* opCtx) : _opCtx(opCtx) {
-        int efd = ::eventfd(0, EFD_NONBLOCK);
-        _promises.push_back(SharedPromise<void>{});
-        _pollSet.push_back({efd, POLLIN, 0});
-    }
+    BatonASIO(OperationContext* opCtx) : _opCtx(opCtx) {}
 
     ~BatonASIO() {
-        invariant(_promises.size() == 1);
+        invariant(_sessions.empty());
         invariant(_scheduled.empty());
         invariant(_timers.empty());
-
-        invariant(close(_pollSet[0].fd) == 0);
     }
 
     void detach() override {
         {
             stdx::lock_guard<stdx::mutex> lk(_mutex);
-            invariant(_promises.size() == 1);
+            invariant(_sessions.empty());
             invariant(_scheduled.empty());
             invariant(_timers.empty());
         }
@@ -83,16 +92,13 @@ public:
     }
 
     Future<void> addSession(Session& session, Type type) override {
-        auto fd =
-            checked_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
+        auto fd = checked_cast<ASIOSession&>(session).getSocket().native_handle();
 
         Promise<void> promise;
         auto out = promise.getFuture();
 
         _safeExecute([ fd, type, sp = promise.share(), this ] {
-            _pollSet.push_back({fd, static_cast<short>(type == Type::In ? POLLIN : POLLOUT), 0});
-            _promises.push_back(sp);
-            _idxById[fd] = _pollSet.size() - 1;
+            _sessions[fd] = TransportSession{type, sp};
         });
 
         return out;
@@ -117,36 +123,59 @@ public:
         return out;
     }
 
-    void cancelSession(Session& session) override {
-        auto fd =
-            checked_cast<TransportLayerASIO::ASIOSession&>(session).getSocket().native_handle();
+    bool cancelSession(Session& session) override {
+        auto fd = checked_cast<ASIOSession&>(session).getSocket().native_handle();
 
-        _safeExecute([fd, this] {
-            auto iter = _idxById.find(fd);
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
 
-            if (iter != _idxById.end()) {
-                _removePollItem(iter->second);
-                _idxById.erase(iter);
-            }
-        });
+        if (_sessions.find(fd) != _sessions.end()) {
+            _safeExecute(
+                [fd, this] {
+                    auto iter = _sessions.find(fd);
+
+                    if (iter != _sessions.end()) {
+                        _sessions.erase(iter);
+                    }
+                },
+                std::move(lk));
+
+            return true;
+        }
+
+        return false;
     }
 
-    void cancelTimer(const ReactorTimer& timer) override {
-        _safeExecute([ timerPtr = &timer, this ] {
-            auto iter = _timersById.find(timerPtr);
+    bool cancelTimer(const ReactorTimer& timer) override {
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
 
-            if (iter != _timersById.end()) {
-                _timers.erase(iter->second);
-                _timersById.erase(iter);
-            }
-        });
+        if (_timersById.find(&timer) != _timersById.end()) {
+            _safeExecute([ timerPtr = &timer, this ] {
+                auto iter = _timersById.find(timerPtr);
+
+                if (iter != _timersById.end()) {
+                    _timers.erase(iter->second);
+                    _timersById.erase(iter);
+                }
+            },
+                         std::move(lk));
+
+            return true;
+        }
+
+        return false;
     }
 
     void schedule(stdx::function<void()> func) override {
-        _safeExecute([ func = std::move(func), this ] { _scheduled.push_back(std::move(func)); });
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+
+        _scheduled.push_back(std::move(func));
+
+        if (_inPoll) {
+            invariant(eventfd_write(_efd.fd, 1) == 0);
+        }
     }
 
-    bool run(boost::optional<Date_t> deadline) override {
+    bool run(boost::optional<Date_t> deadline, OperationContext* opCtx) override {
         std::vector<SharedPromise<void>> toFulfill;
 
         // We'll fulfill promises and run jobs on the way out, ensuring we don't hold any locks
@@ -173,100 +202,121 @@ public:
 
         bool eventfdFired = false;
 
-        {
-            stdx::unique_lock<stdx::mutex> lk(_mutex);
-
-            auto now = Date_t::now();
-
-            // If our deadline has passed, return that we've already failed
-            if (deadline && *deadline <= now) {
-                return false;
-            }
-
-            // If anything was scheduled, run it now.  No need to poll
-            if (_scheduled.size()) {
-                return true;
-            }
-
-            boost::optional<Milliseconds> timeout;
-
-            // If we have a timer, poll no longer than that
-            if (_timers.size()) {
-                timeout = _timers.begin()->expiration - now;
-            }
-
-            // If we have a deadline
-            if (deadline) {
-                auto deadlineTimeout = *deadline - now;
-                // If we didn't have a timer with a deadline, or our deadline is sooner than that
-                // timer
-                if (!timeout || (deadlineTimeout < *timeout)) {
-                    // use the deadline timeout
-                    timeout = deadlineTimeout;
-                }
-            }
-
-            int rval = 0;
-            // If we don't have a timeout, or we have a timeout that's unexpired, run poll.
-            if (!timeout || (*timeout > Milliseconds(0))) {
-                _inPoll = true;
-                lk.unlock();
-                rval = ::poll(
-                    _pollSet.data(), _pollSet.size(), timeout.value_or(Milliseconds(-1)).count());
-
-                // If poll failed, it better be in EINTR
-                if (rval < 0) {
-                    severe() << "error in poll: " << errnoWithDescription(errno);
-                    fassertFailed(50788);
-                }
-
-                lk.lock();
-                _inPoll = false;
-            }
-
-            now = Date_t::now();
-
-            // If our deadline passed while in poll, we've failed
-            if (deadline && now > *deadline) {
-                return false;
-            }
-
-            // Fire expired timers
-            for (auto iter = _timers.begin(); iter != _timers.end() && iter->expiration < now;) {
-                toFulfill.push_back(std::move(iter->promise));
-                _timersById.erase(iter->id);
-                iter = _timers.erase(iter);
-            }
-
-            // If poll found some activity
-            if (rval > 0) {
-                size_t remaining = rval;
-
-                // Walk from right to left, to simplify our swap strategy
-                for (ssize_t n = _promises.size() - 1; n >= 0 && remaining; n--) {
-                    auto& pollSet = _pollSet[n];
-                    if (pollSet.revents) {
-                        if (n == 0) {
-                            // If we have activity on the eventfd, pull the count out
-                            uint64_t u;
-                            invariant(0 == ::eventfd_read(_pollSet[0].fd, &u));
-                            eventfdFired = true;
-                        } else {
-                            // fulfill the promise
-                            toFulfill.push_back(std::move(_promises[n]));
-                            _removePollItem(n);
-                        }
-
-                        remaining--;
-                    }
-                }
-
-                invariant(remaining == 0);
-            }
-
-            // If we got here, we should have done something
-            invariant(toFulfill.size() || _scheduled.size() || eventfdFired);
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
+        if (opCtx) {
+            opCtx->checkForInterrupt();
         }
+
+        auto now = Date_t::now();
+
+        // If our deadline has passed, return that we've already failed
+        if (deadline && *deadline <= now) {
+            return false;
+        }
+
+        // If anything was scheduled, run it now.  No need to poll
+        if (_scheduled.size()) {
+            return true;
+        }
+
+        boost::optional<Milliseconds> timeout;
+
+        // If we have a timer, poll no longer than that
+        if (_timers.size()) {
+            timeout = _timers.begin()->expiration - now;
+        }
+
+        if (deadline) {
+            auto deadlineTimeout = *deadline - now;
+
+            // If we didn't have a timer with a deadline, or our deadline is sooner than that
+            // timer
+            if (!timeout || (deadlineTimeout < *timeout)) {
+                timeout = deadlineTimeout;
+            }
+        }
+
+        std::vector<decltype(_sessions)::iterator> sessions;
+        sessions.reserve(_sessions.size());
+        std::vector<pollfd> pollSet;
+        pollSet.reserve(_sessions.size() + 1);
+
+        pollSet.push_back(pollfd{_efd.fd, POLLIN, 0});
+
+        for (auto iter = _sessions.begin(); iter != _sessions.end(); ++iter) {
+            pollSet.push_back(
+                pollfd{iter->first,
+                       static_cast<short>(iter->second.type == Type::In ? POLLIN : POLLOUT),
+                       0});
+            sessions.push_back(iter);
+        }
+
+        int rval = 0;
+        // If we don't have a timeout, or we have a timeout that's unexpired, run poll.
+        if (!timeout || (*timeout > Milliseconds(0))) {
+            _inPoll = true;
+            lk.unlock();
+            rval =
+                ::poll(pollSet.data(), pollSet.size(), timeout.value_or(Milliseconds(-1)).count());
+
+            // If poll failed, it better be in EINTR
+            if (rval < 0 && errno != EINTR) {
+                severe() << "error in poll: " << errnoWithDescription(errno);
+                fassertFailed(50798);
+            }
+
+            lk.lock();
+            _inPoll = false;
+            if (opCtx) {
+                opCtx->checkForInterrupt();
+            }
+        }
+
+        now = Date_t::now();
+
+        // If our deadline passed while in poll, we've failed
+        if (deadline && now > *deadline) {
+            return false;
+        }
+
+        // Fire expired timers
+        for (auto iter = _timers.begin(); iter != _timers.end() && iter->expiration < now;) {
+            toFulfill.push_back(std::move(iter->promise));
+            _timersById.erase(iter->id);
+            iter = _timers.erase(iter);
+        }
+
+        // If poll found some activity
+        if (rval > 0) {
+            size_t remaining = rval;
+
+            auto pollIter = pollSet.begin();
+
+            if (pollIter->revents) {
+                // If we have activity on the eventfd, pull the count out
+                uint64_t u;
+                invariant(::eventfd_read(pollIter->fd, &u) == 0);
+                eventfdFired = true;
+
+                remaining--;
+            }
+
+            ++pollIter;
+            for (auto sessionIter = sessions.begin(); sessionIter != sessions.end() && remaining;
+                 ++sessionIter, ++pollIter) {
+                if (pollIter->revents) {
+                    toFulfill.push_back(std::move((*sessionIter)->second.promise));
+                    _sessions.erase(*sessionIter);
+
+                    remaining--;
+                }
+            }
+
+            invariant(remaining == 0);
+        }
+
+        // If we got here, we should have done something
+        invariant(toFulfill.size() || _scheduled.size() || eventfdFired);
 
         return true;
     }
@@ -284,48 +334,32 @@ private:
         };
     };
 
+    struct TransportSession {
+        Type type;
+        SharedPromise<void> promise;
+    };
+
+    template <typename Callback>
+    void _safeExecute(Callback&& cb) {
+        return _safeExecute(std::forward<Callback>(cb), stdx::unique_lock<stdx::mutex>(_mutex));
+    }
+
     /**
      * Safely executes method on the reactor.  If we're in poll, we schedule a task, then write to
      * the eventfd.  If not, we run inline.
      */
     template <typename Callback>
-    void _safeExecute(Callback&& cb) {
-        stdx::lock_guard<stdx::mutex> lk(_mutex);
-
+    void _safeExecute(Callback&& cb, stdx::unique_lock<stdx::mutex> lk) {
         if (_inPoll) {
             _scheduled.push_back([cb, this] {
                 stdx::lock_guard<stdx::mutex> lk(_mutex);
                 cb();
             });
 
-            invariant(0 == eventfd_write(_pollSet[0].fd, 1));
+            invariant(eventfd_write(_efd.fd, 1) == 0);
         } else {
             cb();
         }
-    }
-
-    /**
-     * We manage the poll set by swapping to the end of the vector, then popping the last item
-     */
-    void _removePollItem(size_t idx) {
-        // We should never remove the eventfd
-        invariant(idx != 0);
-
-        // We shouldn't index past the end of the vector
-        invariant(idx < _promises.size());
-
-        // If we have more than one fd and we're not removing the last item, swap whatever we're
-        // removing with the last item
-        if (_promises.size() > 2 && (idx != _promises.size() - 1)) {
-            using std::swap;
-            swap(_idxById[_pollSet[idx].fd], _idxById[_pollSet[_pollSet.size() - 1].fd]);
-            swap(_promises[idx], _promises[_promises.size() - 1]);
-            swap(_pollSet[idx], _pollSet[_pollSet.size() - 1]);
-        }
-
-        // Then pop it off
-        _promises.pop_back();
-        _pollSet.pop_back();
     }
 
     stdx::mutex _mutex;
@@ -334,10 +368,11 @@ private:
 
     bool _inPoll = false;
 
-    // These index the same request.  I.e. activation on _pollSet[n] should fulfill _promises[n]
-    std::vector<pollfd> _pollSet;
-    std::vector<SharedPromise<void>> _promises;
-    stdx::unordered_map<int, size_t> _idxById;
+    EventFDHolder _efd;
+
+    // This map stores the sessions we need to poll on. We unwind it into a pollset for every
+    // blocking call to run
+    stdx::unordered_map<int, TransportSession> _sessions;
 
     // The set is used to find the next timer which will fire.  The unordered_map looks up the
     // timers so we can remove them in O(1)

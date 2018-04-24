@@ -106,7 +106,9 @@ public:
     enum WhichReactor { kIngress, kEgress, kNewReactor };
     virtual ReactorHandle getReactor(WhichReactor which) = 0;
 
-    virtual BatonHandle makeBaton(OperationContext* opCtx) = 0;
+    virtual BatonHandle makeBaton(OperationContext* opCtx) {
+        return nullptr;
+    }
 
 protected:
     TransportLayer() = default;
