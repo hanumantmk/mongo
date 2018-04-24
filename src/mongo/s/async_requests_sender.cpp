@@ -220,13 +220,15 @@ void AsyncRequestsSender::_scheduleRequests() {
             auto scheduleStatus = _scheduleRequest(i);
             if (!scheduleStatus.isOK()) {
                 remote.swResponse = std::move(scheduleStatus);
-                // Push a noop response to the queue to indicate that a remote is ready for
-                // re-processing due to failure.
-                _responseQueue.push(boost::none);
+
                 if (_baton) {
                     _batonRequests++;
                     _baton->schedule([this] { _batonRequests--; });
                 }
+
+                // Push a noop response to the queue to indicate that a remote is ready for
+                // re-processing due to failure.
+                _responseQueue.push(boost::none);
             }
         }
     }
@@ -249,11 +251,12 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
     auto callbackStatus = _executor->scheduleRemoteCommand(
         request,
         [remoteIndex, this](const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
-            _responseQueue.push(Job{cbData, remoteIndex});
             if (_baton) {
                 _batonRequests++;
                 _baton->schedule([this] { _batonRequests--; });
             }
+
+            _responseQueue.push(Job{cbData, remoteIndex});
         },
         _baton);
     if (!callbackStatus.isOK()) {
@@ -342,6 +345,7 @@ Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
                 Promise<HostAndPort> promise;
                 auto future = promise.getFuture();
 
+                thisv->_batonRequests++;
                 stdx::thread bgChecker([&] {
                     try {
                         auto sw = targeter->findHostWithMaxWait(readPref, newTimeout);
@@ -350,7 +354,6 @@ Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
                         promise.setError(ex.toStatus());
                     }
 
-                    thisv->_batonRequests++;
                     thisv->_baton->schedule([thisv] { thisv->_batonRequests--; });
                 });
                 const auto guard = MakeGuard([&] { bgChecker.join(); });

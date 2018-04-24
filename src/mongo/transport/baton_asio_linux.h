@@ -202,10 +202,11 @@ public:
 
         bool eventfdFired = false;
 
-        stdx::unique_lock<stdx::mutex> lk(_mutex);
         if (opCtx) {
             opCtx->checkForInterrupt();
         }
+
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
 
         auto now = Date_t::now();
 
@@ -259,17 +260,21 @@ public:
             rval =
                 ::poll(pollSet.data(), pollSet.size(), timeout.value_or(Milliseconds(-1)).count());
 
+            lk.lock();
+            _inPoll = false;
+            lk.unlock();
+
             // If poll failed, it better be in EINTR
             if (rval < 0 && errno != EINTR) {
                 severe() << "error in poll: " << errnoWithDescription(errno);
                 fassertFailed(50798);
             }
 
-            lk.lock();
-            _inPoll = false;
             if (opCtx) {
                 opCtx->checkForInterrupt();
             }
+
+            lk.lock();
         }
 
         now = Date_t::now();
