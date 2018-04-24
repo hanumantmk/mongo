@@ -123,10 +123,7 @@ public:
         ensureSync();
 
         return write(asio::buffer(message.buf(), message.size()))
-            .then([&message](size_t size) {
-                invariant(size == size_t(message.size()));
-                networkCounter.hitPhysicalOut(message.size());
-            })
+            .then([&message](size_t size) { networkCounter.hitPhysicalOut(message.size()); })
             .getNoThrow();
     }
 
@@ -134,7 +131,6 @@ public:
         ensureAsync();
         return write(asio::buffer(message.buf(), message.size()))
             .then([message /*keep the buffer alive*/](size_t size) {
-                invariant(size == size_t(message.size()));
                 networkCounter.hitPhysicalOut(message.size());
             });
     }
@@ -315,8 +311,6 @@ private:
                     return sendHTTPResponse();
                 }
 
-                invariant(size == kHeaderSize);
-
                 const auto msgLen = size_t(MSGHEADER::View(headerBuffer.get()).getMessageLength());
                 if (msgLen < kHeaderSize || msgLen > MaxMessageSizeBytes) {
                     StringBuilder sb;
@@ -405,6 +399,15 @@ private:
         }
     }
 
+    /**
+     * moreToSend checks the ssl socket after an opportunisticWrite.  If there are still bytes to
+     * send, we manually send them off the underlying socket.  Then we hook that up with a future
+     * that gets us back to sending from the ssl side.
+     *
+     * There are two variants because we call opportunisticWrite on generic sockets and ssl sockets.
+     * The generic socket impl never has more to send (because it doesn't have an inner socket it
+     * needs to keep sending).
+     */
     template <typename ConstBufferSequence>
     boost::optional<Future<size_t>> moreToSend(GenericSocket& socket,
                                                const ConstBufferSequence& buffers) {
@@ -412,11 +415,6 @@ private:
     }
 
 #ifdef MONGO_CONFIG_SSL
-    /**
-     * moreToSend checks the ssl socket after an opportunisticWrite.  If there are still bytes to
-     * send, we manually send them off the underlying socket.  Then we hook that up with a future
-     * that gets us back to sending from the ssl side.
-     */
     template <typename ConstBufferSequence>
     boost::optional<Future<size_t>> moreToSend(asio::ssl::stream<GenericSocket>& socket,
                                                const ConstBufferSequence& buffers) {
