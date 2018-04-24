@@ -577,7 +577,6 @@ public:
         return init.result.get();
     }
 
-private:
     Stream next_layer_;
     detail::stream_core core_;
 };
