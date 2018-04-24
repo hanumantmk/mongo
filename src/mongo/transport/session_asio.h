@@ -379,13 +379,7 @@ private:
 #ifdef MONGO_CONFIG_SSL
         _ranHandshake = true;
         if (_sslSocket) {
-            if (_blockingMode == Async) {
-                // Opportunistic writes are broken for async egress SSL (switching between blocking
-                // and non-blocking mode corrupts the TLS exchange).
-                return asio::async_write(*_sslSocket, buffers, UseFuture{});
-            } else {
-                return opportunisticWrite(*_sslSocket, buffers);
-            }
+            return opportunisticWrite(*_sslSocket, buffers);
         }
 #endif
         return opportunisticWrite(_socket, buffers);
@@ -414,12 +408,40 @@ private:
         }
     }
 
+    template <typename ConstBufferSequence>
+    boost::optional<Future<size_t>> moreToSend(GenericSocket& socket,
+                                               const ConstBufferSequence& buffers) {
+        return boost::none;
+    }
+
+#ifdef MONGO_CONFIG_SSL
+    /**
+     * moreToSend checks the ssl socket after an opportunisticWrite.  If there are still bytes to
+     * send, we manually send them off the underlying socket.  Then we hook that up with a future
+     * that gets us back to sending from the ssl side.
+     */
+    template <typename ConstBufferSequence>
+    boost::optional<Future<size_t>> moreToSend(asio::ssl::stream<GenericSocket>& socket,
+                                               const ConstBufferSequence& buffers) {
+        if (_sslSocket->core_.output_.size()) {
+            return opportunisticWrite(getSocket(), _sslSocket->core_.output_)
+                .then([this, &socket, buffers](size_t) {
+                    return opportunisticWrite(socket, buffers);
+                });
+            ;
+        }
+
+        return boost::none;
+    }
+#endif
+
     template <typename Stream, typename ConstBufferSequence>
     Future<size_t> opportunisticWrite(Stream& stream, const ConstBufferSequence& buffers) {
         std::error_code ec;
         auto size = asio::write(stream, buffers, ec);
         if (((ec == asio::error::would_block) || (ec == asio::error::try_again)) &&
             (_blockingMode == Async)) {
+
             // asio::write is a loop internally, so some of buffers may have been read into already.
             // So we need to adjust the buffers passed into async_write to be offset by size, if
             // size is > 0.
@@ -427,6 +449,11 @@ private:
             if (size > 0) {
                 asyncBuffers += size;
             }
+
+            if (auto more = moreToSend(stream, asyncBuffers)) {
+                return std::move(*more);
+            }
+
             return asio::async_write(stream, asyncBuffers, UseFuture{})
                 .then([size](size_t asyncSize) {
                     // Add back in the size written opportunistically.
