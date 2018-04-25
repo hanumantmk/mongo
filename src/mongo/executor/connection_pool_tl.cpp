@@ -50,7 +50,7 @@ struct TimeoutHandler {
 
 void TLTimer::setTimeout(Milliseconds timeoutVal, TimeoutCallback cb) {
     _timer->waitFor(timeoutVal).getAsync([cb = std::move(cb)](Status status) {
-        if (status == ErrorCodes::CallbackCanceled) {
+        if (status == ErrorCodes::CallbackCanceled || status == ErrorCodes::BrokenPromise) {
             return;
         }
 

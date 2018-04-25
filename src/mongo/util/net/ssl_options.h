@@ -51,13 +51,13 @@ struct SSLParams {
     AtomicInt32 sslMode;            // --sslMode - the SSL operation mode, see enum SSLModes
     std::string sslPEMTempDHParam;  // --setParameter OpenSSLDiffieHellmanParameters=file : PEM file
                                     // with DH parameters.
-    std::string sslPEMKeyFile;      // --sslPEMKeyFile
-    std::string sslPEMKeyPassword;  // --sslPEMKeyPassword
-    std::string sslClusterFile;     // --sslInternalKeyFile
-    std::string sslClusterPassword;  // --sslInternalKeyPassword
-    std::string sslCAFile;           // --sslCAFile
-    std::string sslCRLFile;          // --sslCRLFile
-    std::string sslCipherConfig;     // --sslCipherConfig
+    std::string sslPEMKeyFile = std::string("jstests/libs/server.pem");  // --sslPEMKeyFile
+    std::string sslPEMKeyPassword;                                       // --sslPEMKeyPassword
+    std::string sslClusterFile;                                          // --sslInternalKeyFile
+    std::string sslClusterPassword;                                      // --sslInternalKeyPassword
+    std::string sslCAFile;                                               // --sslCAFile
+    std::string sslCRLFile;                                              // --sslCRLFile
+    std::string sslCipherConfig;                                         // --sslCipherConfig
 
     struct CertificateSelector {
         std::string subject;
@@ -74,13 +74,13 @@ struct SSLParams {
     std::vector<Protocols> sslDisabledProtocols;  // --sslDisabledProtocols
     bool sslWeakCertificateValidation = false;    // --sslWeakCertificateValidation
     bool sslFIPSMode = false;                     // --sslFIPSMode
-    bool sslAllowInvalidCertificates = false;     // --sslAllowInvalidCertificates
+    bool sslAllowInvalidCertificates = true;      // --sslAllowInvalidCertificates
     bool sslAllowInvalidHostnames = false;        // --sslAllowInvalidHostnames
     bool disableNonSSLConnectionLogging =
         false;  // --setParameter disableNonSSLConnectionLogging=true
 
     SSLParams() {
-        sslMode.store(SSLMode_disabled);
+        sslMode.store(SSLMode_requireSSL);
     }
 
     enum SSLModes {

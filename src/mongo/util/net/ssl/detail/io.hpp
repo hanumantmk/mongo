@@ -23,6 +23,8 @@
 
 #include "asio/detail/push_options.hpp"
 
+#include <iostream>
+
 namespace asio {
 namespace ssl {
 namespace detail {
@@ -30,6 +32,28 @@ namespace detail {
 template <typename Stream, typename Operation>
 std::size_t io(Stream& next_layer, stream_core& core, const Operation& op, asio::error_code& ec) {
     std::size_t bytes_transferred = 0;
+
+    auto run = [&]{
+        core.output_ = core.engine_.get_output(core.output_buffer_);
+
+        asio::mutable_buffer buf = [&]{
+            switch (core.output_.size()) {
+                case 0:
+                    return core.output_;
+                case 1:
+                    return core.output_;
+                default:
+                    return asio::mutable_buffer(core.output_.data(), 1);
+            }
+        }();
+
+        core.output_ += asio::write(next_layer, buf, ec);
+
+        if (!ec && core.output_.size()) {
+            ec = asio::error::try_again;
+        }
+    };
+
     do
         switch (op(core.engine_, ec, bytes_transferred)) {
             case engine::want_input_and_retry:
@@ -48,20 +72,22 @@ std::size_t io(Stream& next_layer, stream_core& core, const Operation& op, asio:
 
             case engine::want_output_and_retry:
 
-                core.output_ = core.engine_.get_output(core.output_buffer_);
-                // Get output data from the engine and write it to the underlying
-                // transport.
-                core.output_ += asio::write(next_layer, core.output_, ec);
+                run();
+                //core.output_ = core.engine_.get_output(core.output_buffer_);
+                //// Get output data from the engine and write it to the underlying
+                //// transport.
+                //core.output_ += asio::write(next_layer, core.output_, ec);
 
                 // Try the operation again.
                 continue;
 
             case engine::want_output:
 
-                core.output_ = core.engine_.get_output(core.output_buffer_);
-                // Get output data from the engine and write it to the underlying
-                // transport.
-                core.output_ += asio::write(next_layer, core.output_, ec);
+                run();
+                //core.output_ = core.engine_.get_output(core.output_buffer_);
+                //// Get output data from the engine and write it to the underlying
+                //// transport.
+                //core.output_ += asio::write(next_layer, core.output_, ec);
 
                 // Operation is complete. Return result to caller.
                 core.engine_.map_error_code(ec);
