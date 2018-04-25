@@ -123,7 +123,10 @@ public:
         ensureSync();
 
         return write(asio::buffer(message.buf(), message.size()))
-            .then([&message](size_t size) { networkCounter.hitPhysicalOut(message.size()); })
+            .then([&message](size_t size) {
+                invariant(size == size_t(message.size()));
+                networkCounter.hitPhysicalOut(message.size());
+            })
             .getNoThrow();
     }
 
@@ -131,6 +134,7 @@ public:
         ensureAsync();
         return write(asio::buffer(message.buf(), message.size()))
             .then([message /*keep the buffer alive*/](size_t size) {
+                invariant(size == size_t(message.size()));
                 networkCounter.hitPhysicalOut(message.size());
             });
     }
@@ -311,6 +315,8 @@ private:
                     return sendHTTPResponse();
                 }
 
+                invariant(size == kHeaderSize);
+
                 const auto msgLen = size_t(MSGHEADER::View(headerBuffer.get()).getMessageLength());
                 if (msgLen < kHeaderSize || msgLen > MaxMessageSizeBytes) {
                     StringBuilder sb;
@@ -369,9 +375,21 @@ private:
     Future<size_t> write(const ConstBufferSequence& buffers) {
 #ifdef MONGO_CONFIG_SSL
         _ranHandshake = true;
+#ifdef __linux__
+        // We do some trickery in asio (see moreToSend), which appears to work well on linux, but
+        // fails on other platforms.
         if (_sslSocket) {
             return opportunisticWrite(*_sslSocket, buffers);
         }
+#else
+        if (_blockingMode == Async) {
+            // Opportunistic writes are broken for async egress SSL (switching between blocking
+            // and non-blocking mode corrupts the TLS exchange).
+            return asio::async_write(*_sslSocket, buffers, UseFuture{});
+        } else {
+            return opportunisticWrite(*_sslSocket, buffers);
+        }
+#endif
 #endif
         return opportunisticWrite(_socket, buffers);
     }
@@ -410,20 +428,24 @@ private:
      */
     template <typename ConstBufferSequence>
     boost::optional<Future<size_t>> moreToSend(GenericSocket& socket,
-                                               const ConstBufferSequence& buffers) {
+                                               const ConstBufferSequence& buffers,
+                                               size_t size) {
         return boost::none;
     }
 
 #ifdef MONGO_CONFIG_SSL
     template <typename ConstBufferSequence>
     boost::optional<Future<size_t>> moreToSend(asio::ssl::stream<GenericSocket>& socket,
-                                               const ConstBufferSequence& buffers) {
-        if (_sslSocket->core_.output_.size()) {
-            return opportunisticWrite(getSocket(), _sslSocket->core_.output_)
-                .then([this, &socket, buffers](size_t) {
-                    return opportunisticWrite(socket, buffers);
+                                               const ConstBufferSequence& buffers,
+                                               size_t sizeFromBefore) {
+        if (_sslSocket->getCoreOutputBuffer().size()) {
+            return opportunisticWrite(getSocket(), _sslSocket->getCoreOutputBuffer())
+                .then([this, &socket, buffers, sizeFromBefore](size_t) {
+                    return opportunisticWrite(socket, buffers)
+                        .then([sizeFromBefore](size_t justWritten) {
+                            return justWritten + sizeFromBefore;
+                        });
                 });
-            ;
         }
 
         return boost::none;
@@ -445,7 +467,7 @@ private:
                 asyncBuffers += size;
             }
 
-            if (auto more = moreToSend(stream, asyncBuffers)) {
+            if (auto more = moreToSend(stream, asyncBuffers, size)) {
                 return std::move(*more);
             }
 
