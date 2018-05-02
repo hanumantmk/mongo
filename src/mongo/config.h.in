@@ -33,6 +33,9 @@
 #define SSL_PROVIDER_WINDOWS 2
 #define SSL_PROVIDER_APPLE 3
 
+// Define altivec vec_vbpermq output index
+@mongo_config_altivec_vec_vbpermq_output_index@
+
 // Define to target byte order (1234 vs 4321)
 @mongo_config_byte_order@
 
