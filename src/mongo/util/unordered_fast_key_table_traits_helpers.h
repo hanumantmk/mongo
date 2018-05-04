@@ -27,6 +27,8 @@
 
 #pragma once
 
+#include <third_party/murmurhash3/MurmurHash3.h>
+
 #include "mongo/util/unordered_fast_key_table.h"
 
 namespace mongo {
@@ -79,6 +81,54 @@ struct UnorderedFastKeyTableTraitsFactoryForPtrKey {
     using type = UnorderedFastKeyTable<Key*, Key, V, Traits>;
 };
 
+template <typename Key, typename Hasher>
+struct UnorderedFastKeyTableTraitsFactoryForRegularKey {
+    struct Traits {
+        static uint32_t hash(const Key& a) {
+            return Hasher()(a);
+        }
+
+        static bool equals(const Key& a, const Key& b) {
+            return a == b;
+        }
+
+        static const Key& toStorage(const Key& s) {
+            return s;
+        }
+
+        static const Key& toLookup(const Key& s) {
+            return s;
+        }
+
+        class HashedKey {
+        public:
+            HashedKey() = default;
+
+            explicit HashedKey(const Key& key) : _key(key), _hash(Traits::hash(_key)) {}
+
+            HashedKey(const Key& key, uint32_t hash) : _key(key), _hash(hash) {
+                // If you claim to know the hash, it better be correct.
+                dassert(_hash == Traits::hash(_key));
+            }
+
+            const Key& key() const {
+                return _key;
+            }
+
+            uint32_t hash() const {
+                return _hash;
+            }
+
+        private:
+            Key _key;
+            uint32_t _hash = 0;
+        };
+    };
+
+    template <typename V>
+    using type = UnorderedFastKeyTable<Key, Key, V, Traits>;
+};
+
 /**
  * Provides a Hasher which forwards to an instance's .hash() method.  This should only be used with
  * high quality hashing functions because UnorderedFastKeyMap uses bit masks, rather than % by
@@ -88,6 +138,18 @@ template <typename T>
 struct UnorderedFastKeyTableInstanceMethodHasher {
     auto operator()(const T& t) const -> decltype(t.hash()) {
         return t.hash();
+    }
+};
+
+template <typename T>
+struct UnorderedFastKeyTableMurmurHasher {
+    static_assert(std::is_trivially_copyable<T>::value,
+                  "The default murmurhash hasher only works on trivial types");
+
+    uint32_t operator()(const T& t) const {
+        uint32_t hash;
+        MurmurHash3_x86_32(reinterpret_cast<const char*>(&t), sizeof(t), 0, &hash);
+        return hash;
     }
 };
 }

@@ -580,6 +580,16 @@ env.CppUnitTest(
     ],
 )
 
+env.CppUnitTest(
+    target='mongo_unordered_map_test',
+    source=[
+        'mongo_unordered_map_test.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
+    ],
+)
+
 env.Library(
     target='password',
     source=[
