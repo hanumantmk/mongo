@@ -165,4 +165,22 @@ TEST(OpMsg, CloseConnectionOnFireAndForgetNotMasterError) {
     ASSERT(foundSecondary);
 }
 
+TEST(OpMsg, DocumentSequenceReturnsWork) {
+    std::string errMsg;
+    auto conn = std::unique_ptr<DBClientBase>(
+        unittest::getFixtureConnectionString().connect("integration_test", errMsg));
+    uassert(ErrorCodes::SocketException, errMsg, conn);
+
+    auto opMsgRequest = OpMsgRequest::fromDBAndBody("admin", BSON("echo" << 1));
+    opMsgRequest.sequences.push_back({"example", {BSON("a" << 1), BSON("b" << 2)}});
+    auto request = opMsgRequest.serialize();
+
+    Message reply;
+    ASSERT(conn->call(request, reply));
+
+    auto opMsgReply = OpMsg::parse(reply);
+
+    ASSERT(opMsgReply.getSequence("example"));
+}
+
 }  // namespace mongo
