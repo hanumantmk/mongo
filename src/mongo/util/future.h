@@ -44,6 +44,7 @@
 #include "mongo/util/assert_util.h"
 #include "mongo/util/debug_util.h"
 #include "mongo/util/functional.h"
+#include "mongo/util/interruptable.h"
 #include "mongo/util/intrusive_counter.h"
 #include "mongo/util/scopeguard.h"
 
@@ -315,7 +316,7 @@ public:
     virtual ~SharedStateBase() = default;
 
     // Only called by future side.
-    void wait() noexcept {
+    void wait(Interruptable* interruptable) {
         if (state.load(std::memory_order_acquire) == SSBState::kFinished)
             return;
 
@@ -330,7 +331,7 @@ public:
         }
 
         stdx::unique_lock<stdx::mutex> lk(mx);
-        cv->wait(lk, [&] {
+        interruptable->waitForConditionOrInterrupt(*cv, lk, [&] {
             // The mx locking above is insufficient to establish an acquire if state transitions to
             // kFinished before we get here, but we aquire mx before the producer does.
             return state.load(std::memory_order_acquire) == SSBState::kFinished;
@@ -759,31 +760,41 @@ public:
      *
      * These methods can be called multiple times, except for the rvalue overloads.
      */
-    T get() && {
-        return std::move(getImpl());
+    T get(Interruptable* interruptable = Interruptable::Noop()) && {
+        return std::move(getImpl(interruptable));
     }
-    T& get() & {
-        return getImpl();
+    T& get(Interruptable* interruptable = Interruptable::Noop()) & {
+        return getImpl(interruptable);
     }
-    const T& get() const& {
-        return const_cast<Future*>(this)->getImpl();
+    const T& get(Interruptable* interruptable = Interruptable::Noop()) const& {
+        return const_cast<Future*>(this)->getImpl(interruptable);
     }
-    StatusWith<T> getNoThrow() && noexcept {
+    StatusWith<T> getNoThrow(Interruptable* interruptable = Interruptable::Noop()) && noexcept {
         if (_immediate) {
             return std::move(*_immediate);
         }
 
-        _shared->wait();
+        try {
+            _shared->wait(interruptable);
+        } catch (const DBException& ex) {
+            return ex.toStatus();
+        }
+
         if (!_shared->status.isOK())
             return std::move(_shared->status);
         return std::move(*_shared->data);
     }
-    StatusWith<T> getNoThrow() const& noexcept {
+    StatusWith<T> getNoThrow(Interruptable* interruptable = Interruptable::Noop()) const& noexcept {
         if (_immediate) {
             return *_immediate;
         }
 
-        _shared->wait();
+        try {
+            _shared->wait(interruptable);
+        } catch (const DBException& ex) {
+            return ex.toStatus();
+        }
+
         if (!_shared->status.isOK())
             return _shared->status;
         return *_shared->data;
@@ -1092,12 +1103,12 @@ private:
     friend class Future;
     friend class Promise<T>;
 
-    T& getImpl() {
+    T& getImpl(Interruptable* interruptable) {
         if (_immediate) {
             return *_immediate;
         }
 
-        _shared->wait();
+        _shared->wait(interruptable);
         uassertStatusOK(_shared->status);
         return *(_shared->data);
     }
@@ -1244,12 +1255,12 @@ public:
         return _inner.isReady();
     }
 
-    void get() const {
-        _inner.get();
+    void get(Interruptable* interruptable = Interruptable::Noop()) const {
+        _inner.get(interruptable);
     }
 
-    Status getNoThrow() const noexcept {
-        return _inner.getNoThrow().getStatus();
+    Status getNoThrow(Interruptable* interruptable = Interruptable::Noop()) const noexcept {
+        return _inner.getNoThrow(interruptable).getStatus();
     }
 
     template <typename Func>  // Status -> void

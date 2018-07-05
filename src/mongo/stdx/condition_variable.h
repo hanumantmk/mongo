@@ -29,14 +29,83 @@
 #pragma once
 
 #include <condition_variable>
+#include <list>
+
+#include "mongo/stdx/mutex.h"
+#include "mongo/util/notifyable.h"
 
 namespace mongo {
+
+class Waitable;
+
 namespace stdx {
 
-using condition_variable = ::std::condition_variable;          // NOLINT
 using condition_variable_any = ::std::condition_variable_any;  // NOLINT
 using cv_status = ::std::cv_status;                            // NOLINT
 using ::std::notify_all_at_thread_exit;                        // NOLINT
+
+/**
+ * We wrap std::condition_variable to allow us to register Notifyables which can "wait" on the
+ * condvar without actually waiting on the std::condition_variable.  This allows us to possibly do
+ * productive work in those types, rather than sleeping in the os.
+ */
+class condition_variable : private std::condition_variable {  // NOLINT
+    friend class ::mongo::Waitable;
+
+public:
+    using std::condition_variable::condition_variable;  // NOLINT
+
+    void notify_one() noexcept {
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+
+        auto iter = _notifyables.begin();
+        if (iter != _notifyables.end()) {
+            (*iter)->notify();
+            return;
+        }
+
+        std::condition_variable::notify_one();  // NOLINT
+    }
+
+    void notify_all() noexcept {
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+
+        for (auto& notifyable : _notifyables) {
+            notifyable->notify();
+        }
+
+        std::condition_variable::notify_all();  // NOLINT
+    }
+
+    using std::condition_variable::wait;           // NOLINT
+    using std::condition_variable::wait_for;       // NOLINT
+    using std::condition_variable::wait_until;     // NOLINT
+    using std::condition_variable::native_handle;  // NOLINT
+
+private:
+    /**
+     * Runs the callback with the Notifyable registered on the condvar.  This ensures that for the
+     * duration of the callback execution, a notification on the condvar will trigger a notify() to
+     * the Notifyable.
+     *
+     * The method is private, and accessed via friendship in Waitable.
+     */
+    template <typename Callback>
+    void _runWithNotifyable(Notifyable& notifyable, Callback&& cb) {
+        auto iter = [&] {
+            stdx::lock_guard<stdx::mutex> localMutex(_mutex);
+            return _notifyables.insert(_notifyables.end(), &notifyable);
+        }();
+
+        std::forward<Callback>(cb)();
+
+        stdx::lock_guard<stdx::mutex> localMutex(_mutex);
+        _notifyables.erase(iter);
+    }
+
+    stdx::mutex _mutex;
+    std::list<Notifyable*> _notifyables;
+};
 
 }  // namespace stdx
 }  // namespace mongo

@@ -138,7 +138,6 @@ public:
      *
      * Calling this implicitly calls cancel().
      */
-    virtual Future<void> waitFor(Milliseconds timeout, const BatonHandle& baton = nullptr) = 0;
     virtual Future<void> waitUntil(Date_t timeout, const BatonHandle& baton = nullptr) = 0;
 };
 

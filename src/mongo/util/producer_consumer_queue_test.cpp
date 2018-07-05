@@ -76,7 +76,7 @@ public:
             auto client = _serviceCtx->makeClient(name.toString());
             auto opCtx = client->makeOperationContext();
 
-            cb(opCtx.get(), _timeout);
+            opCtx->runWithDeadline(_timeout, [&] { cb(opCtx.get()); });
         });
     }
 
@@ -96,20 +96,6 @@ public:
     }
 };
 
-template <typename Timeout>
-class ProducerConsumerQueueTestHelper<Timeout> {
-public:
-    ProducerConsumerQueueTestHelper(Timeout timeout) : _timeout(timeout) {}
-
-    template <typename Callback>
-    stdx::thread runThread(StringData name, Callback&& cb) {
-        return stdx::thread([this, name, cb] { cb(_timeout); });
-    }
-
-private:
-    Timeout _timeout;
-};
-
 class ProducerConsumerQueueTest : public unittest::Test {
 public:
     template <typename Callback>
@@ -127,27 +113,17 @@ public:
         const Minutes duration(30);
 
         callback(ProducerConsumerQueueTestHelper<OperationContext>(_serviceCtx.get()));
-        callback(ProducerConsumerQueueTestHelper<OperationContext, Milliseconds>(_serviceCtx.get(),
-                                                                                 duration));
         callback(ProducerConsumerQueueTestHelper<OperationContext, Date_t>(
             _serviceCtx.get(), _serviceCtx->getPreciseClockSource()->now() + duration));
         callback(ProducerConsumerQueueTestHelper<>());
-        callback(ProducerConsumerQueueTestHelper<Milliseconds>(duration));
-        callback(ProducerConsumerQueueTestHelper<Date_t>(
-            _serviceCtx->getPreciseClockSource()->now() + duration));
     }
 
     template <typename Callback>
     void runTimeoutPermutations(Callback&& callback) {
         const Milliseconds duration(10);
 
-        callback(ProducerConsumerQueueTestHelper<OperationContext, Milliseconds>(_serviceCtx.get(),
-                                                                                 duration));
         callback(ProducerConsumerQueueTestHelper<OperationContext, Date_t>(
             _serviceCtx.get(), _serviceCtx->getPreciseClockSource()->now() + duration));
-        callback(ProducerConsumerQueueTestHelper<Milliseconds>(duration));
-        callback(ProducerConsumerQueueTestHelper<Date_t>(
-            _serviceCtx->getPreciseClockSource()->now() + duration));
     }
 
 private:
@@ -294,22 +270,23 @@ TEST_F(ProducerConsumerQueueTest, popsWithTimeout) {
         ProducerConsumerQueue<MoveOnly> pcq{};
 
         helper
-            .runThread(
-                "Consumer",
-                [&](auto... interruptionArgs) {
-                    ASSERT_THROWS_CODE(
-                        pcq.pop(interruptionArgs...), DBException, ErrorCodes::ExceededTimeLimit);
+            .runThread("Consumer",
+                       [&](auto... interruptionArgs) {
+                           ASSERT_THROWS_CODE(pcq.pop(interruptionArgs...),
+                                              DBException,
+                                              ErrorCodes::InternalExceededTimeLimit);
 
-                    std::vector<MoveOnly> vec;
-                    ASSERT_THROWS_CODE(pcq.popMany(std::back_inserter(vec), interruptionArgs...),
-                                       DBException,
-                                       ErrorCodes::ExceededTimeLimit);
+                           std::vector<MoveOnly> vec;
+                           ASSERT_THROWS_CODE(
+                               pcq.popMany(std::back_inserter(vec), interruptionArgs...),
+                               DBException,
+                               ErrorCodes::InternalExceededTimeLimit);
 
-                    ASSERT_THROWS_CODE(
-                        pcq.popManyUpTo(1000, std::back_inserter(vec), interruptionArgs...),
-                        DBException,
-                        ErrorCodes::ExceededTimeLimit);
-                })
+                           ASSERT_THROWS_CODE(
+                               pcq.popManyUpTo(1000, std::back_inserter(vec), interruptionArgs...),
+                               DBException,
+                               ErrorCodes::InternalExceededTimeLimit);
+                       })
             .join();
 
         ASSERT_EQUALS(pcq.sizeForTest(), 0ul);
@@ -333,7 +310,7 @@ TEST_F(ProducerConsumerQueueTest, pushesWithTimeout) {
                                MoveOnly mo(2);
                                ASSERT_THROWS_CODE(pcq.push(std::move(mo), interruptionArgs...),
                                                   DBException,
-                                                  ErrorCodes::ExceededTimeLimit);
+                                                  ErrorCodes::InternalExceededTimeLimit);
                                ASSERT_EQUALS(pcq.sizeForTest(), 1ul);
                                ASSERT(!mo.movedFrom());
                                ASSERT_EQUALS(mo, MoveOnly(2));
@@ -346,7 +323,7 @@ TEST_F(ProducerConsumerQueueTest, pushesWithTimeout) {
                                auto iter = begin(vec);
                                ASSERT_THROWS_CODE(pcq.pushMany(iter, end(vec), interruptionArgs...),
                                                   DBException,
-                                                  ErrorCodes::ExceededTimeLimit);
+                                                  ErrorCodes::InternalExceededTimeLimit);
                                ASSERT_EQUALS(pcq.sizeForTest(), 1ul);
                                ASSERT(!vec[0].movedFrom());
                                ASSERT_EQUALS(vec[0], MoveOnly(2));
