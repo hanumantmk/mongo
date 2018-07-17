@@ -104,9 +104,6 @@ boost::optional<OperationSessionInfoFromClient> initializeOperationSessionInfo(
 
     if (osi.getAutocommit()) {
         invariant(osi.getTxnNumber());
-        uassert(ErrorCodes::InvalidOptions,
-                "Specifying autocommit=true is not allowed.",
-                !osi.getAutocommit().value());
         uassert(ErrorCodes::IllegalOperation,
                 "Multi-document transactions are only allowed on storage engines that support "
                 "recover to stable timestamp.",

@@ -98,6 +98,7 @@ const StringMap<int> txnCmdWhitelist = {{"abortTransaction", 1},
                                         {"getMore", 1},
                                         {"insert", 1},
                                         {"killCursors", 1},
+                                        {"bulkWrite", 1},
                                         {"prepareTransaction", 1},
                                         {"update", 1}};
 
@@ -586,16 +587,15 @@ void Session::_beginOrContinueTxn(WithLock wl,
     // At this point, the given transaction number must be > _activeTxnNumber. Existence of an
     // 'autocommit' field means we interpret this operation as part of a multi-document transaction.
     invariant(txnNumber > _activeTxnNumber);
+    _autocommit = autocommit;
     if (autocommit) {
         // Start a multi-document transaction.
-        invariant(*autocommit == false);
         uassert(ErrorCodes::NoSuchTransaction,
                 str::stream() << "Given transaction number " << txnNumber
                               << " does not match any in-progress transactions.",
                 startTransaction != boost::none);
 
         _setActiveTxn(wl, txnNumber);
-        _autocommit = false;
         _txnState.transitionTo(wl, TransitionTable::State::kInProgress);
         // Tracks various transactions metrics.
         _singleTransactionStats = SingleTransactionStats();
@@ -609,7 +609,6 @@ void Session::_beginOrContinueTxn(WithLock wl,
         // Execute a retryable write.
         invariant(startTransaction == boost::none);
         _setActiveTxn(wl, txnNumber);
-        _autocommit = true;
         _txnState.transitionTo(wl, TransitionTable::State::kNone);
         // SingleTransactionStats are only for multi-document transactions.
         _singleTransactionStats = boost::none;
@@ -988,7 +987,7 @@ void Session::addTransactionOperation(OperationContext* opCtx,
     // Ensure that we only ever add operations to an in progress transaction.
     invariant(_txnState.isInProgress(lk), str::stream() << "Current state: " << _txnState);
 
-    invariant(!_autocommit && _activeTxnNumber != kUninitializedTxnNumber);
+    invariant(_autocommit && _activeTxnNumber != kUninitializedTxnNumber);
     invariant(opCtx->lockState()->inAWriteUnitOfWork());
     _transactionOperations.push_back(operation);
     _transactionOperationBytes += repl::OplogEntry::getReplOperationSize(operation);
@@ -1016,7 +1015,7 @@ std::vector<repl::ReplOperation> Session::endTransactionAndRetrieveOperations(
     invariant(_txnState.isPrepared(lk) || _txnState.isCommitting(lk),
               str::stream() << "Current state: " << _txnState);
 
-    invariant(!_autocommit);
+    invariant(_autocommit);
     _transactionOperationBytes = 0;
     return std::move(_transactionOperations);
 }
@@ -1162,7 +1161,9 @@ void Session::_reportTransactionStats(WithLock wl, BSONObjBuilder* builder) cons
         parametersBuilder.done();
         return;
     }
-    parametersBuilder.append("autocommit", _autocommit);
+    if (_autocommit) {
+        parametersBuilder.append("autocommit", *_autocommit);
+    }
     parametersBuilder.done();
 
     builder->append("startWallClockTime",

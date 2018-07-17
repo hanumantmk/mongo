@@ -36,8 +36,10 @@
 #include "mongo/db/commands/write_commands/write_commands_common.h"
 #include "mongo/db/curop.h"
 #include "mongo/db/db_raii.h"
+#include "mongo/db/dbdirectclient.h"
 #include "mongo/db/json.h"
 #include "mongo/db/lasterror.h"
+#include "mongo/db/matcher/matcher.h"
 #include "mongo/db/ops/delete_request.h"
 #include "mongo/db/ops/parsed_delete.h"
 #include "mongo/db/ops/parsed_update.h"
@@ -53,6 +55,7 @@
 #include "mongo/db/stats/counters.h"
 #include "mongo/db/write_concern.h"
 #include "mongo/s/stale_exception.h"
+#include "mongo/stdx/variant.h"
 
 namespace mongo {
 namespace {
@@ -220,7 +223,8 @@ public:
 
 private:
     // Customization point for 'doCheckAuthorization'.
-    virtual void doCheckAuthorizationImpl(AuthorizationSession* authzSession) const = 0;
+    virtual void doCheckAuthorizationImpl(AuthorizationSession* authzSession,
+                                          OperationContext* opCtx) const = 0;
 
     // Customization point for 'run'.
     virtual void runImpl(OperationContext* opCtx, BSONObjBuilder& result) const = 0;
@@ -248,7 +252,7 @@ private:
 
     void doCheckAuthorization(OperationContext* opCtx) const final {
         try {
-            doCheckAuthorizationImpl(AuthorizationSession::get(opCtx->getClient()));
+            doCheckAuthorizationImpl(AuthorizationSession::get(opCtx->getClient()), opCtx);
         } catch (const DBException& e) {
             LastError::get(opCtx->getClient()).setLastError(e.code(), e.reason());
             throw;
@@ -288,7 +292,8 @@ private:
             return _batch.getNamespace();
         }
 
-        void doCheckAuthorizationImpl(AuthorizationSession* authzSession) const override {
+        void doCheckAuthorizationImpl(AuthorizationSession* authzSession,
+                                      OperationContext* opCtx) const override {
             auth::checkAuthForInsertCommand(authzSession, getBypass(), _batch);
         }
 
@@ -334,7 +339,8 @@ private:
             return _batch.getNamespace();
         }
 
-        void doCheckAuthorizationImpl(AuthorizationSession* authzSession) const override {
+        void doCheckAuthorizationImpl(AuthorizationSession* authzSession,
+                                      OperationContext* opCtx) const override {
             auth::checkAuthForUpdateCommand(authzSession, getBypass(), _batch);
         }
 
@@ -410,7 +416,8 @@ private:
             return _batch.getNamespace();
         }
 
-        void doCheckAuthorizationImpl(AuthorizationSession* authzSession) const override {
+        void doCheckAuthorizationImpl(AuthorizationSession* authzSession,
+                                      OperationContext* opCtx) const override {
             auth::checkAuthForDeleteCommand(authzSession, getBypass(), _batch);
         }
 
@@ -467,6 +474,177 @@ private:
         return "delete documents";
     }
 } cmdDelete;
+
+namespace {
+template <class... Fs>
+struct OverLoaded;
+
+template <class F1, class... Fs>
+struct OverLoaded<F1, Fs...> : F1, OverLoaded<Fs...>::type {
+    typedef OverLoaded type;
+
+    OverLoaded(F1 head, Fs... tail) : F1(head), OverLoaded<Fs...>::type(tail...) {}
+
+    using F1::operator();
+    using OverLoaded<Fs...>::type::operator();
+};
+
+template <class F>
+struct OverLoaded<F> : F {
+    typedef F type;
+    using F::operator();
+};
+
+template <class... Fs>
+typename OverLoaded<Fs...>::type makeOverLoaded(Fs... x) {
+    return OverLoaded<Fs...>(x...);
+}
+
+}  // namespace
+
+class BulkWriteCommand final : public WriteCommand {
+public:
+    BulkWriteCommand() : WriteCommand("bulkWrite") {}
+
+private:
+    class Invocation final : public InvocationBase {
+    public:
+        Invocation(const WriteCommand* cmd, const OpMsgRequest& request)
+            : InvocationBase(cmd, request),
+              _request(write_ops::Bulkwrite::parse("bulkwrite"_sd, request)) {
+            for (const auto& cmd : _request.getCommands()) {
+                auto name = cmd.firstElementFieldName();
+
+                if (name == "insert"_sd) {
+                    _batch.emplace_back(write_ops::Insert::parse("insert"_sd, cmd));
+                } else if (name == "update"_sd) {
+                    _batch.emplace_back(write_ops::Update::parse("update"_sd, cmd));
+                } else if (name == "delete"_sd) {
+                    _batch.emplace_back(write_ops::Delete::parse("delete"_sd, cmd));
+                } else {
+                    uasserted(ErrorCodes::BadValue, "Invalid write command");
+                }
+            }
+        }
+
+    private:
+        NamespaceString ns() const override {
+            return NamespaceString("admin");
+        }
+
+        void doCheckAuthorizationImpl(AuthorizationSession* authSession,
+                                      OperationContext* opCtx) const override {
+            if (_request.getPreConditions()) {
+                for (const auto& p : *(_request.getPreConditions())) {
+                    uassertStatusOK(authSession->checkAuthForFind(p.getNs(), false));
+                }
+            }
+
+            for (const auto& op : _batch) {
+                stdx::visit(makeOverLoaded(
+                                [&](const write_ops::Insert& x) {
+                                    auth::checkAuthForInsertCommand(authSession, getBypass(), x);
+                                },
+                                [&](const write_ops::Update& x) {
+                                    auth::checkAuthForUpdateCommand(authSession, getBypass(), x);
+                                },
+                                [&](const write_ops::Delete& x) {
+                                    auth::checkAuthForDeleteCommand(authSession, getBypass(), x);
+                                }),
+                            op);
+            }
+        }
+
+        void runImpl(OperationContext* opCtx, BSONObjBuilder& topLevelResult) const override {
+            if (_request.getPreConditions()) {
+                for (const auto& p : *(_request.getPreConditions())) {
+                    const auto& nss = p.getNs();
+
+                    DBDirectClient db(opCtx);
+                    BSONObj realres = db.findOne(nss.ns(), p.getQ());
+
+                    // Get collection default collation.
+                    Database* database = DatabaseHolder::getDatabaseHolder().get(opCtx, nss.db());
+                    uassert(ErrorCodes::BadValue,
+                            "database in ns does not exist: " + nss.ns(),
+                            database);
+                    Collection* collection = database->getCollection(opCtx, nss);
+                    uassert(ErrorCodes::BadValue,
+                            "collection in ns does not exist: " + nss.ns(),
+                            collection);
+                    const CollatorInterface* collator = collection->getDefaultCollator();
+
+                    boost::intrusive_ptr<ExpressionContext> expCtx(
+                        new ExpressionContext(opCtx, collator));
+                    Matcher matcher(p.getRes(), std::move(expCtx));
+
+                    auto errCode = p.getRetryable() ? ErrorCodes::PreConditionFailedRetryable
+                                                    : ErrorCodes::BadValue;
+
+                    uassert(errCode, "preCondition failed", matcher.matches(realres));
+                }
+            }
+
+            BSONObjBuilder bob;
+
+            BSONArrayBuilder results(topLevelResult.subarrayStart("results"));
+
+            for (const auto& op : _batch) {
+                BSONObjBuilder result(results.subobjStart());
+
+                stdx::visit(makeOverLoaded(
+                                [&](const write_ops::Insert& x) {
+                                    auto reply = performInserts(opCtx, x);
+                                    serializeReply(opCtx,
+                                                   ReplyStyle::kNotUpdate,
+                                                   !x.getWriteCommandBase().getOrdered(),
+                                                   x.getDocuments().size(),
+                                                   std::move(reply),
+                                                   &result);
+                                },
+                                [&](const write_ops::Update& x) {
+                                    auto reply = performUpdates(opCtx, x);
+                                    serializeReply(opCtx,
+                                                   ReplyStyle::kUpdate,
+                                                   !x.getWriteCommandBase().getOrdered(),
+                                                   x.getUpdates().size(),
+                                                   std::move(reply),
+                                                   &result);
+                                },
+                                [&](const write_ops::Delete& x) {
+                                    auto reply = performDeletes(opCtx, x);
+                                    serializeReply(opCtx,
+                                                   ReplyStyle::kNotUpdate,
+                                                   !x.getWriteCommandBase().getOrdered(),
+                                                   x.getDeletes().size(),
+                                                   std::move(reply),
+                                                   &result);
+                                }),
+                            op);
+
+                if (_request.getOrdered() && result.asTempObj().hasField("writeErrors")) {
+                    break;
+                }
+            }
+        }
+
+        using SomeOp = stdx::variant<write_ops::Insert, write_ops::Update, write_ops::Delete>;
+
+        write_ops::Bulkwrite _request;
+        std::vector<SomeOp> _batch;
+    };
+
+    std::unique_ptr<CommandInvocation> parse(OperationContext*,
+                                             const OpMsgRequest& request) override {
+        return stdx::make_unique<Invocation>(this, request);
+    }
+
+    void redactForLogging(mutablebson::Document* cmdObj) const final {}
+
+    std::string help() const final {
+        return "do writes as a transaction";
+    }
+} bulkWriteCommand;
 
 }  // namespace
 }  // namespace mongo

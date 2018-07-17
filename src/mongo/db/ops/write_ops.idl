@@ -117,6 +117,24 @@ structs:
                 type: object
                 optional: true
 
+    PreCondition:
+        description: "Parser for the preconditions to bulkWrite."
+        strict: true
+        fields:
+            ns:
+                description: "namespace for the precondition"
+                type: namespacestring
+            q:
+                description: "query for the precondition"
+                type: object
+            res:
+                description: "expected result for the precondition"
+                type: object
+            retryable:
+                description: "if the precondition should be retried"
+                type: bool
+                default: true
+
 commands:
 
     insert:
@@ -153,4 +171,21 @@ commands:
             deletes:
                 description: "An array of one or more delete statements to perform."
                 type: array<DeleteOpEntry>
+                supports_doc_sequence: true
+
+    bulkwrite:
+        description: "Parser for the 'bulkWrite' command."
+        strict: true
+        namespace: ignored
+        chained_structs:
+            WriteCommandBase: writeCommandBase
+        fields:
+            preConditions:
+                description: "An array of one or more preconditions to check."
+                type: array<PreCondition>
+                optional: true
+                supports_doc_sequence: true
+            commands:
+                description: "An array of one or more write commands to run."
+                type: array<object>
                 supports_doc_sequence: true

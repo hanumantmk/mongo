@@ -304,7 +304,7 @@ public:
      */
     void abortActiveTransaction(OperationContext* opCtx);
 
-    bool getAutocommit() const {
+    boost::optional<bool> getAutocommit() const {
         return _autocommit;
     }
 
@@ -400,6 +400,14 @@ public:
     void transitionToCommittingforTest() {
         stdx::lock_guard<stdx::mutex> lk(_mutex);
         _txnState.transitionTo(lk, TransitionTable::State::kCommitting);
+    }
+
+    void reset() {
+        stdx::lock_guard<stdx::mutex> lk(_mutex);
+        _txnResourceStash.reset();
+        _transactionOperationBytes = 0;
+        _transactionOperations.clear();
+        _speculativeTransactionReadOpTime = repl::OpTime();
     }
 
 private:
@@ -579,7 +587,7 @@ private:
     CommittedStatementTimestampMap _activeTxnCommittedStatements;
 
     // Set in _beginOrContinueTxn and applies to the activeTxn on the session.
-    bool _autocommit{true};
+    boost::optional<bool> _autocommit;
 
     // Set when a snapshot read / transaction begins. Alleviates cache pressure by limiting how long
     // a snapshot will remain open and available. Checked in combination with _txnState to determine

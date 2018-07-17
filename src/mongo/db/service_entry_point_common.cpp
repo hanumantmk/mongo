@@ -129,6 +129,7 @@ const StringMap<int> sessionCheckoutWhitelist = {{"abortTransaction", 1},
                                                  {"insert", 1},
                                                  {"killCursors", 1},
                                                  {"mapReduce", 1},
+                                                 {"bulkWrite", 1},
                                                  {"prepareTransaction", 1},
                                                  {"refreshLogicalSessionCacheNow", 1},
                                                  {"update", 1}};
@@ -215,24 +216,27 @@ void generateErrorResponse(OperationContext* opCtx,
     replyBuilder->setMetadata(replyMetadata);
 }
 
-BSONObj getErrorLabels(const boost::optional<OperationSessionInfoFromClient>& sessionOptions,
-                       const std::string& commandName,
-                       ErrorCodes::Error code) {
-    // By specifying "autocommit", the user indicates they want to run a transaction.
+bool isTransientTransactionError(
+    const boost::optional<OperationSessionInfoFromClient>& sessionOptions,
+    const std::string& commandName,
+    ErrorCodes::Error code) {
     if (!sessionOptions || !sessionOptions->getAutocommit()) {
-        return {};
+        return false;
     }
 
     bool isRetryable = ErrorCodes::isNotMasterError(code) || ErrorCodes::isShutdownError(code);
-    bool isTransientTransactionError = code == ErrorCodes::WriteConflict  //
-        || code == ErrorCodes::SnapshotUnavailable                        //
-        || code == ErrorCodes::NoSuchTransaction                          //
-        || code == ErrorCodes::LockTimeout                                //
+    return code == ErrorCodes::WriteConflict || code == ErrorCodes::SnapshotUnavailable ||
+        code == ErrorCodes::NoSuchTransaction || code == ErrorCodes::LockTimeout ||
+        code == ErrorCodes::PreConditionFailedRetryable
         // Clients can retry a single commitTransaction command, but cannot retry the whole
         // transaction if commitTransaction fails due to NotMaster.
         || (isRetryable && (commandName != "commitTransaction"));
+}
 
-    if (isTransientTransactionError) {
+BSONObj getErrorLabels(const boost::optional<OperationSessionInfoFromClient>& sessionOptions,
+                       const std::string& commandName,
+                       ErrorCodes::Error code) {
+    if (isTransientTransactionError(sessionOptions, commandName, code)) {
         return BSON("errorLabels" << BSON_ARRAY("TransientTransactionError"));
     }
     return {};
@@ -460,24 +464,73 @@ void appendClusterAndOperationTime(OperationContext* opCtx,
 
 void invokeInTransaction(OperationContext* opCtx,
                          CommandInvocation* invocation,
-                         rpc::ReplyBuilderInterface* replyBuilder) {
+                         rpc::ReplyBuilderInterface* replyBuilder,
+                         const boost::optional<OperationSessionInfoFromClient>& sessionOptions) {
     auto session = OperationContextSession::get(opCtx);
     if (!session) {
         // Run the command directly if we're not in a transaction.
         invocation->run(opCtx, replyBuilder);
+
         return;
     }
 
     session->unstashTransactionResources(opCtx, invocation->definition()->getName());
     ScopeGuard guard = MakeGuard([session, opCtx]() { session->abortActiveTransaction(opCtx); });
 
-    invocation->run(opCtx, replyBuilder);
+    if (sessionOptions->getStartTransaction() && sessionOptions->getAutocommit().value_or(false)) {
+        struct Backoff {
+            void wait(OperationContext* opCtx) {
+                if (attempt < 4) {
+                    opCtx->checkForInterrupt();
+                } else if (attempt < 10) {
+                    opCtx->sleepFor(Milliseconds(1));
+                } else if (attempt < 100) {
+                    opCtx->sleepFor(Milliseconds(5));
+                } else {
+                    opCtx->sleepFor(Milliseconds(10));
+                }
+
+                attempt++;
+            }
+
+            size_t attempt = 0;
+        } backoff;
+
+        while (true) {
+            try {
+                invocation->run(opCtx, replyBuilder);
+                break;
+            } catch (const DBException& ex) {
+                log() << "ZZZ - " << ex.toStatus();
+
+                if (!isTransientTransactionError(
+                        sessionOptions, invocation->definition()->getName(), ex.code())) {
+                    throw;
+                }
+
+                opCtx->checkForInterrupt();
+
+                replyBuilder->reset();
+                session->stashTransactionResources(opCtx);
+                session->reset();
+                session->unstashTransactionResources(opCtx, invocation->definition()->getName());
+
+                backoff.wait(opCtx);
+            }
+        }
+    } else {
+        invocation->run(opCtx, replyBuilder);
+    }
 
     if (auto okField = replyBuilder->getBodyBuilder().asTempObj()["ok"]) {
         // If ok is present, use its truthiness.
         if (!okField.trueValue()) {
             return;
         }
+    }
+
+    if (sessionOptions->getAutocommit().value_or(false)) {
+        session->commitTransaction(opCtx);
     }
 
     // Stash or commit the transaction when the command succeeds.
@@ -502,17 +555,19 @@ bool runCommandImpl(OperationContext* opCtx,
     if (kDebugBuild)
         bytesToReserve = 0;
 #endif
+
     replyBuilder->reserveBytes(bytesToReserve);
 
     if (!invocation->supportsWriteConcern()) {
         behaviors.uassertCommandDoesNotSpecifyWriteConcern(request.body);
-        invokeInTransaction(opCtx, invocation, replyBuilder);
+        invokeInTransaction(opCtx, invocation, replyBuilder, sessionOptions);
     } else {
         auto wcResult = uassertStatusOK(extractWriteConcern(opCtx, request.body));
         auto session = OperationContextSession::get(opCtx);
         uassert(ErrorCodes::InvalidOptions,
                 "writeConcern is not allowed within a multi-statement transaction",
                 wcResult.usedDefault || !session || !session->inMultiDocumentTransaction() ||
+                    sessionOptions->getAutocommit().value_or(false) ||
                     invocation->definition()->getName() == "commitTransaction" ||
                     invocation->definition()->getName() == "abortTransaction" ||
                     invocation->definition()->getName() == "doTxn");
@@ -537,7 +592,7 @@ bool runCommandImpl(OperationContext* opCtx,
         };
 
         try {
-            invokeInTransaction(opCtx, invocation, replyBuilder);
+            invokeInTransaction(opCtx, invocation, replyBuilder, sessionOptions);
         } catch (const DBException&) {
             waitForWriteConcern(*extraFieldsBuilder);
             throw;
