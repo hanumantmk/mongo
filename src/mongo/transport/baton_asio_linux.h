@@ -54,6 +54,13 @@ namespace transport {
  * We implement our networking reactor on top of poll + eventfd for wakeups
  */
 class TransportLayerASIO::BatonASIO : public Baton {
+    /**
+     * We use this internal reactor timer to exit run_until calls (by forcing an early timeout for
+     * ::poll).
+     *
+     * It's methods are all unreachable because we never actually use its timer-ness (we just need
+     * its address for baton book keeping).
+     */
     class InternalReactorTimer : public ReactorTimer {
     public:
         void cancel(const BatonHandle& baton = nullptr) override {
@@ -212,17 +219,24 @@ public:
         schedule([] {});
     }
 
-    Waitable::TimeoutState run_until(ClockSource* clkSource, Date_t deadline) override {
+    /**
+     * We synthesize a run_until by creating a synthetic timer which we use to exit run early (we
+     * create a regular waitUntil baton event off the timer, with the passed deadline).
+     */
+    Waitable::TimeoutState run_until(ClockSource* clkSource, Date_t deadline) noexcept override {
         InternalReactorTimer irt;
         auto future = waitUntil(irt, deadline);
 
         run(clkSource);
 
+        // If the future is ready our timer has fired, in which case we timed out
         if (future.isReady()) {
             future.get();
 
             return Waitable::TimeoutState::Timeout;
         } else {
+            // Otherwise, remove the timer from the internal timer list, abandon the future and
+            // return no timeout
             cancelTimer(irt);
             std::move(future).getAsync([](mongo::Status) {});
 
@@ -230,7 +244,7 @@ public:
         }
     }
 
-    void run(ClockSource* clkSource) override {
+    void run(ClockSource* clkSource) noexcept override {
         std::vector<SharedPromise<void>> toFulfill;
 
         // We'll fulfill promises and run jobs on the way out, ensuring we don't hold any locks
@@ -290,7 +304,7 @@ public:
         // If we don't have a timeout, or we have a timeout that's unexpired, run poll.
         if (!deadline || (*deadline > now)) {
             if (deadline && !clkSource->tracksSystemClock()) {
-                invariant(clkSource->setAlarm(*deadline, [this] { notify(); }).isOK());
+                invariant(clkSource->setAlarm(*deadline, [this] { notify(); }));
 
                 deadline.reset();
             }
@@ -299,7 +313,7 @@ public:
             lk.unlock();
             rval = ::poll(pollSet.data(),
                           pollSet.size(),
-                          deadline ? Milliseconds(*deadline - clkSource->now()).count() : -1);
+                          deadline ? Milliseconds(*deadline - now).count() : -1);
 
             const auto pollGuard = MakeGuard([&] {
                 lk.lock();

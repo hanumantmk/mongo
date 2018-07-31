@@ -248,7 +248,6 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
 
 // Passing opCtx means you'd like to opt into opCtx interruption.  During cleanup we actually don't.
 void AsyncRequestsSender::_makeProgress() {
-    // Otherwise we block on the queue
     auto job = _responseQueue.pop(_opCtx);
 
     if (!job) {
@@ -328,9 +327,13 @@ Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
         });
         const auto threadGuard = MakeGuard([&] { bgChecker.join(); });
 
+        // We ignore interrupts here because we want to spin the baton for the full duration of the
+        // findHostWithMaxWait.  We set the time limit (although the bg checker should fulfill our
+        // promise) to sync up with the findHostWithMaxWait.
         return ars->_opCtx->runWithoutInterruption([&] {
-            return ars->_opCtx->runWithDeadline(clock->now() + Seconds{20},
-                                                [&] { return pf.future.getNoThrow(ars->_opCtx); });
+            return ars->_opCtx->runWithDeadline(deadline, ErrorCodes::ExceededTimeLimit, [&] {
+                return pf.future.getNoThrow(ars->_opCtx);
+            });
         });
     }();
 

@@ -76,7 +76,8 @@ public:
             auto client = _serviceCtx->makeClient(name.toString());
             auto opCtx = client->makeOperationContext();
 
-            opCtx->runWithDeadline(_timeout, [&] { cb(opCtx.get()); });
+            opCtx->runWithDeadline(
+                _timeout, ErrorCodes::ExceededTimeLimit, [&] { cb(opCtx.get()); });
         });
     }
 
@@ -270,23 +271,22 @@ TEST_F(ProducerConsumerQueueTest, popsWithTimeout) {
         ProducerConsumerQueue<MoveOnly> pcq{};
 
         helper
-            .runThread("Consumer",
-                       [&](auto... interruptionArgs) {
-                           ASSERT_THROWS_CODE(pcq.pop(interruptionArgs...),
-                                              DBException,
-                                              ErrorCodes::InternalExceededTimeLimit);
+            .runThread(
+                "Consumer",
+                [&](auto... interruptionArgs) {
+                    ASSERT_THROWS_CODE(
+                        pcq.pop(interruptionArgs...), DBException, ErrorCodes::ExceededTimeLimit);
 
-                           std::vector<MoveOnly> vec;
-                           ASSERT_THROWS_CODE(
-                               pcq.popMany(std::back_inserter(vec), interruptionArgs...),
-                               DBException,
-                               ErrorCodes::InternalExceededTimeLimit);
+                    std::vector<MoveOnly> vec;
+                    ASSERT_THROWS_CODE(pcq.popMany(std::back_inserter(vec), interruptionArgs...),
+                                       DBException,
+                                       ErrorCodes::ExceededTimeLimit);
 
-                           ASSERT_THROWS_CODE(
-                               pcq.popManyUpTo(1000, std::back_inserter(vec), interruptionArgs...),
-                               DBException,
-                               ErrorCodes::InternalExceededTimeLimit);
-                       })
+                    ASSERT_THROWS_CODE(
+                        pcq.popManyUpTo(1000, std::back_inserter(vec), interruptionArgs...),
+                        DBException,
+                        ErrorCodes::ExceededTimeLimit);
+                })
             .join();
 
         ASSERT_EQUALS(pcq.sizeForTest(), 0ul);
@@ -310,7 +310,7 @@ TEST_F(ProducerConsumerQueueTest, pushesWithTimeout) {
                                MoveOnly mo(2);
                                ASSERT_THROWS_CODE(pcq.push(std::move(mo), interruptionArgs...),
                                                   DBException,
-                                                  ErrorCodes::InternalExceededTimeLimit);
+                                                  ErrorCodes::ExceededTimeLimit);
                                ASSERT_EQUALS(pcq.sizeForTest(), 1ul);
                                ASSERT(!mo.movedFrom());
                                ASSERT_EQUALS(mo, MoveOnly(2));
@@ -323,7 +323,7 @@ TEST_F(ProducerConsumerQueueTest, pushesWithTimeout) {
                                auto iter = begin(vec);
                                ASSERT_THROWS_CODE(pcq.pushMany(iter, end(vec), interruptionArgs...),
                                                   DBException,
-                                                  ErrorCodes::InternalExceededTimeLimit);
+                                                  ErrorCodes::ExceededTimeLimit);
                                ASSERT_EQUALS(pcq.sizeForTest(), 1ul);
                                ASSERT(!vec[0].movedFrom());
                                ASSERT_EQUALS(vec[0], MoveOnly(2));

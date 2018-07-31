@@ -38,7 +38,7 @@
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/concurrency/with_lock.h"
-#include "mongo/util/interruptable.h"
+#include "mongo/util/interruptible.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
@@ -73,9 +73,9 @@ struct DefaultCostFunction {
  *   multi-consumer - Any number of threads may pop work out of the queue
  *
  * Interruptibility:
- *   All of the blocking methods on this type take an interruptable.
+ *   All of the blocking methods on this type take an interruptible.
  *
- * Exceptions outside the interruptable include:
+ * Exceptions outside the interruptible include:
  *   closure of queue endpoints
  *     ErrorCodes::ProducerConsumerQueueEndClosed
  *   pushes with batches that exceed the max queue size
@@ -118,7 +118,7 @@ public:
     // Pushes the passed T into the queue
     //
     // Leaves T unchanged if an interrupt exception is thrown while waiting for space
-    void push(T&& t, Interruptable* interruptable = Interruptable::Noop()) {
+    void push(T&& t, Interruptible* interruptible = Interruptible::notInterruptible()) {
         _pushRunner([&](stdx::unique_lock<stdx::mutex>& lk) {
             auto cost = _invokeCostFunc(t, lk);
             uassert(ErrorCodes::ProducerConsumerQueueBatchTooLarge,
@@ -128,7 +128,7 @@ public:
                                   << ")",
                     cost <= _max);
 
-            _waitForSpace(lk, cost, interruptable);
+            _waitForSpace(lk, cost, interruptible);
             _push(lk, std::move(t));
         });
     }
@@ -147,7 +147,7 @@ public:
     template <typename StartIterator, typename EndIterator>
     void pushMany(StartIterator start,
                   EndIterator last,
-                  Interruptable* interruptable = Interruptable::Noop()) {
+                  Interruptible* interruptible = Interruptible::notInterruptible()) {
         return _pushRunner([&](stdx::unique_lock<stdx::mutex>& lk) {
             size_t cost = 0;
             for (auto iter = start; iter != last; ++iter) {
@@ -161,7 +161,7 @@ public:
                                   << ")",
                     cost <= _max);
 
-            _waitForSpace(lk, cost, interruptable);
+            _waitForSpace(lk, cost, interruptible);
 
             for (auto iter = start; iter != last; ++iter) {
                 _push(lk, std::move(*iter));
@@ -178,9 +178,9 @@ public:
     }
 
     // Pops one T out of the queue
-    T pop(Interruptable* interruptable = Interruptable::Noop()) {
+    T pop(Interruptible* interruptible = Interruptible::notInterruptible()) {
         return _popRunner([&](stdx::unique_lock<stdx::mutex>& lk) {
-            _waitForNonEmpty(lk, interruptable);
+            _waitForNonEmpty(lk, interruptible);
             return _pop(lk);
         });
     }
@@ -194,8 +194,8 @@ public:
     // Returns the cost value of the items extracted, along with the updated output iterator
     template <typename OutputIterator>
     std::pair<size_t, OutputIterator> popMany(
-        OutputIterator iterator, Interruptable* interruptable = Interruptable::Noop()) {
-        return popManyUpTo(_max, iterator, interruptable);
+        OutputIterator iterator, Interruptible* interruptible = Interruptible::notInterruptible()) {
+        return popManyUpTo(_max, iterator, interruptible);
     }
 
     // Waits for at least one item in the queue, then pops items out of the queue until it would
@@ -209,11 +209,11 @@ public:
     std::pair<size_t, OutputIterator> popManyUpTo(
         size_t budget,
         OutputIterator iterator,
-        Interruptable* interruptable = Interruptable::Noop()) {
+        Interruptible* interruptible = Interruptible::notInterruptible()) {
         return _popRunner([&](stdx::unique_lock<stdx::mutex>& lk) {
             size_t cost = 0;
 
-            _waitForNonEmpty(lk, interruptable);
+            _waitForNonEmpty(lk, interruptible);
 
             while (auto out = _tryPop(lk)) {
                 cost += _invokeCostFunc(*out, lk);
@@ -386,7 +386,7 @@ private:
 
     void _waitForSpace(stdx::unique_lock<stdx::mutex>& lk,
                        size_t cost,
-                       Interruptable* interruptable) {
+                       Interruptible* interruptible) {
         invariant(!_producerWants);
 
         _producerWants = cost;
@@ -398,10 +398,10 @@ private:
                      _checkProducerClosed(lk);
                      return _current + cost <= _max;
                  },
-                 interruptable);
+                 interruptible);
     }
 
-    void _waitForNonEmpty(stdx::unique_lock<stdx::mutex>& lk, Interruptable* interruptable) {
+    void _waitForNonEmpty(stdx::unique_lock<stdx::mutex>& lk, Interruptible* interruptible) {
 
         _consumers++;
         const auto guard = MakeGuard([&] { _consumers--; });
@@ -412,15 +412,15 @@ private:
                      _checkConsumerClosed(lk);
                      return _queue.size();
                  },
-                 interruptable);
+                 interruptible);
     }
 
     template <typename Callback>
     void _waitFor(stdx::unique_lock<stdx::mutex>& lk,
                   stdx::condition_variable& condvar,
                   Callback&& pred,
-                  Interruptable* interruptable) {
-        interruptable->waitForConditionOrInterrupt(condvar, lk, pred);
+                  Interruptible* interruptible) {
+        interruptible->waitForConditionOrInterrupt(condvar, lk, pred);
     }
 
     mutable stdx::mutex _mutex;

@@ -28,13 +28,28 @@
 
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <list>
 
+#include "mongo/platform/atomic_word.h"
 #include "mongo/stdx/mutex.h"
-#include "mongo/util/notifyable.h"
 
 namespace mongo {
+
+/**
+ * Notifyable is a slim type meant to allow integration of special kinds of waiters for
+ * stdx::condition_variable.  Specifially, the notify() on this type will be called directly from
+ * stdx::condition_varibale::notify_(one|all).
+ *
+ * See Waitable for the stdx::condition_variable integration.
+ */
+class Notifyable {
+public:
+    virtual ~Notifyable() noexcept {}
+
+    virtual void notify() noexcept = 0;
+};
 
 class Waitable;
 
@@ -50,28 +65,27 @@ using ::std::notify_all_at_thread_exit;                        // NOLINT
  * productive work in those types, rather than sleeping in the os.
  */
 class condition_variable : private std::condition_variable {  // NOLINT
-    friend class ::mongo::Waitable;
-
 public:
     using std::condition_variable::condition_variable;  // NOLINT
 
     void notify_one() noexcept {
-        stdx::lock_guard<stdx::mutex> lk(_mutex);
+        if (_notifyableCount.load()) {
+            stdx::lock_guard<stdx::mutex> lk(_mutex);
 
-        auto iter = _notifyables.begin();
-        if (iter != _notifyables.end()) {
-            (*iter)->notify();
-            return;
+            if (_notifyNextNotifyable(lk)) {
+                return;
+            }
         }
 
         std::condition_variable::notify_one();  // NOLINT
     }
 
     void notify_all() noexcept {
-        stdx::lock_guard<stdx::mutex> lk(_mutex);
+        if (_notifyableCount.load()) {
+            stdx::lock_guard<stdx::mutex> lk(_mutex);
 
-        for (auto& notifyable : _notifyables) {
-            notifyable->notify();
+            while (_notifyNextNotifyable(lk)) {
+            }
         }
 
         std::condition_variable::notify_all();  // NOLINT
@@ -83,28 +97,72 @@ public:
     using std::condition_variable::native_handle;  // NOLINT
 
 private:
+    friend class ::mongo::Waitable;
+
     /**
      * Runs the callback with the Notifyable registered on the condvar.  This ensures that for the
      * duration of the callback execution, a notification on the condvar will trigger a notify() to
      * the Notifyable.
      *
+     * The scheme here is that list entries are erased from the notification list when notified (so
+     * that they don't eat multiple notify_one's).  We detect that condition by noting that our
+     * Notifyable* has been overwritten with null (in which case we should avoid a double erase).
+     *
      * The method is private, and accessed via friendship in Waitable.
      */
     template <typename Callback>
-    void _runWithNotifyable(Notifyable& notifyable, Callback&& cb) {
+    void _runWithNotifyable(Notifyable& notifyable, Callback&& cb) noexcept {
+        static_assert(noexcept(std::forward<Callback>(cb)()),
+                      "Only noexcept functions may be invoked with _runWithNotifyable");
+
+        _notifyableCount.addAndFetch(1);
+
+        // We use this local pad to receive notification that we were notified, rather than timing
+        // out organically.
+        Notifyable* n = &notifyable;
+
         auto iter = [&] {
             stdx::lock_guard<stdx::mutex> localMutex(_mutex);
-            return _notifyables.insert(_notifyables.end(), &notifyable);
+            return _notifyables.insert(_notifyables.end(), &n);
         }();
 
         std::forward<Callback>(cb)();
 
         stdx::lock_guard<stdx::mutex> localMutex(_mutex);
-        _notifyables.erase(iter);
+        // if n is null, we were notified, and erased elsewhere
+        if (n) {
+            _notifyableCount.subtractAndFetch(1);
+            _notifyables.erase(iter);
+        }
     }
 
+    /**
+     * Notifies the next notifyable.
+     *
+     * Returns true if there was a notifyable to be notified.
+     */
+    bool _notifyNextNotifyable(const stdx::lock_guard<stdx::mutex>&) noexcept {
+        auto iter = _notifyables.begin();
+        if (iter == _notifyables.end()) {
+            return false;
+        }
+
+        (**iter)->notify();
+
+        // null out iter here, so that the notifyable won't remove itself from the list when it
+        // wakes up
+        *iter = nullptr;
+
+        _notifyableCount.subtractAndFetch(1);
+        _notifyables.erase(iter);
+
+        return true;
+    }
+
+    AtomicUInt64 _notifyableCount;
+
     stdx::mutex _mutex;
-    std::list<Notifyable*> _notifyables;
+    std::list<Notifyable**> _notifyables;
 };
 
 }  // namespace stdx

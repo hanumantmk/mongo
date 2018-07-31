@@ -39,7 +39,7 @@
 #include "mongo/executor/task_executor.h"
 #include "mongo/s/client/shard.h"
 #include "mongo/s/shard_id.h"
-#include "mongo/util/interruptable.h"
+#include "mongo/util/interruptible.h"
 #include "mongo/util/net/hostandport.h"
 #include "mongo/util/producer_consumer_queue.h"
 #include "mongo/util/time_support.h"

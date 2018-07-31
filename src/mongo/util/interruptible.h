@@ -38,13 +38,13 @@ namespace mongo {
 /**
  * A type which can be used to wait on condition variables with a level triggered one-way interrupt.
  * I.e. after the interrupt is triggered (via some non-public api call) subsequent calls to
- * waitForConditionXXX will fail with a negative status.  Interrupts must unblock all callers of
- * waitForConditionXXX.
+ * waitForConditionXXX will fail.  Interrupts must unblock all callers of waitForConditionXXX.
  */
-class Interruptable {
+class Interruptible {
 protected:
     struct DeadlineState {
         Date_t deadline;
+        ErrorCodes::Error error;
         bool hasArtificialDeadline;
     };
 
@@ -53,76 +53,48 @@ protected:
         DeadlineState deadline;
     };
 
-    /**
-     * Pushes an ignore interruption critical section into the interruptable.  Until an associated
-     * popIgnoreInterrupts is invoked, the interruptable should ignore interruptions.
-     *
-     * Returns state needed to pop interruption.
-     */
-    virtual IgnoreInterruptsState _pushIgnoreInterrupts() = 0;
-
-    /**
-     * Pops the ignored interruption critical section introduced by push.
-     */
-    virtual void _popIgnoreInterrupts(IgnoreInterruptsState iis) = 0;
-
-    /**
-     * Pushes a subsidiary deadline into the interruptble.  Until an associated popFatalDeadline is
-     * invoked, the interruptable will fail checkForInterrupt and waitForConditionOrInterrupt calls
-     * with InternalExceededTimeLimit if the deadline has passed.
-     *
-     * Returns state needed to pop the deadline.
-     */
-    virtual DeadlineState _pushFatalDeadline(Date_t deadline) = 0;
-
-    /**
-     * Pops the subsidiary deadline introduced by push.
-     */
-    virtual void _popFatalDeadline(DeadlineState) = 0;
-
-    /**
-     * Returns the equivalent of Date_t::now() + waitFor for the interruptable's clock
-     */
-    virtual Date_t _getExpirationDateForWaitForValue(Milliseconds waitFor) = 0;
-
-    class NoopInterruptable;
-
 public:
     /**
-     * Returns the Noop interruptable.  Useful as a default argument to interruptable taking
-     * methods.
+     * Returns the not interruptible.  Useful as a default argument to interruptible taking methods.
      */
-    static Interruptable* Noop();
+    static Interruptible* notInterruptible();
 
     /**
-     * A deadline guard which when allocated on the stack provides a subsidiary deadline to the
-     * parent.
+     * A deadline guard provides a subsidiary deadline to the parent.
      */
     class DeadlineGuard {
-        friend Interruptable;
-
-        explicit DeadlineGuard(Interruptable& interruptable, Date_t newDeadline)
-            : _interruptable(interruptable),
-              _oldDeadline(_interruptable._pushFatalDeadline(newDeadline)) {}
-
     public:
+        DeadlineGuard(const DeadlineGuard&) = delete;
+        DeadlineGuard& operator=(const DeadlineGuard&) = delete;
+
+        DeadlineGuard(DeadlineGuard&& other)
+            : _interruptible(other._interruptible), _oldDeadline(other._oldDeadline) {
+            other._interruptible = nullptr;
+        }
+
+        DeadlineGuard& operator=(DeadlineGuard&& other) = delete;
+
         ~DeadlineGuard() {
-            _interruptable._popFatalDeadline(_oldDeadline);
+            if (_interruptible) {
+                _interruptible->popArtificialDeadline(_oldDeadline);
+            }
         }
 
     private:
-        Interruptable& _interruptable;
+        friend Interruptible;
+
+        explicit DeadlineGuard(Interruptible& interruptible,
+                               Date_t newDeadline,
+                               ErrorCodes::Error error)
+            : _interruptible(&interruptible),
+              _oldDeadline(_interruptible->pushArtificialDeadline(newDeadline, error)) {}
+
+        Interruptible* _interruptible;
         DeadlineState _oldDeadline;
     };
 
-    /**
-     * makeDeadlineGuard introduces a new subsidiary scope in which, for the liftime of the returned
-     * guard, the interruptable has a new fatal deadline.  All operations which check
-     * checkForInterrupt or waitForConditionOrInterrupt will return InternalExceededTimeLimit if the
-     * interruptable's now() is past the deadline.
-     */
-    DeadlineGuard makeDeadlineGuard(Date_t deadline) {
-        return DeadlineGuard(*this, deadline);
+    DeadlineGuard makeDeadlineGuard(Date_t deadline, ErrorCodes::Error error) {
+        return DeadlineGuard(*this, deadline, error);
     }
 
     /**
@@ -132,57 +104,65 @@ public:
      * lower level one)
      */
     template <typename Callback>
-    decltype(auto) runWithDeadline(Date_t deadline, Callback&& cb) {
+    decltype(auto) runWithDeadline(Date_t deadline, ErrorCodes::Error error, Callback&& cb) {
+        invariant(ErrorCodes::isExceededTimeLimitError(error));
+
         try {
-            const auto guard = makeDeadlineGuard(deadline);
+            const auto guard = makeDeadlineGuard(deadline, error);
             return std::forward<Callback>(cb)();
-        } catch (const ExceptionFor<ErrorCodes::InternalExceededTimeLimit>&) {
+        } catch (const ExceptionForCat<ErrorCategory::ExceededTimeLimitError>&) {
+            // May throw replacement exception
             checkForInterrupt();
             throw;
         }
     }
 
     /**
-     * Returns true if this interruptable has a deadline.
+     * Returns true if this interruptible has a deadline.
      */
     bool hasDeadline() const {
-        return getDeadline() < Date_t::max();
+        return getDeadline() != Date_t::max();
     }
 
     /**
-     * Returns the deadline for this interruptable, or Date_t::max() if there is no deadline.
+     * Returns the deadline for this interruptible, or Date_t::max() if there is no deadline.
      */
     virtual Date_t getDeadline() const = 0;
 
     /**
-     * An interruption guard which when allocated on the stack provides a region where interruption
-     * is ignored.
+     * An interruption guard provides a region where interruption is ignored.
      *
      * Note that this causes the deadline to be reset to Date_t::max(), but that it can also be
      * subsequently reduced in size after the fact.
      */
     class InterruptionGuard {
-        friend Interruptable;
-
-        explicit InterruptionGuard(Interruptable& interruptable)
-            : _interruptable(interruptable), _oldState(_interruptable._pushIgnoreInterrupts()) {}
-
     public:
+        InterruptionGuard(const InterruptionGuard&) = delete;
+        InterruptionGuard& operator=(const InterruptionGuard&) = delete;
+
+        InterruptionGuard(InterruptionGuard&& other)
+            : _interruptible(other._interruptible), _oldState(other._oldState) {
+            other._interruptible = nullptr;
+        }
+
+        InterruptionGuard& operator=(InterruptionGuard&&) = delete;
+
         ~InterruptionGuard() {
-            _interruptable._popIgnoreInterrupts(_oldState);
+            if (_interruptible) {
+                _interruptible->popIgnoreInterrupts(_oldState);
+            }
         }
 
     private:
-        Interruptable& _interruptable;
+        friend Interruptible;
+
+        explicit InterruptionGuard(Interruptible& interruptible)
+            : _interruptible(&interruptible), _oldState(_interruptible->pushIgnoreInterrupts()) {}
+
+        Interruptible* _interruptible;
         IgnoreInterruptsState _oldState;
     };
 
-    /**
-     * makeDeadlineGuard introduces a new subsidiary scope in which, for the liftime of the returned
-     * guard, the interruptable ignores outside interruption.  All operations which check
-     * checkForInterrupt or waitForConditionOrInterrupt will return Status::OK, unless a new
-     * deadline guard is established, in which case they may return InternalExceededTimeLimit.
-     */
     InterruptionGuard makeInterruptionGuard() {
         return InterruptionGuard(*this);
     }
@@ -191,14 +171,15 @@ public:
      * Invokes the passed callback with an interruption guard active.  Additionally handles the
      * dance of try/catching the invocation and checking checkForInterrupt with the guard inactive
      * (to allow a higher level timeout to override a lower level one, or for top level interruption
-     * to propogate)
+     * to propagate)
      */
     template <typename Callback>
     decltype(auto) runWithoutInterruption(Callback&& cb) {
         try {
             const auto guard = makeInterruptionGuard();
             return std::forward<Callback>(cb)();
-        } catch (const ExceptionFor<ErrorCodes::InternalExceededTimeLimit>&) {
+        } catch (const ExceptionForCat<ErrorCategory::ExceededTimeLimitError>&) {
+            // May throw replacement exception
             checkForInterrupt();
             throw;
         }
@@ -318,7 +299,7 @@ public:
                                                    stdx::unique_lock<stdx::mutex>& m,
                                                    Milliseconds ms) {
         return uassertStatusOK(
-            waitForConditionOrInterruptNoAssertUntil(cv, m, _getExpirationDateForWaitForValue(ms)));
+            waitForConditionOrInterruptNoAssertUntil(cv, m, getExpirationDateForWaitForValue(ms)));
     }
 
     /**
@@ -348,7 +329,7 @@ public:
         Date_t deadline) noexcept = 0;
 
     /**
-     * Sleeps until "deadline"; throws an exception if the interrutipble is interrupted before then.
+     * Sleeps until "deadline"; throws an exception if the interruptible is interrupted before then.
      */
     void sleepUntil(Date_t deadline) {
         stdx::mutex m;
@@ -367,13 +348,56 @@ public:
         stdx::unique_lock<stdx::mutex> lk(m);
         invariant(!waitForConditionOrInterruptFor(cv, lk, duration, [] { return false; }));
     }
+
+protected:
+    /**
+     * Pushes an ignore interruption critical section into the interruptible.  Until an associated
+     * popIgnoreInterrupts is invoked, the interruptible should ignore interruptions related to
+     * explicit interruption or previously set deadlines.
+     *
+     * Note that new deadlines can be set after this is called, which will again introduce the
+     * possibility of interruption.
+     *
+     * Returns state needed to pop interruption.
+     */
+    virtual IgnoreInterruptsState pushIgnoreInterrupts() = 0;
+
+    /**
+     * Pops the ignored interruption critical section introduced by push.
+     */
+    virtual void popIgnoreInterrupts(IgnoreInterruptsState iis) = 0;
+
+    /**
+     * Pushes a subsidiary deadline into the interruptible.  Until an associated
+     * popArtificialDeadline is
+     * invoked, the interruptible will fail checkForInterrupt and waitForConditionOrInterrupt calls
+     * with the passed error code if the deadline has passed.
+     *
+     * Note that deadline's higher than the current value are constrained (such that the passed
+     * error code will be returned/thrown, but after the min(oldDeadline, newDeadline) has passed).
+     *
+     * Returns state needed to pop the deadline.
+     */
+    virtual DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) = 0;
+
+    /**
+     * Pops the subsidiary deadline introduced by push.
+     */
+    virtual void popArtificialDeadline(DeadlineState) = 0;
+
+    /**
+     * Returns the equivalent of Date_t::now() + waitFor for the interruptible's clock
+     */
+    virtual Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) = 0;
+
+    class NotInterruptible;
 };
 
 /**
- * A noop interrutible type which can be used as a lightweight default arg for interruptible taking
+ * A not interruptible type which can be used as a lightweight default arg for interruptible taking
  * functions.
  */
-class Interruptable::NoopInterruptable : public Interruptable {
+class Interruptible::NotInterruptible final : public Interruptible {
     StatusWith<stdx::cv_status> waitForConditionOrInterruptNoAssertUntil(
         stdx::condition_variable& cv,
         stdx::unique_lock<stdx::mutex>& m,
@@ -396,35 +420,39 @@ class Interruptable::NoopInterruptable : public Interruptable {
     }
 
     // It's invalid to call the deadline or ignore interruption guards on a possibly noop
-    // interruptable.
+    // interruptible.
     //
-    // The noop interruptable should only be invoked as a default arg at the bottom of the call
+    // The noop interruptible should only be invoked as a default arg at the bottom of the call
     // stack (with types that won't modify it's invocation)
-    IgnoreInterruptsState _pushIgnoreInterrupts() override {
+    IgnoreInterruptsState pushIgnoreInterrupts() override {
         MONGO_UNREACHABLE;
     }
 
-    void _popIgnoreInterrupts(IgnoreInterruptsState) override {
+    void popIgnoreInterrupts(IgnoreInterruptsState) override {
         MONGO_UNREACHABLE;
     }
 
-    DeadlineState _pushFatalDeadline(Date_t deadline) override {
+    DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) override {
         MONGO_UNREACHABLE;
     }
 
-    void _popFatalDeadline(DeadlineState) override {
+    void popArtificialDeadline(DeadlineState) override {
         MONGO_UNREACHABLE;
     }
 
-    Date_t _getExpirationDateForWaitForValue(Milliseconds waitFor) override {
+    Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) override {
         return Date_t::now() + waitFor;
     }
 };
 
-inline Interruptable* Interruptable::Noop() {
-    static NoopInterruptable noop;
+inline Interruptible* Interruptible::notInterruptible() {
+    static constexpr NotInterruptible notInterruptible;
 
-    return &noop;
+    // This is okay because even by an exhaustive interpretation of the standard, we never "modify"
+    // a const object (note the lack of any data members in Interruptible and NotInterruptible).
+    //
+    // This also mandates the lack of a virtual dtor, but that should be enforced statically.
+    return const_cast<NotInterruptible*>(&notInterruptible);
 }
 
 }  // namespace mongo

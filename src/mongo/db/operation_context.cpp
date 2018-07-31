@@ -88,7 +88,9 @@ void OperationContext::setDeadlineAndMaxTime(Date_t when,
                                              ErrorCodes::Error timeoutError) {
     invariant(!getClient()->isInDirectClient());
     invariant(ErrorCodes::isExceededTimeLimitError(timeoutError));
-    uassert(40120, "Illegal attempt to change operation deadline", _hasArtificialDeadline || !hasDeadline());
+    uassert(40120,
+            "Illegal attempt to change operation deadline",
+            _hasArtificialDeadline || !hasDeadline());
     _deadline = when;
     _maxTime = maxTime;
     _timeoutError = timeoutError;
@@ -370,7 +372,7 @@ std::unique_ptr<Locker> OperationContext::swapLockState(std::unique_ptr<Locker> 
     return locker;
 }
 
-Date_t OperationContext::_getExpirationDateForWaitForValue(Milliseconds waitFor) {
+Date_t OperationContext::getExpirationDateForWaitForValue(Milliseconds waitFor) {
     return getServiceContext()->getPreciseClockSource()->now() + waitFor;
 }
 

@@ -44,7 +44,7 @@
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/decorable.h"
-#include "mongo/util/interruptable.h"
+#include "mongo/util/interruptible.h"
 #include "mongo/util/time_support.h"
 #include "mongo/util/timer.h"
 
@@ -71,7 +71,7 @@ class UnreplicatedWritesBlock;
  * (RecoveryUnitState) to reduce complexity and duplication in the storage-engine specific
  * RecoveryUnit and to allow better invariant checking.
  */
-class OperationContext : public Interruptable, public Decorable<OperationContext> {
+class OperationContext : public Interruptible, public Decorable<OperationContext> {
     MONGO_DISALLOW_COPYING(OperationContext);
 
 public:
@@ -330,47 +330,45 @@ public:
         Date_t deadline) noexcept override;
 
 private:
-    IgnoreInterruptsState _pushIgnoreInterrupts() override {
-        IgnoreInterruptsState iis{_ignoreInterrupts, {_deadline, _hasArtificialDeadline}};
+    IgnoreInterruptsState pushIgnoreInterrupts() override {
+        IgnoreInterruptsState iis{_ignoreInterrupts,
+                                  {_deadline, _timeoutError, _hasArtificialDeadline}};
         _hasArtificialDeadline = true;
-        setDeadlineByDate(Date_t::max());
+        setDeadlineByDate(Date_t::max(), ErrorCodes::ExceededTimeLimit);
         _ignoreInterrupts = true;
 
         return iis;
     }
 
-    void _popIgnoreInterrupts(IgnoreInterruptsState iis) override {
+    void popIgnoreInterrupts(IgnoreInterruptsState iis) override {
         _ignoreInterrupts = iis.ignoreInterrupts;
 
-        setDeadlineByDate(iis.deadline.deadline);
+        setDeadlineByDate(iis.deadline.deadline, iis.deadline.error);
         _hasArtificialDeadline = iis.deadline.hasArtificialDeadline;
 
-        if (!_ignoreInterrupts && !_hasArtificialDeadline && hasDeadlineExpired() &&
-            getKillStatus() == ErrorCodes::OK) {
-            markKilled(ErrorCodes::ExceededTimeLimit);
-        }
+        _markKilledIfDeadlineRequires();
     }
 
-    DeadlineState _pushFatalDeadline(Date_t deadline) override {
-        DeadlineState ds{_deadline, _hasArtificialDeadline};
+    DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) override {
+        DeadlineState ds{_deadline, _timeoutError, _hasArtificialDeadline};
 
         _hasArtificialDeadline = true;
-
-        if (deadline < _deadline) {
-            setDeadlineByDate(deadline);
-        }
+        setDeadlineByDate(std::min(_deadline, deadline), error);
 
         return ds;
     }
 
-    void _popFatalDeadline(DeadlineState ds) override {
-        auto preCheck = checkForInterruptNoAssert();
-
-        setDeadlineByDate(ds.deadline);
+    void popArtificialDeadline(DeadlineState ds) override {
+        setDeadlineByDate(ds.deadline, ds.error);
         _hasArtificialDeadline = ds.hasArtificialDeadline;
 
-        if (!_hasArtificialDeadline && hasDeadlineExpired() && getKillStatus() == ErrorCodes::OK) {
-            markKilled(ErrorCodes::ExceededTimeLimit);
+        _markKilledIfDeadlineRequires();
+    }
+
+    void _markKilledIfDeadlineRequires() {
+        if (!_ignoreInterrupts && !_hasArtificialDeadline && hasDeadlineExpired() &&
+            !isKillPending()) {
+            markKilled(_timeoutError);
         }
     }
 
@@ -395,7 +393,7 @@ private:
      * Returns the timepoint that is "waitFor" ms after now according to the
      * ServiceContext's precise clock.
      */
-    Date_t _getExpirationDateForWaitForValue(Milliseconds waitFor) override;
+    Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) override;
 
     /**
      * Set whether or not operations should generate oplog entries.

@@ -31,7 +31,6 @@
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/clock_source.h"
-#include "mongo/util/notifyable.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
@@ -48,35 +47,13 @@ namespace mongo {
  * when it would otherwise block.
  */
 class Waitable : public Notifyable {
-protected:
-    enum class TimeoutState {
-        NoTimeout,
-        Timeout,
-    };
-
-    /**
-     * Run some amount of work.  The intention is that this function perform work until it's
-     * possible that the surrounding condvar clause could have finished.
-     *
-     * Note that like regular condvar.wait, this allows implementers the flexibility to possibly
-     * return early.
-     *
-     * We take a clock source here to allow for synthetic timeouts.
-     */
-    virtual void run(ClockSource* clkSource) = 0;
-
-    /**
-     * Like run, but only until the passed deadline has passed.
-     */
-    virtual TimeoutState run_until(ClockSource* clkSource, Date_t deadline) = 0;
-
 public:
     static void wait(Waitable* waitable,
                      ClockSource* clkSource,
                      stdx::condition_variable& cv,
                      stdx::unique_lock<stdx::mutex>& lk) {
         if (waitable) {
-            cv._runWithNotifyable(*waitable, [&] {
+            cv._runWithNotifyable(*waitable, [&]() noexcept {
                 lk.unlock();
                 waitable->run(clkSource);
                 lk.lock();
@@ -106,7 +83,7 @@ public:
         if (waitable) {
             auto rval = stdx::cv_status::no_timeout;
 
-            cv._runWithNotifyable(*waitable, [&] {
+            cv._runWithNotifyable(*waitable, [&]() noexcept {
                 lk.unlock();
                 if (waitable->run_until(clkSource, Date_t(timeout_time)) == TimeoutState::Timeout) {
                     rval = stdx::cv_status::timeout;
@@ -135,6 +112,28 @@ public:
 
         return true;
     }
+
+protected:
+    enum class TimeoutState {
+        NoTimeout,
+        Timeout,
+    };
+
+    /**
+     * Run some amount of work.  The intention is that this function perform work until it's
+     * possible that the surrounding condvar clause could have finished.
+     *
+     * Note that like regular condvar.wait, this allows implementers the flexibility to possibly
+     * return early.
+     *
+     * We take a clock source here to allow for synthetic timeouts.
+     */
+    virtual void run(ClockSource* clkSource) noexcept = 0;
+
+    /**
+     * Like run, but only until the passed deadline has passed.
+     */
+    virtual TimeoutState run_until(ClockSource* clkSource, Date_t deadline) noexcept = 0;
 };
 
 }  // namespace mongo
