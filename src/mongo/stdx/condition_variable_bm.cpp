@@ -38,7 +38,7 @@
 namespace mongo {
 
 void BM_stdNotifyOne(benchmark::State& state) {
-    std::condition_variable cv;
+    std::condition_variable cv;  // NOLINT
 
     for (auto _ : state) {
         benchmark::ClobberMemory();
@@ -58,7 +58,7 @@ void BM_stdxNotifyOneNoNotifyables(benchmark::State& state) {
 volatile bool alwaysTrue = true;
 
 void BM_stdWaitWithTruePredicate(benchmark::State& state) {
-    std::condition_variable cv;
+    std::condition_variable cv;  // NOLINT
     stdx::mutex mutex;
     stdx::unique_lock<stdx::mutex> lk(mutex);
 

@@ -782,6 +782,8 @@ public:
         } catch (const DBException& ex) {
             return ex.toStatus();
         }
+
+        return Status::OK();
     }
 
     /**

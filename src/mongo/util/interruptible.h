@@ -446,13 +446,9 @@ class Interruptible::NotInterruptible final : public Interruptible {
 };
 
 inline Interruptible* Interruptible::notInterruptible() {
-    static constexpr NotInterruptible notInterruptible;
+    static NotInterruptible notInterruptible{};
 
-    // This is okay because even by an exhaustive interpretation of the standard, we never "modify"
-    // a const object (note the lack of any data members in Interruptible and NotInterruptible).
-    //
-    // This also mandates the lack of a virtual dtor, but that should be enforced statically.
-    return const_cast<NotInterruptible*>(&notInterruptible);
+    return &notInterruptible;
 }
 
 }  // namespace mongo
