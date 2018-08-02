@@ -309,6 +309,7 @@ env.Library(
         'db/initialize_snmp',
         'db/keys_collection_client_direct',
         'db/kill_sessions_local',
+        'db/traffic_recorder',
         'db/logical_session_cache_factory_mongod',
         'db/mongod_options',
         'db/mongodandmongos',
@@ -375,6 +376,17 @@ mongod = env.Program(
         'core',
         'default',
         'servers',
+    ],
+)
+
+traffic_reader = env.Program(
+    target="traffic_reader",
+    source=[
+        "db/traffic_reader.cpp",
+    ],
+    LIBDEPS=[
+        'base',
+        '$BUILD_DIR/mongo/rpc/protocol',
     ],
 )
 
