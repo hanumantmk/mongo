@@ -46,9 +46,10 @@ namespace mongo {
  */
 class Notifyable {
 public:
-    virtual ~Notifyable() noexcept {}
-
     virtual void notify() noexcept = 0;
+
+protected:
+    ~Notifyable() noexcept {}
 };
 
 class Waitable;

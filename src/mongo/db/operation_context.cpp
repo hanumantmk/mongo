@@ -200,7 +200,7 @@ Status OperationContext::checkForInterruptNoAssert() noexcept {
         if (!_hasArtificialDeadline) {
             markKilled(_timeoutError);
         }
-        return Status(_timeoutError, "exceeded internal time limit");
+        return Status(_timeoutError, "operation exceeded time limit");
     }
 
     if (_ignoreInterrupts) {
@@ -311,7 +311,7 @@ StatusWith<stdx::cv_status> OperationContext::waitForConditionOrInterruptNoAsser
         if (!_hasArtificialDeadline) {
             markKilled(_timeoutError);
         }
-        return Status(_timeoutError, "exceeded internal time limit");
+        return Status(_timeoutError, "operation exceeded time limit");
     }
 
     return waitStatus;

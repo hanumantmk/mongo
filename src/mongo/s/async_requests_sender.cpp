@@ -330,6 +330,8 @@ Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
         // We ignore interrupts here because we want to spin the baton for the full duration of the
         // findHostWithMaxWait.  We set the time limit (although the bg checker should fulfill our
         // promise) to sync up with the findHostWithMaxWait.
+        //
+        // TODO clean this up after SERVER-35689 when we can do async targeting.
         return ars->_opCtx->runWithoutInterruption([&] {
             return ars->_opCtx->runWithDeadline(deadline, ErrorCodes::ExceededTimeLimit, [&] {
                 return pf.future.getNoThrow(ars->_opCtx);

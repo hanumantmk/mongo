@@ -114,6 +114,8 @@ public:
     }
 
 protected:
+    ~Waitable() noexcept {}
+
     enum class TimeoutState {
         NoTimeout,
         Timeout,
