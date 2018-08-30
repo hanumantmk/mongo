@@ -62,6 +62,12 @@
 namespace mongo {
 namespace transport {
 
+namespace {
+
+AtomicUInt64 outgoingBindIpIdx(0);
+
+}  // namespace
+
 MONGO_FAIL_POINT_DEFINE(transportLayerASIOasyncConnectTimesOut);
 
 class ASIOReactorTimer final : public ReactorTimer {
@@ -240,6 +246,11 @@ TransportLayerASIO::TransportLayerASIO(const TransportLayerASIO::Options& opts,
 #endif
       _sep(sep),
       _listenerOptions(opts) {
+    for (const auto& ip : opts.ipList) {
+        for (auto addr : SockAddr::createAll(ip, 0, AF_INET)) {
+            _outgoingBindIps.push_back(addr);
+        }
+    }
 }
 
 TransportLayerASIO::~TransportLayerASIO() = default;
@@ -560,11 +571,20 @@ Future<SessionHandle> TransportLayerASIO::asyncConnect(HostAndPort peer,
     }
 
     connector->resolver.asyncResolve(connector->peer, _listenerOptions.enableIPv6)
-        .then([connector](WrappedResolver::EndpointVector results) {
+        .then([connector, this](WrappedResolver::EndpointVector results) {
             stdx::unique_lock<stdx::mutex> lk(connector->mutex);
             connector->resolvedEndpoint = results.front();
             connector->socket.open(connector->resolvedEndpoint->protocol());
             connector->socket.non_blocking(true);
+
+            if (_outgoingBindIps.size()) {
+                const auto& bindIp =
+                    _outgoingBindIps[outgoingBindIpIdx.fetchAndAdd(1) % _outgoingBindIps.size()];
+                asio::ip::tcp::endpoint endPoint(
+                    asio::ip::address::from_string(bindIp.toString(false)), 0);
+                connector->socket.bind(endPoint);
+            }
+
             lk.unlock();
 
             return connector->socket.async_connect(*connector->resolvedEndpoint, UseFuture{});
