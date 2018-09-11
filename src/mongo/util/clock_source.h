@@ -28,6 +28,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "mongo/stdx/condition_variable.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/stdx/mutex.h"
@@ -41,6 +43,16 @@ class Date_t;
  * An interface for getting the current wall clock time.
  */
 class ClockSource {
+    // We need a type trait to differentiate waitable ptr args from predicates.
+    //
+    // This returns true for non-pointers and function pointers
+    template <typename Pred>
+    struct CouldBePredicate
+        : public std::integral_constant<bool,
+                                        !std::is_pointer<Pred>::value ||
+                                            std::is_function<std::remove_pointer_t<Pred>>::value> {
+    };
+
 public:
     virtual ~ClockSource() = default;
 
@@ -86,7 +98,7 @@ public:
      * Like cv.wait_until(m, deadline, pred), but uses this ClockSource instead of
      * stdx::chrono::system_clock to measure the passage of time.
      */
-    template <typename Pred, std::enable_if_t<!std::is_pointer<Pred>::value, int> = 0>
+    template <typename Pred, std::enable_if_t<CouldBePredicate<Pred>::value, int> = 0>
     bool waitForConditionUntil(stdx::condition_variable& cv,
                                stdx::unique_lock<stdx::mutex>& m,
                                Date_t deadline,
@@ -106,7 +118,7 @@ public:
      */
     template <typename Duration,
               typename Pred,
-              std::enable_if_t<!std::is_pointer<Pred>::value, int> = 0>
+              std::enable_if_t<CouldBePredicate<Pred>::value, int> = 0>
     bool waitForConditionFor(stdx::condition_variable& cv,
                              stdx::unique_lock<stdx::mutex>& m,
                              Duration duration,

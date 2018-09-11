@@ -148,13 +148,14 @@ private:
             return false;
         }
 
+        _notifyableCount.subtractAndFetch(1);
+
         (**iter)->notify();
 
         // null out iter here, so that the notifyable won't remove itself from the list when it
         // wakes up
         **iter = nullptr;
 
-        _notifyableCount.subtractAndFetch(1);
         _notifyables.erase(iter);
 
         return true;

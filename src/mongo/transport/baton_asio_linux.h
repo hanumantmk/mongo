@@ -235,10 +235,7 @@ public:
 
             return Waitable::TimeoutState::Timeout;
         } else {
-            // Otherwise, remove the timer from the internal timer list, abandon the future and
-            // return no timeout
             cancelTimer(irt);
-            std::move(future).getAsync([](mongo::Status) {});
 
             return Waitable::TimeoutState::NoTimeout;
         }

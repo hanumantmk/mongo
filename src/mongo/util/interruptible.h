@@ -55,7 +55,8 @@ protected:
 
 public:
     /**
-     * Returns the not interruptible.  Useful as a default argument to interruptible taking methods.
+     * Returns a statically allocated instance that cannot be interrupted.  Useful as a default
+     * argument to interruptible taking methods.
      */
     static Interruptible* notInterruptible();
 
@@ -117,9 +118,6 @@ public:
         }
     }
 
-    /**
-     * Returns true if this interruptible has a deadline.
-     */
     bool hasDeadline() const {
         return getDeadline() != Date_t::max();
     }
@@ -135,19 +133,19 @@ public:
      * Note that this causes the deadline to be reset to Date_t::max(), but that it can also be
      * subsequently reduced in size after the fact.
      */
-    class InterruptionGuard {
+    class IgnoreInterruptionsGuard {
     public:
-        InterruptionGuard(const InterruptionGuard&) = delete;
-        InterruptionGuard& operator=(const InterruptionGuard&) = delete;
+        IgnoreInterruptionsGuard(const IgnoreInterruptionsGuard&) = delete;
+        IgnoreInterruptionsGuard& operator=(const IgnoreInterruptionsGuard&) = delete;
 
-        InterruptionGuard(InterruptionGuard&& other)
+        IgnoreInterruptionsGuard(IgnoreInterruptionsGuard&& other)
             : _interruptible(other._interruptible), _oldState(other._oldState) {
             other._interruptible = nullptr;
         }
 
-        InterruptionGuard& operator=(InterruptionGuard&&) = delete;
+        IgnoreInterruptionsGuard& operator=(IgnoreInterruptionsGuard&&) = delete;
 
-        ~InterruptionGuard() {
+        ~IgnoreInterruptionsGuard() {
             if (_interruptible) {
                 _interruptible->popIgnoreInterrupts(_oldState);
             }
@@ -156,15 +154,15 @@ public:
     private:
         friend Interruptible;
 
-        explicit InterruptionGuard(Interruptible& interruptible)
+        explicit IgnoreInterruptionsGuard(Interruptible& interruptible)
             : _interruptible(&interruptible), _oldState(_interruptible->pushIgnoreInterrupts()) {}
 
         Interruptible* _interruptible;
         IgnoreInterruptsState _oldState;
     };
 
-    InterruptionGuard makeInterruptionGuard() {
-        return InterruptionGuard(*this);
+    IgnoreInterruptionsGuard makeIgnoreInterruptionsGuard() {
+        return IgnoreInterruptionsGuard(*this);
     }
 
     /**
@@ -176,7 +174,7 @@ public:
     template <typename Callback>
     decltype(auto) runWithoutInterruption(Callback&& cb) {
         try {
-            const auto guard = makeInterruptionGuard();
+            const auto guard = makeIgnoreInterruptionsGuard();
             return std::forward<Callback>(cb)();
         } catch (const ExceptionForCat<ErrorCategory::ExceededTimeLimitError>&) {
             // May throw replacement exception
