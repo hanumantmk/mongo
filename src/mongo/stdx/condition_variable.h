@@ -49,7 +49,7 @@ public:
     virtual void notify() noexcept = 0;
 
 protected:
-    ~Notifyable() noexcept {}
+    ~Notifyable() = default;
 };
 
 class Waitable;

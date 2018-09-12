@@ -58,7 +58,7 @@ class TransportLayerASIO::BatonASIO : public Baton {
      * We use this internal reactor timer to exit run_until calls (by forcing an early timeout for
      * ::poll).
      *
-     * It's methods are all unreachable because we never actually use its timer-ness (we just need
+     * Its methods are all unreachable because we never actually use its timer-ness (we just need
      * its address for baton book keeping).
      */
     class InternalReactorTimer : public ReactorTimer {
