@@ -381,7 +381,7 @@ void MigrationDestinationManager::cloneDocumentsFromDonor(
     stdx::function<void(OperationContext*, BSONObj)> insertBatchFn,
     stdx::function<BSONObj(OperationContext*)> fetchBatchFn) {
 
-    ProducerConsumerQueue<BSONObj> batches(1);
+    SingleProducerSingleConsumerQueue<BSONObj> batches(1);
     stdx::thread inserterThread{[&] {
         Client::initThreadIfNotAlready("chunkInserter");
         auto inserterOpCtx = Client::getCurrent()->makeOperationContext();

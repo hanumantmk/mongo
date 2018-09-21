@@ -33,6 +33,7 @@
 #include <boost/optional.hpp>
 #include <deque>
 #include <list>
+#include <numeric>
 #include <queue>
 #include <stack>
 
@@ -59,41 +60,240 @@ struct DefaultCostFunction {
     }
 };
 
-}  // namespace producer_consumer_queue_detail
+template <bool b, typename T>
+struct Holder;
 
-/**
- * A bounded, blocking, thread safe, cost parametrizable, single producer, multi-consumer queue.
- *
- * Properties:
- *   bounded - the queue can be limited in the number of items it can hold
- *   blocking - when the queue is full, or has no entries, callers block
- *   thread safe - the queue can be accessed safely from multiple threads at the same time
- *   cost parametrizable - the cost of items in the queue need not be equal. I.e. your items could
- *                          be discrete byte buffers and the queue depth measured in bytes, so that
- *                          the queue could hold one large buffer, or many smaller ones
- *   single producer - Only one thread may push work into the queue
- *   multi-consumer - Any number of threads may pop work out of the queue
- *
- * Interruptibility:
- *   All of the blocking methods on this type take an interruptible.
- *
- * Exceptions outside the interruptible include:
- *   closure of queue endpoints
- *     ErrorCodes::ProducerConsumerQueueEndClosed
- *   pushes with batches that exceed the max queue size
- *     ErrorCodes::ProducerConsumerQueueBatchTooLarge
- *
- * Cost Function:
- *   The cost function must have a call operator which takes a const T& and returns the cost in
- *   size_t units. It must be pure across moves for a given T and never return zero. The intent of
- *   the cost function is to express the kind of bounds the queue provides, rather than to
- *   specialize behavior for a type. I.e. you should not specialize the default cost function and
- *   the cost function should always be explicit in the type.
- */
-template <typename T, typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
-class ProducerConsumerQueue {
+template <typename T>
+struct Holder<true, T> {
+    std::shared_ptr<T> data;
+
+    template <typename U>
+    Holder(const std::shared_ptr<U>& u) : data(std::make_shared<T>(u)) {}
+
+    const T& operator->() const {
+        return *data;
+    }
+};
+
+template <typename T>
+struct Holder<false, T> {
+    T data;
+
+    template <typename U>
+    Holder(const std::shared_ptr<U>& u) : data(u) {}
+
+    Holder(const Holder&) = delete;
+    Holder& operator=(const Holder&) = delete;
+
+    Holder(Holder&&) = default;
+    Holder& operator=(Holder&&) = default;
+
+    const T& operator->() const {
+        return data;
+    }
+};
+
+template <bool>
+class ConsumerState;
+
+template <>
+class ConsumerState<false> {
+public:
+    stdx::condition_variable& cv() {
+        return _cv;
+    }
+
+    operator size_t() const {
+        return data ? 1 : 0;
+    }
+
+    class RAII {
+    public:
+        RAII(ConsumerState& x) : _x(x.data) {
+            invariant(!_x);
+            _x = true;
+        }
+
+        ~RAII() {
+            _x = false;
+        }
+
+    private:
+        bool& _x;
+    };
+
+private:
+    bool data = false;
+    stdx::condition_variable _cv;
+};
+
+template <>
+class ConsumerState<true> {
+public:
+    stdx::condition_variable& cv() {
+        return _cv;
+    }
+
+    operator size_t() const {
+        return data;
+    }
+
+    class RAII {
+    public:
+        RAII(ConsumerState& x) : _x(x.data) {
+            ++_x;
+        }
+
+        ~RAII() {
+            --_x;
+        }
+
+    private:
+        size_t& _x;
+    };
+
+private:
+    size_t data = 0;
+    stdx::condition_variable _cv;
+};
+
+template <bool>
+class ProducerState;
+
+template <>
+class ProducerState<false> {
+public:
+    stdx::condition_variable& cv() {
+        return _cv;
+    }
+
+    size_t wants() {
+        return data;
+    }
+
+    operator size_t() const {
+        return data ? 1 : 0;
+    }
+
+    size_t queueDepth() const {
+        return data;
+    }
+
+    explicit operator bool() const {
+        return data;
+    }
+
+    class RAII {
+    public:
+        RAII(ProducerState& x, size_t wants) : _x(x) {
+            invariant(!_x);
+            _x.data = wants;
+        }
+
+        stdx::condition_variable& cv() {
+            return _x._cv;
+        }
+
+        explicit operator bool() const {
+            return true;
+        }
+
+        ~RAII() {
+            _x.data = 0;
+        }
+
+    public:
+        ProducerState& _x;
+    };
+
+private:
+    size_t data = 0;
+
+    stdx::condition_variable _cv;
+};
+
+template <>
+class ProducerState<true> {
+    // One of these is allocated for each producer that blocks on pushing to the queue
+    struct ProducerWants {
+        ProducerWants(size_t s) : wants(s) {}
+
+        size_t wants;
+        // Each producer has their own cv, so that they can be woken individually in FIFO order
+        stdx::condition_variable cv;
+    };
 
 public:
+    stdx::condition_variable& cv() {
+        return data.front().cv;
+    }
+
+    size_t wants() {
+        return data.front().wants;
+    }
+
+    operator size_t() const {
+        return data.size();
+    }
+
+    size_t queueDepth() const {
+        size_t depth = 0;
+        for (const auto& x : data) {
+            depth += x.wants;
+        }
+
+        return depth;
+    }
+
+    explicit operator bool() const {
+        return data.size();
+    }
+
+    class RAII {
+    public:
+        RAII(ProducerState& x, size_t wants) : _x(x.data) {
+            _x.emplace_back(wants);
+            _iter = --_x.end();
+        }
+
+        stdx::condition_variable& cv() {
+            return _iter->cv;
+        }
+
+        explicit operator bool() const {
+            return _x.begin() == _iter;
+        }
+
+        ~RAII() {
+            _x.erase(_iter);
+        }
+
+    private:
+        std::list<ProducerWants>& _x;
+        std::list<ProducerWants>::iterator _iter;
+    };
+
+private:
+    // A list of producers that want to push to the queue
+    std::list<ProducerWants> data;
+};
+
+template <typename T,
+          bool isMultiProducer,
+          bool isMultiConsumer,
+          typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
+class ProducerConsumerQueue {
+    using Consumers = ConsumerState<isMultiConsumer>;
+    using Producers = ProducerState<isMultiProducer>;
+
+public:
+    struct Stats {
+        size_t queueDepth;
+        size_t waitingConsumers;
+        size_t waitingProducers;
+        size_t producerQueueDepth;
+    };
+
     // By default the queue depth is unlimited
     ProducerConsumerQueue()
         : ProducerConsumerQueue(std::numeric_limits<size_t>::max(), CostFunc{}) {}
@@ -113,7 +313,7 @@ public:
     ProducerConsumerQueue& operator=(ProducerConsumerQueue&&) = delete;
 
     ~ProducerConsumerQueue() {
-        invariant(!_producerWants);
+        invariant(!_producers);
         invariant(!_consumers);
     }
 
@@ -256,19 +456,146 @@ public:
         _notifyIfNecessary(lk);
     }
 
-    // TEST ONLY FUNCTIONS
-
-    // Returns the current depth of the queue in CostFunction units
-    size_t sizeForTest() const {
+    Stats getStats() const {
         stdx::lock_guard<stdx::mutex> lk(_mutex);
-
-        return _current;
+        Stats stats;
+        stats.queueDepth = _current;
+        stats.waitingConsumers = _consumers;
+        stats.waitingProducers = _producers;
+        stats.producerQueueDepth = _producers.queueDepth();
+        return stats;
     }
 
-    // Returns true if the queue is empty
-    bool emptyForTest() const {
-        return sizeForTest() == 0;
-    }
+    struct Pipe {
+        class Producer {
+            struct Closer {
+                Closer(const std::shared_ptr<ProducerConsumerQueue>& parent) : _parent(parent) {}
+
+                ~Closer() {
+                    _parent->closeProducerEnd();
+                }
+
+                ProducerConsumerQueue* operator->() const {
+                    return _parent.get();
+                }
+
+                std::shared_ptr<ProducerConsumerQueue> _parent;
+            };
+
+        public:
+            explicit Producer(const std::shared_ptr<ProducerConsumerQueue>& parent)
+                : _parent(parent) {}
+
+            void push(T&& t,
+                      Interruptible* interruptible = Interruptible::notInterruptible()) const {
+                _parent->push(std::move(t), interruptible);
+            }
+
+            template <typename StartIterator, typename EndIterator>
+            void pushMany(StartIterator&& start,
+                          EndIterator&& last,
+                          Interruptible* interruptible = Interruptible::notInterruptible()) const {
+                _parent->pushMany(std::forward<StartIterator>(start),
+                                  std::forward<EndIterator>(last),
+                                  interruptible);
+            }
+
+            bool tryPush(T&& t) const {
+                return _parent->tryPush(std::move(t));
+            }
+
+            void close() const {
+                _parent->closeProducerEnd();
+            }
+
+        private:
+            producer_consumer_queue_detail::Holder<isMultiProducer, Closer> _parent;
+        };
+
+        class Consumer {
+            struct Closer {
+                Closer(const std::shared_ptr<ProducerConsumerQueue>& parent) : _parent(parent) {}
+
+                ~Closer() {
+                    _parent->closeConsumerEnd();
+                }
+
+                ProducerConsumerQueue* operator->() const {
+                    return _parent.get();
+                }
+
+                std::shared_ptr<ProducerConsumerQueue> _parent;
+            };
+
+        public:
+            explicit Consumer(const std::shared_ptr<ProducerConsumerQueue>& parent)
+                : _parent(parent) {}
+
+            T pop(Interruptible* interruptible = Interruptible::notInterruptible()) const {
+                return _parent->pop(interruptible);
+            }
+
+            template <typename OutputIterator>
+            std::pair<size_t, OutputIterator> popMany(
+                OutputIterator&& iterator,
+                Interruptible* interruptible = Interruptible::notInterruptible()) const {
+                return _parent->popMany(std::forward<OutputIterator>(iterator), interruptible);
+            }
+
+            template <typename OutputIterator>
+            std::pair<size_t, OutputIterator> popManyUpTo(
+                size_t budget,
+                OutputIterator&& iterator,
+                Interruptible* interruptible = Interruptible::notInterruptible()) const {
+                return _parent->popManyUpTo(
+                    budget, std::forward<OutputIterator>(iterator), interruptible);
+            }
+
+            boost::optional<T> tryPop() const {
+                return _parent->tryPop();
+            }
+
+            void close() const {
+                _parent->closeConsumerEnd();
+            }
+
+        private:
+            producer_consumer_queue_detail::Holder<isMultiConsumer, Closer> _parent;
+        };
+
+        class Controller {
+        public:
+            explicit Controller(const std::shared_ptr<ProducerConsumerQueue>& parent)
+                : _parent(parent) {}
+
+            void closeConsumerEnd() const {
+                _parent->closeConsumerEnd();
+            }
+
+            void closeProducerEnd() const {
+                _parent->closeProducerEnd();
+            }
+
+            Stats getStats() const {
+                return _parent->getStats();
+            }
+
+        private:
+            std::shared_ptr<ProducerConsumerQueue> _parent;
+        };
+
+        explicit Pipe(const std::shared_ptr<ProducerConsumerQueue>& parent)
+            : producer(parent), controller(parent), consumer(parent) {}
+
+        Pipe() : Pipe(std::make_shared<ProducerConsumerQueue>()) {}
+        Pipe(size_t size) : Pipe(std::make_shared<ProducerConsumerQueue>(size)) {}
+        Pipe(size_t size, CostFunc costFunc)
+            : Pipe(std::make_shared<ProducerConsumerQueue>(size, std::move(costFunc))) {}
+
+        Producer producer;
+        Controller controller;
+        Consumer consumer;
+    };
 
 private:
     size_t _invokeCostFunc(const T& t, WithLock) {
@@ -297,26 +624,26 @@ private:
         // the queue, wake everyone up and get out of here
         if (_consumerEndClosed || (_queue.empty() && _producerEndClosed)) {
             if (_consumers) {
-                _condvarConsumer.notify_all();
+                _consumers.cv().notify_all();
             }
 
-            if (_producerWants) {
-                _condvarProducer.notify_one();
+            if (_producers) {
+                _producers.cv().notify_one();
             }
 
             return;
         }
 
         // If a producer is queued, and we have enough space for it to push its work
-        if (_producerWants && _current + _producerWants <= _max) {
-            _condvarProducer.notify_one();
+        if (_producers && _current + _producers.wants() <= _max) {
+            _producers.cv().notify_one();
 
             return;
         }
 
         // If we have consumers and anything in the queue, notify consumers
         if (_consumers && _queue.size()) {
-            _condvarConsumer.notify_one();
+            _consumers.cv().notify_one();
 
             return;
         }
@@ -389,27 +716,33 @@ private:
     void _waitForSpace(stdx::unique_lock<stdx::mutex>& lk,
                        size_t cost,
                        Interruptible* interruptible) {
-        invariant(!_producerWants);
+        _checkProducerClosed(lk);
 
-        _producerWants = cost;
-        const auto guard = MakeGuard([&] { _producerWants = 0; });
+        if (!_producers && _current + cost <= _max) {
+            return;
+        }
+
+        typename Producers::RAII raii(_producers, cost);
 
         _waitFor(lk,
-                 _condvarProducer,
+                 raii.cv(),
                  [&] {
                      _checkProducerClosed(lk);
+
+                     if (!raii) {
+                         return false;
+                     }
+
                      return _current + cost <= _max;
                  },
                  interruptible);
     }
 
     void _waitForNonEmpty(stdx::unique_lock<stdx::mutex>& lk, Interruptible* interruptible) {
-
-        _consumers++;
-        const auto guard = MakeGuard([&] { _consumers--; });
+        typename Consumers::RAII raii(_consumers);
 
         _waitFor(lk,
-                 _condvarConsumer,
+                 _consumers.cv(),
                  [&] {
                      _checkConsumerClosed(lk);
                      return _queue.size();
@@ -426,8 +759,6 @@ private:
     }
 
     mutable stdx::mutex _mutex;
-    stdx::condition_variable _condvarConsumer;
-    stdx::condition_variable _condvarProducer;
 
     // Max size of the queue
     const size_t _max;
@@ -440,15 +771,30 @@ private:
 
     std::queue<T> _queue;
 
-    // Counter for consumers in the queue
-    size_t _consumers = 0;
-
-    // Size of batch the blocking producer wants to insert
-    size_t _producerWants = 0;
+    Consumers _consumers;
+    Producers _producers;
 
     // Flags that we're shutting down the queue
     bool _consumerEndClosed = false;
     bool _producerEndClosed = false;
 };
+
+}  // namespace producer_consumer_queue_detail
+
+template <typename T, typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
+using MultiProducerMultiConsumerQueue =
+    producer_consumer_queue_detail::ProducerConsumerQueue<T, true, true, CostFunc>;
+
+template <typename T, typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
+using MultiProducerSingleConsumerQueue =
+    producer_consumer_queue_detail::ProducerConsumerQueue<T, true, false, CostFunc>;
+
+template <typename T, typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
+using SingleProducerMultiConsumerQueue =
+    producer_consumer_queue_detail::ProducerConsumerQueue<T, false, true, CostFunc>;
+
+template <typename T, typename CostFunc = producer_consumer_queue_detail::DefaultCostFunction>
+using SingleProducerSingleConsumerQueue =
+    producer_consumer_queue_detail::ProducerConsumerQueue<T, false, false, CostFunc>;
 
 }  // namespace mongo
