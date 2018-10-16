@@ -214,6 +214,13 @@ Status OperationContext::checkForInterruptNoAssert() noexcept {
         }
     }
 
+    if (getClient() && getClient()->session() && !getClient()->session()->isConnected()) {
+        log() << "operation was interrupted because a client disconnected";
+        markKilled(ErrorCodes::ClientDisconnect);
+        return Status(ErrorCodes::ClientDisconnect,
+                      "operation was interrupted because a client disconnected");
+    }
+
     const auto killStatus = getKillStatus();
     if (killStatus != ErrorCodes::OK) {
         return Status(killStatus, "operation was interrupted");
@@ -278,6 +285,29 @@ StatusWith<stdx::cv_status> OperationContext::waitForConditionOrInterruptNoAsser
     if (opHasDeadline) {
         deadline = std::min(deadline, getDeadline());
     }
+
+    auto oldBaton = _baton;
+
+    if (getClient() && getClient()->session()) {
+        if (!oldBaton) {
+            _baton = getServiceContext()->getTransportLayer()->makeBaton(this);
+        }
+
+        _baton->addSession(*(getClient()->session()), transport::Baton::Type::In)
+            .getAsync([](const auto&) {});
+    }
+
+    const auto guard = MakeGuard([&] {
+        if (getClient() && getClient()->session()) {
+            _baton->cancelSession(*(getClient()->session()));
+        }
+
+        if (_baton != oldBaton) {
+            auto extra = _baton;
+            _baton->detach();
+            _baton = oldBaton;
+        }
+    });
 
     const auto waitStatus = [&] {
         if (Date_t::max() == deadline) {

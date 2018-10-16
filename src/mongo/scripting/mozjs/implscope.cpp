@@ -820,6 +820,17 @@ void MozJSImplScope::gc() {
 void MozJSImplScope::sleep(Milliseconds ms) {
     stdx::unique_lock<stdx::mutex> lk(_mutex);
 
+    if (_opCtx) {
+        try {
+            _opCtx->waitForConditionOrInterruptFor(_sleepCondition, lk, ms);
+        } catch (const DBException& ex) {
+            _killStatus = ex.toStatus();
+            uasserted(ErrorCodes::JSUncatchableError, "sleep was interrupted by kill");
+        }
+
+        return;
+    }
+
     uassert(ErrorCodes::JSUncatchableError,
             "sleep was interrupted by kill",
             !_sleepCondition.wait_for(
