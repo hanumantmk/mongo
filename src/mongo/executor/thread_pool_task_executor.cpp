@@ -46,7 +46,6 @@
 #include "mongo/executor/network_interface.h"
 #include "mongo/platform/atomic_word.h"
 #include "mongo/transport/baton.h"
-#include "mongo/util/concurrency/thread_pool_interface.h"
 #include "mongo/util/fail_point_service.h"
 #include "mongo/util/log.h"
 #include "mongo/util/time_support.h"
@@ -132,7 +131,7 @@ public:
 
 ThreadPoolTaskExecutor::ThreadPoolTaskExecutor(std::unique_ptr<ThreadPoolInterface> pool,
                                                std::shared_ptr<NetworkInterface> net)
-    : _net(std::move(net)), _pool(std::move(pool)) {}
+    : _net(std::move(net)), _pool(std::move(pool)), _outOfLineExecutor(_pool.get()) {}
 
 ThreadPoolTaskExecutor::~ThreadPoolTaskExecutor() {
     shutdown();
@@ -563,7 +562,8 @@ void ThreadPoolTaskExecutor::scheduleIntoPool_inlock(WorkQueue* fromQueue,
 
     for (const auto& cbState : todo) {
         if (cbState->baton) {
-            cbState->baton->schedule([this, cbState] { runCallback(std::move(cbState)); });
+            cbState->baton->schedule(&_outOfLineExecutor,
+                                     [this, cbState] { runCallback(std::move(cbState)); });
         } else {
             const auto status =
                 _pool->schedule([this, cbState] { runCallback(std::move(cbState)); });

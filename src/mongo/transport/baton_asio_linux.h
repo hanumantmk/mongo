@@ -130,27 +130,58 @@ public:
     }
 
     void detach() override {
+        decltype(_sessions) sessions;
+        decltype(_scheduled) scheduled;
+        decltype(_timers) timers;
+
         {
             stdx::lock_guard<stdx::mutex> lk(_mutex);
-            invariant(_sessions.empty());
-            invariant(_scheduled.empty());
-            invariant(_timers.empty());
+
+            {
+                stdx::lock_guard<Client> lk(*_opCtx->getClient());
+                invariant(_opCtx->getBaton().get() == this);
+                _opCtx->setBaton(nullptr);
+            }
+
+            _opCtx = nullptr;
+
+            using std::swap;
+            swap(_sessions, sessions);
+            swap(_scheduled, scheduled);
+            swap(_timers, timers);
         }
 
-        {
-            stdx::lock_guard<Client> lk(*_opCtx->getClient());
-            invariant(_opCtx->getBaton().get() == this);
-            _opCtx->setBaton(nullptr);
+        for (auto& job : scheduled) {
+            if (job.first) {
+                job.first->schedule(std::move(job.second));
+            } else {
+                std::move(job.second)();
+            }
         }
 
-        _opCtx = nullptr;
+        for (auto& session : sessions) {
+            session.second.promise.setError(
+                Status(ErrorCodes::OperationComplete, "baton is detached, cannot addSession"));
+        }
+
+        for (const auto& timer : timers) {
+            auto promise = timer.promise;
+            promise.setError(
+                Status(ErrorCodes::OperationComplete, "baton is detached, cannot add timer"));
+        }
     }
 
     Future<void> addSession(Session& session, Type type) override {
         auto fd = checked_cast<ASIOSession&>(session).getSocket().native_handle();
         auto pf = makePromiseFuture<void>();
 
-        _safeExecute([ fd, type, sp = pf.promise.share(), this ] {
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
+
+        if (!_opCtx) {
+            return Status(ErrorCodes::OperationComplete, "baton is detached, cannot addSession");
+        }
+
+        _safeExecute(std::move(lk), [ fd, type, sp = pf.promise.share(), this ] {
             _sessions[fd] = TransportSession{type, sp};
         });
 
@@ -159,13 +190,21 @@ public:
 
     Future<void> waitUntil(const ReactorTimer& timer, Date_t expiration) override {
         auto pf = makePromiseFuture<void>();
-        _safeExecute([ timerPtr = &timer, expiration, sp = pf.promise.share(), this ] {
-            auto pair = _timers.insert({
-                timerPtr, expiration, sp,
-            });
-            invariant(pair.second);
-            _timersById[pair.first->id] = pair.first;
-        });
+
+        stdx::unique_lock<stdx::mutex> lk(_mutex);
+
+        if (!_opCtx) {
+            return Status(ErrorCodes::OperationComplete, "baton is detached, cannot addSession");
+        }
+
+        _safeExecute(std::move(lk),
+                     [ timerPtr = &timer, expiration, sp = pf.promise.share(), this ] {
+                         auto pair = _timers.insert({
+                             timerPtr, expiration, sp,
+                         });
+                         invariant(pair.second);
+                         _timersById[pair.first->id] = pair.first;
+                     });
 
         return std::move(pf.future);
     }
@@ -207,10 +246,18 @@ public:
         return true;
     }
 
-    void schedule(unique_function<void()> func) override {
+    void schedule(OutOfLineExecutor* exec, unique_function<void()> func) override {
         stdx::lock_guard<stdx::mutex> lk(_mutex);
 
-        _scheduled.push_back(std::move(func));
+        if (!_opCtx) {
+            if (exec) {
+                exec->schedule(std::move(func));
+            }
+
+            return;
+        }
+
+        _scheduled.push_back({exec, std::move(func)});
 
         if (_inPoll) {
             _efd.notify();
@@ -262,7 +309,7 @@ public:
 
                 lk.unlock();
                 for (auto& job : toRun) {
-                    job();
+                    job.second();
                 }
                 lk.lock();
             }
@@ -382,11 +429,6 @@ private:
         SharedPromise<void> promise;
     };
 
-    template <typename Callback>
-    void _safeExecute(Callback&& cb) {
-        return _safeExecute(stdx::unique_lock<stdx::mutex>(_mutex), std::forward<Callback>(cb));
-    }
-
     /**
      * Safely executes method on the reactor.  If we're in poll, we schedule a task, then write to
      * the eventfd.  If not, we run inline.
@@ -394,10 +436,10 @@ private:
     template <typename Callback>
     void _safeExecute(stdx::unique_lock<stdx::mutex> lk, Callback&& cb) {
         if (_inPoll) {
-            _scheduled.push_back([cb, this] {
-                stdx::lock_guard<stdx::mutex> lk(_mutex);
-                cb();
-            });
+            _scheduled.push_back({nullptr, [cb, this] {
+                                      stdx::lock_guard<stdx::mutex> lk(_mutex);
+                                      cb();
+                                  }});
 
             _efd.notify();
         } else {
@@ -423,7 +465,7 @@ private:
     stdx::unordered_map<const ReactorTimer*, decltype(_timers)::const_iterator> _timersById;
 
     // For tasks that come in via schedule.  Or that were deferred because we were in poll
-    std::vector<unique_function<void()>> _scheduled;
+    std::vector<std::pair<OutOfLineExecutor*, unique_function<void()>>> _scheduled;
 };
 
 }  // namespace transport

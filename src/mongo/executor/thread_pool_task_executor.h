@@ -39,10 +39,10 @@
 #include "mongo/stdx/mutex.h"
 #include "mongo/stdx/thread.h"
 #include "mongo/transport/baton.h"
+#include "mongo/util/concurrency/thread_pool_interface.h"
+#include "mongo/util/out_of_line_executor.h"
 
 namespace mongo {
-
-class ThreadPoolInterface;
 
 namespace executor {
 
@@ -71,7 +71,7 @@ public:
     void startup() override;
     void shutdown() override;
     void join() override;
-    void appendDiagnosticBSON(BSONObjBuilder* b) const;
+    void appendDiagnosticBSON(BSONObjBuilder* b) const override;
     Date_t now() override;
     StatusWith<EventHandle> makeEvent() override;
     void signalEvent(const EventHandle& event) override;
@@ -102,6 +102,22 @@ private:
     class EventState;
     using WorkQueue = stdx::list<std::shared_ptr<CallbackState>>;
     using EventList = stdx::list<std::shared_ptr<EventState>>;
+
+    class OutOfLineThreadExecutor : public OutOfLineExecutor {
+    public:
+        explicit OutOfLineThreadExecutor(ThreadPoolInterface* pool) : _pool(pool) {}
+
+        void schedule(unique_function<void()> task) override {
+            _pool
+                ->schedule([task = std::make_shared<unique_function<void()>>(std::move(task))] {
+                    return (*task)();
+                })
+                .ignore();
+        }
+
+    private:
+        ThreadPoolInterface* _pool;
+    };
 
     /**
      * Representation of the stage of life of a thread pool.
@@ -186,6 +202,9 @@ private:
 
     // The thread pool that executes scheduled work items.
     std::unique_ptr<ThreadPoolInterface> _pool;
+
+    // The thread pool that executes scheduled work items.
+    OutOfLineThreadExecutor _outOfLineExecutor;
 
     // Mutex guarding all remaining fields.
     mutable stdx::mutex _mutex;

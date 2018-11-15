@@ -243,6 +243,9 @@ public:
         const RemoteCommandCallbackFn& cb,
         const transport::BatonHandle& baton = nullptr) = 0;
 
+    Future<RemoteCommandCallbackArgs> scheduleRemoteCommand(
+        const RemoteCommandRequest& request, const transport::BatonHandle& baton = nullptr);
+
     /**
      * If the callback referenced by "cbHandle" hasn't already executed, marks it as
      * canceled and runnable.
@@ -443,6 +446,23 @@ struct TaskExecutor::RemoteCommandCallbackArgs {
     RemoteCommandRequest request;
     ResponseStatus response;
 };
+
+inline Future<TaskExecutor::RemoteCommandCallbackArgs> TaskExecutor::scheduleRemoteCommand(
+    const RemoteCommandRequest& request, const transport::BatonHandle& baton) {
+    auto pf = makePromiseFuture<RemoteCommandCallbackArgs>();
+
+    auto status = scheduleRemoteCommand(
+        request,
+        [sp = pf.promise.share()](const RemoteCommandCallbackArgs& rs) mutable {
+            sp.emplaceValue(rs);
+        },
+        baton);
+
+    if (!status.isOK()) {
+        return status.getStatus();
+    }
+    return std::move(pf.future);
+}
 
 }  // namespace executor
 }  // namespace mongo

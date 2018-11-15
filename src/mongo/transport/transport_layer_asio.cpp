@@ -182,10 +182,14 @@ public:
 
     void schedule(ScheduleMode mode, Task task) override {
         if (mode == kDispatch) {
-            _ioContext.dispatch(std::move(task));
+            asio::dispatch(_ioContext, std::move(task));
         } else {
-            _ioContext.post(std::move(task));
+            asio::post(_ioContext, std::move(task));
         }
+    }
+
+    void schedule(Task task) override {
+        asio::post(_ioContext, std::move(task));
     }
 
     bool onReactorThread() const override {

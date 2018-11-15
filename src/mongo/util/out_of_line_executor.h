@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "mongo/stdx/functional.h"
+#include "mongo/util/functional.h"
 #include "mongo/util/future.h"
 
 namespace mongo {
@@ -69,7 +69,7 @@ public:
     /**
      * Invokes the callback on the executor.  This never happens immediately on the caller's stack.
      */
-    virtual void schedule(stdx::function<void()> func) = 0;
+    virtual void schedule(unique_function<void()> func) = 0;
 
 protected:
     ~OutOfLineExecutor() noexcept {}

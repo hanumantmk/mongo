@@ -35,6 +35,7 @@
 #include "mongo/transport/transport_layer.h"
 #include "mongo/util/functional.h"
 #include "mongo/util/future.h"
+#include "mongo/util/out_of_line_executor.h"
 #include "mongo/util/time_support.h"
 #include "mongo/util/waitable.h"
 
@@ -72,12 +73,11 @@ public:
      * baton runner.
      */
     template <typename Callback>
-    Future<FutureContinuationResult<Callback>> execute(Callback&& cb) {
+    Future<FutureContinuationResult<Callback>> execute(OutOfLineExecutor* exec, Callback cb) {
         auto pf = makePromiseFuture<FutureContinuationResult<Callback>>();
 
-        schedule([ cb = std::forward<Callback>(cb), sp = pf.promise.share() ]() mutable {
-            sp.setWith(std::move(cb));
-        });
+        schedule(exec,
+                 [ cb = cb, sp = pf.promise.share() ]() mutable { sp.setWith(std::move(cb)); });
 
         return std::move(pf.future);
     }
@@ -85,7 +85,7 @@ public:
     /**
      * Executes a callback on the baton.
      */
-    virtual void schedule(unique_function<void()> func) = 0;
+    virtual void schedule(OutOfLineExecutor* exec, unique_function<void()> func) = 0;
 
     /**
      * Adds a session, returning a future which activates on read/write-ability of the session.

@@ -472,7 +472,13 @@ private:
 
             if (baton) {
                 return baton->addSession(*this, Baton::Type::In)
-                    .then([&stream, asyncBuffers, baton, this] {
+                    .thenAll([&stream, asyncBuffers, baton, this](Status s) {
+                        if (!s.isOK() && s.code() == ErrorCodes::OperationComplete) {
+                            return asio::async_read(stream, asyncBuffers, UseFuture{})
+                                .ignoreValue();
+                        }
+
+                        uassertStatusOK(s);
                         return opportunisticRead(stream, asyncBuffers, baton);
                     });
             }
@@ -555,7 +561,14 @@ private:
 
             if (baton) {
                 return baton->addSession(*this, Baton::Type::Out)
-                    .then([&stream, asyncBuffers, baton, this] {
+                    .thenAll([&stream, asyncBuffers, baton, this](Status s) {
+                        if (!s.isOK() && s.code() == ErrorCodes::OperationComplete) {
+                            return asio::async_write(stream, asyncBuffers, UseFuture{})
+                                .ignoreValue();
+                        }
+
+                        uassertStatusOK(s);
+
                         return opportunisticWrite(stream, asyncBuffers, baton);
                     });
             }

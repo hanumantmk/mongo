@@ -41,6 +41,7 @@
 #include "mongo/rpc/message.h"
 #include "mongo/rpc/op_msg.h"
 #include "mongo/stdx/memory.h"
+#include "mongo/transport/baton.h"
 #include "mongo/transport/message_compressor_manager.h"
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/transport/service_executor_task_names.h"
@@ -439,9 +440,15 @@ void ServiceStateMachine::_processMessage(ThreadGuard guard) {
     // Pass sourced Message to handler to generate response.
     auto opCtx = Client::getCurrent()->makeOperationContext();
 
-    // The handleRequest is implemented in a subclass for mongod/mongos and actually all the
-    // database work for this request.
-    DbResponse dbresponse = _sep->handleRequest(opCtx.get(), _inMessage);
+    DbResponse dbresponse = [&] {
+        auto baton = _serviceContext->getTransportLayer()->makeBaton(opCtx.get());
+
+        const auto guard = MakeGuard([&] { baton->detach(); });
+
+        // The handleRequest is implemented in a subclass for mongod/mongos and actually all the
+        // database work for this request.
+        return _sep->handleRequest(opCtx.get(), _inMessage);
+    }();
 
     // opCtx must be destroyed here so that the operation cannot show
     // up in currentOp results after the response reaches the client

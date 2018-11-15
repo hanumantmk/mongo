@@ -66,7 +66,6 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
                                          Shard::RetryPolicy retryPolicy)
     : _opCtx(opCtx),
       _executor(executor),
-      _baton(opCtx),
       _db(dbName.toString()),
       _readPreference(readPreference),
       _retryPolicy(retryPolicy) {
@@ -240,7 +239,7 @@ Status AsyncRequestsSender::_scheduleRequest(size_t remoteIndex) {
             const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
             producer.push(Job{cbData, remoteIndex});
         },
-        _baton);
+        _opCtx->getBaton());
     if (!callbackStatus.isOK()) {
         return callbackStatus.getStatus();
     }
@@ -311,19 +310,6 @@ Status AsyncRequestsSender::RemoteData::resolveShardIdToHostAndPort(
 std::shared_ptr<Shard> AsyncRequestsSender::RemoteData::getShard() {
     // TODO: Pass down an OperationContext* to use here.
     return Grid::get(getGlobalServiceContext())->shardRegistry()->getShardNoReload(shardId);
-}
-
-AsyncRequestsSender::BatonDetacher::BatonDetacher(OperationContext* opCtx)
-    : _baton(AsyncRequestsSenderUseBaton.load()
-                 ? (opCtx->getServiceContext()->getTransportLayer()
-                        ? opCtx->getServiceContext()->getTransportLayer()->makeBaton(opCtx)
-                        : nullptr)
-                 : nullptr) {}
-
-AsyncRequestsSender::BatonDetacher::~BatonDetacher() {
-    if (_baton) {
-        _baton->detach();
-    }
 }
 
 }  // namespace mongo

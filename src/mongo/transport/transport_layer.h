@@ -35,7 +35,9 @@
 #include "mongo/base/status.h"
 #include "mongo/stdx/functional.h"
 #include "mongo/transport/session.h"
+#include "mongo/util/functional.h"
 #include "mongo/util/future.h"
+#include "mongo/util/out_of_line_executor.h"
 #include "mongo/util/time_support.h"
 
 namespace mongo {
@@ -143,7 +145,7 @@ public:
     virtual Future<void> waitUntil(Date_t deadline, const BatonHandle& baton = nullptr) = 0;
 };
 
-class Reactor {
+class Reactor : public OutOfLineExecutor {
 public:
     Reactor(const Reactor&) = delete;
     Reactor& operator=(const Reactor&) = delete;
@@ -158,10 +160,13 @@ public:
     virtual void stop() = 0;
     virtual void drain() = 0;
 
-    using Task = stdx::function<void()>;
+    using Task = unique_function<void()>;
 
     enum ScheduleMode { kDispatch, kPost };
     virtual void schedule(ScheduleMode mode, Task task) = 0;
+
+    // post mode only
+    void schedule(Task task) override = 0;
 
     template <typename Callback>
     Future<FutureContinuationResult<Callback>> execute(Callback&& cb) {

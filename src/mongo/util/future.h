@@ -956,6 +956,79 @@ public:
             });
     }
 
+    template <typename Func,  // StatusWith<T> -> Result or StatusWith<T> -> StatusWith<Result>
+              typename Result = NormalizedCallResult<Func, StatusWith<T>>,
+              typename = std::enable_if_t<!isFuture<Result>>>
+        Future<Result> thenAll(Func&& func) && noexcept {
+        return generalImpl(
+            // on ready success:
+            [&](T&& val) { return Future<Result>::makeReady(statusCall(func, std::move(val))); },
+            // on ready failure:
+            [&](Status&& status) {
+                return Future<Result>::makeReady(statusCall(func, std::move(status)));
+            },
+            // on not ready yet:
+            [&] {
+                return makeContinuation<Result>([func = std::forward<Func>(func)](
+                    SharedState<T> * input, SharedState<Result> * output) mutable noexcept {
+                    if (!input->status.isOK())
+                        return output->setFromStatusWith(
+                            statusCall(func, std::move(input->status)));
+
+                    output->setFromStatusWith(statusCall(func, std::move(*input->data)));
+                });
+            });
+    }
+
+    /**
+     * Same as above then() but for case where func returns a Future that needs to be unwrapped.
+     */
+    template <typename Func,  // StatusWith<T> -> Future<UnwrappedResult>
+              typename RawResult = NormalizedCallResult<Func, StatusWith<T>>,
+              typename = std::enable_if_t<isFuture<RawResult>>,
+              typename UnwrappedResult = typename RawResult::value_type>
+        Future<UnwrappedResult> thenAll(Func&& func) && noexcept {
+        return generalImpl(
+            // on ready success:
+            [&](T&& val) {
+                try {
+                    return Future<UnwrappedResult>(throwingCall(func, std::move(val)));
+                } catch (const DBException& ex) {
+                    return Future<UnwrappedResult>::makeReady(ex.toStatus());
+                }
+            },
+            // on ready failure:
+            [&](Status&& status) {
+                try {
+                    return Future<UnwrappedResult>(throwingCall(func, std::move(status)));
+                } catch (const DBException& ex) {
+                    return Future<UnwrappedResult>::makeReady(ex.toStatus());
+                }
+            },
+            // on not ready yet:
+            [&] {
+                return makeContinuation<UnwrappedResult>([func = std::forward<Func>(func)](
+                    SharedState<T> * input,
+                    SharedState<UnwrappedResult> * output) mutable noexcept {
+                    if (!input->status.isOK()) {
+                        try {
+                            throwingCall(func, std::move(input->status)).propagateResultTo(output);
+                        } catch (const DBException& ex) {
+                            output->setError(ex.toStatus());
+                        }
+
+                        return;
+                    }
+
+                    try {
+                        throwingCall(func, std::move(*input->data)).propagateResultTo(output);
+                    } catch (const DBException& ex) {
+                        output->setError(ex.toStatus());
+                    }
+                });
+            });
+    }
+
     /**
      * Callbacks passed to onError() are only called if the input Future completes with an error.
      * Otherwise, the successful result propagates automatically, bypassing the callback.
@@ -1322,6 +1395,11 @@ public:
     template <typename Func>  // () -> T or StatusWith<T> or Future<T>
         auto then(Func&& func) && noexcept {
         return std::move(_inner).then(std::forward<Func>(func));
+    }
+
+    template <typename Func>  // Status -> T or StatusWith<T> or Future<T>
+        auto thenAll(Func&& func) && noexcept {
+        return std::move(_inner).thenAll(std::forward<Func>(func));
     }
 
     template <typename Func>  // Status -> T or StatusWith<T> or Future<T>

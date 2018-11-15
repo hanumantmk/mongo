@@ -269,9 +269,10 @@ Status NetworkInterfaceTL::startCommand(const TaskExecutor::CallbackHandle& cbHa
         // connection
         std::move(connFuture).getAsync([
             baton,
+            reactor = _reactor.get(),
             rw = std::move(remainingWork)
         ](StatusWith<std::shared_ptr<CommandState::ConnHandle>> swConn) mutable {
-            baton->schedule([ rw = std::move(rw), swConn = std::move(swConn) ]() mutable {
+            baton->schedule(reactor, [ rw = std::move(rw), swConn = std::move(swConn) ]() mutable {
                 std::move(rw)(std::move(swConn));
             });
         });
@@ -438,7 +439,7 @@ Status NetworkInterfaceTL::setAlarm(Date_t when,
 
     if (when <= now()) {
         if (baton) {
-            baton->schedule(std::move(action));
+            baton->schedule(_reactor.get(), std::move(action));
         } else {
             _reactor->schedule(transport::Reactor::kPost, std::move(action));
         }
@@ -477,7 +478,7 @@ Status NetworkInterfaceTL::setAlarm(Date_t when,
 
             if (status.isOK()) {
                 if (baton) {
-                    baton->schedule(std::move(action));
+                    baton->schedule(_reactor.get(), std::move(action));
                 } else {
                     _reactor->schedule(transport::Reactor::kPost, std::move(action));
                 }
