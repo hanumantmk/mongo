@@ -39,9 +39,7 @@
 #include "mongo/client/connection_string.h"
 #include "mongo/db/commands/test_commands_enabled.h"
 #include "mongo/db/wire_version.h"
-#include "mongo/executor/connection_pool.h"
 #include "mongo/executor/network_connection_hook.h"
-#include "mongo/executor/network_interface_factory.h"
 #include "mongo/executor/network_interface_integration_fixture.h"
 #include "mongo/executor/test_network_connection_hook.h"
 #include "mongo/rpc/factory.h"
@@ -191,7 +189,7 @@ private:
                             const BSONObj& request,
                             const RemoteCommandResponse& isMasterReply) override {
             stdx::lock_guard<stdx::mutex> lk(_parent->_mutex);
-//            _parent->_isMasterResult = {request, isMasterReply};
+            _parent->_isMasterResult = {request, isMasterReply};
             _parent->_isMasterCond.notify_all();
             return Status::OK();
         }
@@ -388,77 +386,61 @@ TEST_F(NetworkInterfaceTest, IsMasterRequestMissingInternalClientInfoWhenNotInte
 #endif
 
 TEST_F(NetworkInterfaceTest, PrimaryRequired) {
-    executor::ConnectionPool::Options options;
-    options.maxConnections = 200;
-    options.maxConnecting = 2;
-
-    auto barNet = executor::makeNetworkInterface(
-        "NetworkInterfaceIntegrationFixtureBar", {}, nullptr, std::move(options));
-    barNet->startup();
-
-    auto runSleep = [&](bool targetBar) {
+    auto runSleep = [&] {
         auto cs = fixture();
-        std::string db = targetBar ? "bar" : "foo";
-        auto& netToUse = targetBar ? *barNet : net();
-
-        auto time = "sleep(1); return true;";
-        //auto time = targetBar ? "sleep(1); return true;" : "sleep(10); return true;";
-
-        RemoteCommandRequest rcr(cs.getServers().front(),
-                                 db,
-                                 BSON("find"
-                                      << "test"
-                                      << "$readPreference"
-                                      << BSON("mode"
-                                              << "primary")
-                                      << "filter"
-                                      << BSON("$where" << time)),
-                                 BSONObj(),
-                                 nullptr,
-                                 RemoteCommandRequest::kNoTimeout);
-
-        return netToUse.startCommand(makeCallbackHandle(), rcr)
-            .then([targetBar](RemoteCommandResponse rcr) {
-                return std::make_pair(targetBar, std::move(rcr));
-            });
+        return runCommand(makeCallbackHandle(),
+                          RemoteCommandRequest(cs.getServers().front(),
+                                               "test",
+                                               BSON("find"
+                                                    << "test"
+                                                    << "$readPreference"
+                                                    //<< BSON("mode"
+                                                    //        << "primary")
+                                                    << BSON("mode"
+                                                            << "secondary")
+                                                    << "filter"
+                                                    << BSON("$where"
+                                                            << "sleep(1); return true;")),
+                                               BSONObj(),
+                                               nullptr,
+                                               RemoteCommandRequest::kNoTimeout));
     };
 
     struct Result {
         stdx::chrono::high_resolution_clock::time_point start = stdx::chrono::high_resolution_clock::now();
         stdx::chrono::high_resolution_clock::time_point end;
-        bool targetBar;
         Status result = Status::OK();
     };
 
     MultiProducerSingleConsumerQueue<Result>::Pipe pipe;
 
-    for (int i = 0; i < 100000; ++i) {
+    for (int i = 0; i < 30000; ++i) {
         if (i % 10 == 0) {
             stdx::this_thread::sleep_for(stdx::chrono::milliseconds(10));
         }
 
-        runSleep(i%2).getAsync([p = pipe.producer, r = Result(), i](StatusWith<std::pair<bool, RemoteCommandResponse>> swRCR) mutable {
+        runSleep().getAsync([p = pipe.producer, r = Result(), i](StatusWith<RemoteCommandResponse> swRCR) mutable {
             invariant(swRCR.isOK());
 
-            if (!swRCR.getValue().second.isOK()) {
-                r.result = swRCR.getValue().second.status;
+            if (!swRCR.getValue().isOK()) {
+                r.result = swRCR.getValue().status;
             }
 
             if (i == 0) {
-                std::cout << "0: " << swRCR.getValue().second.data << "\n";
+                std::cout << "0: " << swRCR.getValue().data << "\n";
             }
 
             r.end = stdx::chrono::high_resolution_clock::now();
-            r.targetBar = swRCR.getValue().first;
             p.push(std::move(r));
         });
     }
 
     pipe.producer.reset();
 
-    std::map<stdx::chrono::time_point<stdx::chrono::high_resolution_clock, stdx::chrono::seconds>, std::pair<std::vector<stdx::chrono::microseconds>, size_t>> fooTimes;
+    auto success = 0;
+    auto failure = 0;
 
-    std::map<stdx::chrono::time_point<stdx::chrono::high_resolution_clock, stdx::chrono::seconds>, std::pair<std::vector<stdx::chrono::microseconds>, size_t>> barTimes;
+    std::map<stdx::chrono::time_point<stdx::chrono::high_resolution_clock, stdx::chrono::seconds>, std::pair<std::vector<stdx::chrono::microseconds>, size_t>> successTimes;
 
     try {
         while (true) {
@@ -467,21 +449,22 @@ TEST_F(NetworkInterfaceTest, PrimaryRequired) {
                                          stdx::chrono::seconds>
                     tp(stdx::chrono::time_point_cast<stdx::chrono::seconds>(response.start));
 
-                auto& times = response.targetBar ? barTimes : fooTimes;
-
-                auto r = times.emplace(std::piecewise_construct, std::forward_as_tuple(tp), std::forward_as_tuple());
-                r.first->second.first.push_back(stdx::chrono::duration_cast<stdx::chrono::milliseconds>(response.end - response.start));
-                if (! response.result.isOK()) {
-                    r.first->second.second++;
+                if (response.result.isOK()) {
+                    success++;
+                } else {
+                    failure++;
                 }
+
+                auto r = successTimes.emplace(std::piecewise_construct, std::forward_as_tuple(tp), std::forward_as_tuple());
+                r.first->second.first.push_back(stdx::chrono::duration_cast<stdx::chrono::milliseconds>(response.end - response.start));
             }
         }
     } catch (const ExceptionFor<ErrorCodes::ProducerConsumerQueueConsumed>&) {
     }
 
-    std::cout << "FooTimes\n\nTime, Total, Failures, Average, Min, Median, P95, P99, Max\n";
+    std::cout << "Time, Total, Failures, Average, Min, Median, P95, P99, Max\n";
 
-    for (auto& second : fooTimes) {
+    for (auto& second : successTimes) {
         auto& vec = second.second.first;
         std::sort(vec.begin(), vec.end());
 
@@ -512,42 +495,6 @@ TEST_F(NetworkInterfaceTest, PrimaryRequired) {
         std::cout << roundDown(0.99).count() << ",";
         std::cout << vec.back().count() << "\n";
     }
-
-    std::cout << "BarTimes\n\nTime, Total, Failures, Average, Min, Median, P95, P99, Max\n";
-
-    for (auto& second : barTimes) {
-        auto& vec = second.second.first;
-        std::sort(vec.begin(), vec.end());
-
-        stdx::chrono::microseconds totalDuration{0};
-
-        for (const auto& duration : vec) {
-            totalDuration += duration;
-        }
-
-        auto roundDown = [&](double ratio) {
-            auto i = vec.size() * ratio;
-
-            if (i == 0) {
-            } else if (i == vec.size()) {
-                i--;
-            }
-
-            return vec[i];
-        };
-
-        std::cout << second.first.time_since_epoch().count() << ",";
-        std::cout << vec.size() << ",";
-        std::cout << second.second.second << ",";
-        std::cout << (totalDuration / vec.size()).count() << ",";
-        std::cout << vec.front().count() << ",";
-        std::cout << roundDown(0.50).count() << ",";
-        std::cout << roundDown(0.95).count() << ",";
-        std::cout << roundDown(0.99).count() << ",";
-        std::cout << vec.back().count() << "\n";
-    }
-
-    barNet->shutdown();
 }
 
 }  // namespace

@@ -96,6 +96,10 @@ public:
         return _parent;
     }
 
+    void reset() {
+        _parent->reset();
+    }
+
 private:
     std::shared_ptr<PCQ> _parent;
 };
@@ -138,6 +142,10 @@ public:
         return *_data;
     }
 
+    void reset() {
+        _data.reset();
+    }
+
 private:
     std::shared_ptr<T> _data;
 };
@@ -155,6 +163,10 @@ public:
 
     const T& operator->() const {
         return _data;
+    }
+
+    void reset() {
+        _data.reset();
     }
 
 private:
@@ -582,6 +594,20 @@ public:
         });
     }
 
+    std::deque<T> popAll(
+        Interruptible* interruptible = Interruptible::notInterruptible()) {
+        std::deque<T> out;
+
+        _popRunner([&](stdx::unique_lock<stdx::mutex>& lk) {
+            _waitForNonEmpty(lk, interruptible);
+
+            std::swap(out, _queue);
+            _current = 0;
+        });
+
+        return out;
+    }
+
     // Attempts a non-blocking pop of a value
     boost::optional<T> tryPop() {
         return _popRunner([&](stdx::unique_lock<stdx::mutex>& lk) { return _tryPop(lk); });
@@ -649,6 +675,10 @@ public:
             _parent->closeProducerEnd();
         }
 
+        void reset() {
+            _parent.reset();
+        }
+
     private:
         friend class ProducerConsumerQueue::Pipe;
 
@@ -685,6 +715,11 @@ public:
                 budget, std::forward<OutputIterator>(iterator), interruptible);
         }
 
+        std::deque<T> popAll(
+            Interruptible* interruptible = Interruptible::notInterruptible()) const {
+            return _parent->popAll(interruptible);
+        }
+
         boost::optional<T> tryPop() const {
             return _parent->tryPop();
         }
@@ -694,6 +729,10 @@ public:
         // rather than closing after all consumers have gone away.
         void close() const {
             _parent->closeConsumerEnd();
+        }
+
+        void reset() {
+            _parent.reset();
         }
 
     private:
@@ -833,7 +872,7 @@ private:
     bool _tryPush(WithLock wl, T&& t) {
         size_t cost = _invokeCostFunc(t, wl);
         if (_current + cost <= _options.maxQueueDepth) {
-            _queue.emplace(std::move(t));
+            _queue.emplace_back(std::move(t));
             _current += cost;
             return true;
         }
@@ -845,7 +884,7 @@ private:
         size_t cost = _invokeCostFunc(t, wl);
         invariant(_current + cost <= _options.maxQueueDepth);
 
-        _queue.emplace(std::move(t));
+        _queue.emplace_back(std::move(t));
         _current += cost;
     }
 
@@ -854,7 +893,7 @@ private:
 
         if (!_queue.empty()) {
             out.emplace(std::move(_queue.front()));
-            _queue.pop();
+            _queue.pop_front();
             _current -= _invokeCostFunc(*out, wl);
         }
 
@@ -865,7 +904,7 @@ private:
         invariant(_queue.size());
 
         auto t = std::move(_queue.front());
-        _queue.pop();
+        _queue.pop_front();
 
         _current -= _invokeCostFunc(t, wl);
 
@@ -907,7 +946,7 @@ private:
     // Current size of the queue
     size_t _current = 0;
 
-    std::queue<T> _queue;
+    std::deque<T> _queue;
 
     // State for waiting consumers and producers
     Consumers _consumers;

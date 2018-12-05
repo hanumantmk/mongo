@@ -55,7 +55,8 @@ void NetworkInterfaceIntegrationFixture::startNet(
     // concurrently will result in refused connections and test failure.
     options.maxConnections = 16u;
 #else
-    options.maxConnections = 256u;
+    options.maxConnections = 500u;
+    options.maxConnecting = 100;
 #endif
     _net = makeNetworkInterface(
         "NetworkInterfaceIntegrationFixture", std::move(connectHook), nullptr, std::move(options));
