@@ -38,6 +38,7 @@
 #include <string>
 
 #include "mongo/base/status_with.h"
+#include "mongo/platform/atomic_word.h"
 #include "mongo/stdx/chrono.h"
 #include "mongo/stdx/mutex.h"
 #include "mongo/util/duration.h"
@@ -81,7 +82,7 @@ public:
      * Returns the last time fetched from Date_t::now()
      */
     static Date_t lastNow() {
-        return fromMillisSinceEpoch(_lastNow.load(std::memory_order_relaxed));  // NOLINT
+        return fromMillisSinceEpoch(_lastNow.loadRelaxed());  // NOLINT
     }
 
     /**
@@ -243,7 +244,7 @@ private:
 
     long long millis = 0;
 
-    static std::atomic<long long> _lastNow;  // NOLINT
+    static AtomicWord<long long> _lastNow;
 };
 
 // uses ISO 8601 dates without trailing Z
