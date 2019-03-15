@@ -29,6 +29,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <boost/date_time/gregorian/gregorian_types.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <ctime>
@@ -75,6 +76,13 @@ public:
      * Reads the system clock and returns a Date_t representing the present time.
      */
     static Date_t now();
+
+    /**
+     * Returns the last time fetched from Date_t::now()
+     */
+    static Date_t lastNow() {
+        return fromMillisSinceEpoch(_lastNow.load(std::memory_order_relaxed));  // NOLINT
+    }
 
     /**
      * Returns a Date_t from an integer number of milliseconds since the epoch.
@@ -234,6 +242,8 @@ private:
     constexpr explicit Date_t(long long m) : millis(m) {}
 
     long long millis = 0;
+
+    static std::atomic<long long> _lastNow;  // NOLINT
 };
 
 // uses ISO 8601 dates without trailing Z

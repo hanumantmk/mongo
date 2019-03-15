@@ -69,7 +69,7 @@ Status BackgroundThreadClockSource::setAlarm(Date_t when, unique_function<void()
     return _clockSource->setAlarm(when, std::move(action));
 }
 
-Date_t BackgroundThreadClockSource::now() {
+Date_t BackgroundThreadClockSource::nowWithoutCheckingLastNow() {
     // Since this is called very frequently by many threads, the common case should not write to
     // shared memory.
     if (MONGO_unlikely(_timerWillPause.load())) {
@@ -79,7 +79,14 @@ Date_t BackgroundThreadClockSource::now() {
     if (MONGO_unlikely(!now)) {
         return _slowNow();
     }
+
     return Date_t::fromMillisSinceEpoch(now);
+}
+
+Date_t BackgroundThreadClockSource::now() {
+    auto nwcln = nowWithoutCheckingLastNow();
+    auto ln = Date_t::lastNow();
+    return std::max(nwcln, ln);
 }
 
 // This will be called at most once per _granularity per thread. In common cases it will only be

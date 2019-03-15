@@ -68,6 +68,12 @@ public:
         return Date_t::fromMillisSinceEpoch(_current.load());
     }
 
+    /**
+     * The background thread clock source true's up with Date_t::now (in that we return the greater
+     * of the result of nowWithoutCheckingLastNow() and Date_t::lastNow() on calls to now())
+     */
+    Date_t nowWithoutCheckingLastNow();
+
 private:
     Date_t _slowNow();
     void _startTimerThread();

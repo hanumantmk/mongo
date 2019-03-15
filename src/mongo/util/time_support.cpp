@@ -63,9 +63,22 @@ extern "C" time_t timegm(struct tm* const tmp);
 
 namespace mongo {
 
+std::atomic<long long> Date_t::_lastNow;  // NOLINT
+
 Date_t Date_t::now() {
-    return fromMillisSinceEpoch(curTimeMillis64());
+    auto oldLastNow = _lastNow.load(std::memory_order_relaxed);  // NOLINT
+    auto curTime = curTimeMillis64();
+
+    // If we fail to comp exchange, it means someone else concurrently called Date_t::now(), in
+    // which case it's likely their time is also recent.  No need to loop.
+    _lastNow.compare_exchange_strong(
+        oldLastNow, curTime, std::memory_order_relaxed, std::memory_order_relaxed);  // NOLINT
+    return fromMillisSinceEpoch(curTime);
 }
+
+//Date_t Date_t::lastNow() {
+//    return fromMillisSinceEpoch(_lastNow.load(std::memory_order_relaxed));  // NOLINT
+//}
 
 Date_t::Date_t(stdx::chrono::system_clock::time_point tp)
     : millis(durationCount<Milliseconds>(tp - stdx::chrono::system_clock::from_time_t(0))) {}
