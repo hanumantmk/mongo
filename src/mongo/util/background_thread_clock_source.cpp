@@ -75,7 +75,7 @@ Date_t BackgroundThreadClockSource::now() {
     //
     // If we read ReaderHasRead, we have at least the last time from a previous reader, or the
     // background thread.
-    if (MONGO_unlikely(_state.load() != kReaderHasRead)) {  // acquire
+    if (MONGO_unlikely(_state.load(std::memory_order_acquire) != kReaderHasRead)) {  // acquire
         _updateClockAndWakeTimerIfNeeded();
     }
 
@@ -95,7 +95,7 @@ void BackgroundThreadClockSource::_updateClock() {
 // called by a single thread per _granularity.
 void BackgroundThreadClockSource::_updateClockAndWakeTimerIfNeeded() {
     // Try to go from TimerWillPause to ReaderHasRead.
-    if (_state.compareAndSwap(kTimerWillPause, kReaderHasRead) != kTimerPaused) {
+    if (_state.compareAndSwap(kTimerWillPause, kReaderHasRead, std::memory_order_acquire, std::memory_order_acquire) != kTimerPaused) {
         // There are three possible states _state could have been in before this cas:
         //
         // kTimerWillPause - In this case, we've transitioned to kReaderHasRead, telling the timer
@@ -134,7 +134,7 @@ void BackgroundThreadClockSource::_updateClockAndWakeTimerIfNeeded() {
     // updated time.  Failing to keep that order may cause them to observe what may be a very
     // stale read (if the background timer was a sleep for an extended period).
     _updateClock();
-    _state.store(kReaderHasRead);  // release
+    _state.store(kReaderHasRead, std::memory_order_release);  // release
 
     _condition.notify_one();
 }
@@ -158,7 +158,7 @@ void BackgroundThreadClockSource::_startTimerThread() {
             _updateClock();
 
             // Always transition to will pause on every run.
-            auto old = _state.swap(kTimerWillPause);  // release
+            auto old = _state.swap(kTimerWillPause, std::memory_order_release);  // release
 
             // There are 3 possible states _state could have been in:
             //

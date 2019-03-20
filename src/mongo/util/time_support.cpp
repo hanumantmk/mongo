@@ -80,7 +80,7 @@ Date_t Date_t::now() {
         // which case it's likely their time is also recent.  It's important that we don't loop so
         // that we avoid forcing time backwards if we have multiple callers at a millisecond
         // boundary.
-        lastNowVal.compareAndSwap(oldLastNow, curTime);
+        lastNowVal.compareAndSwap(oldLastNow, curTime, std::memory_order_relaxed, std::memory_order_relaxed);
     }
 
     return fromMillisSinceEpoch(curTime);

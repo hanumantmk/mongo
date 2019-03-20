@@ -78,8 +78,8 @@ public:
     /**
      * Gets the current value of this AtomicWord.
      */
-    WordType load() const {
-        return _value.load();
+    WordType load(std::memory_order order = std::memory_order_seq_cst) const {
+        return _value.load(order);
     }
 
     /**
@@ -94,8 +94,8 @@ public:
     /**
      * Sets the value of this AtomicWord to "newValue".
      */
-    void store(WordType newValue) {
-        _value.store(newValue);
+    void store(WordType newValue, std::memory_order order = std::memory_order_seq_cst) {
+        _value.store(newValue, order);
     }
 
     /**
@@ -103,8 +103,8 @@ public:
      *
      * Returns the old value.
      */
-    WordType swap(WordType newValue) {
-        return _value.exchange(newValue);
+    WordType swap(WordType newValue, std::memory_order order = std::memory_order_seq_cst) {
+        return _value.exchange(newValue, order);
     }
 
     /**
@@ -113,9 +113,9 @@ public:
      * If this value equals "expected", sets this to "newValue".
      * Always returns the original of this.
      */
-    WordType compareAndSwap(WordType expected, WordType newValue) {
+    WordType compareAndSwap(WordType expected, WordType newValue, std::memory_order success = std::memory_order_seq_cst, std::memory_order failure = std::memory_order_seq_cst) {
         // NOTE: Subtle: compare_exchange mutates its first argument.
-        _value.compare_exchange_strong(expected, newValue);
+        _value.compare_exchange_strong(expected, newValue, success, failure);
         return expected;
     }
 
