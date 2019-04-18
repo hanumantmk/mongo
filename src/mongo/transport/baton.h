@@ -32,7 +32,6 @@
 #include <memory>
 
 #include "mongo/db/baton.h"
-#include "mongo/transport/transport_layer.h"
 #include "mongo/util/functional.h"
 #include "mongo/util/future.h"
 #include "mongo/util/out_of_line_executor.h"
@@ -89,7 +88,7 @@ public:
      */
     virtual bool cancelTimer(const ReactorTimer& timer) noexcept = 0;
 
-    NetworkingBaton* networking() noexcept final {
+    NetworkingBaton* networking() noexcept {
         return this;
     }
 };

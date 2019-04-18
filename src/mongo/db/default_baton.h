@@ -51,7 +51,7 @@ public:
 
     void markKillOnClientDisconnect() noexcept override;
 
-    void schedule(unique_function<void(OperationContext*)> func) noexcept override;
+    void schedule(unique_function<void(Status)> func) noexcept override;
 
     void notify() noexcept override;
 
@@ -60,6 +60,8 @@ public:
     void run(ClockSource* clkSource) noexcept override;
 
 private:
+    std::shared_ptr<Baton> makeSubBatonImpl() override;
+
     void detachImpl() noexcept override;
 
     stdx::mutex _mutex;
@@ -71,7 +73,7 @@ private:
 
     bool _hasIngressSocket = false;
 
-    std::vector<unique_function<void(OperationContext*)>> _scheduled;
+    std::vector<unique_function<void(Status)>> _scheduled;
 };
 
 }  // namespace mongo

@@ -34,9 +34,16 @@
 #include "mongo/db/default_baton.h"
 
 #include "mongo/db/operation_context.h"
+#include "mongo/db/sub_baton.h"
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
+
+namespace {
+
+const auto kDetached = Status(ErrorCodes::ShutdownInProgress, "Baton detached");
+
+}  // namespace
 
 DefaultBaton::DefaultBaton(OperationContext* opCtx) : _opCtx(opCtx) {}
 
@@ -68,16 +75,20 @@ void DefaultBaton::detachImpl() noexcept {
     }
 
     for (auto& job : scheduled) {
-        job(nullptr);
+        job(kDetached);
     }
 }
 
-void DefaultBaton::schedule(unique_function<void(OperationContext*)> func) noexcept {
+std::shared_ptr<Baton> DefaultBaton::makeSubBatonImpl() {
+    return std::make_shared<SubBaton>(_opCtx);
+}
+
+void DefaultBaton::schedule(unique_function<void(Status)> func) noexcept {
     stdx::unique_lock<stdx::mutex> lk(_mutex);
 
     if (!_opCtx) {
         lk.unlock();
-        func(nullptr);
+        func(kDetached);
 
         return;
     }
@@ -108,7 +119,7 @@ Waitable::TimeoutState DefaultBaton::run_until(ClockSource* clkSource,
 
             lk.unlock();
             for (auto& job : toRun) {
-                job(_opCtx);
+                job(Status::OK());
             }
             lk.lock();
         }
