@@ -102,12 +102,6 @@ public:
      * Defines a response for a request to a remote shard.
      */
     struct Response {
-        // Constructor for a response that was successfully received.
-        Response(ShardId shardId, executor::RemoteCommandResponse response, HostAndPort hp);
-
-        // Constructor that specifies the reason the response was not successfully received.
-        Response(ShardId shardId, Status status, boost::optional<HostAndPort> hp);
-
         // The shard to which the request was sent.
         ShardId shardId;
 
@@ -172,7 +166,8 @@ private:
     /**
      * We instantiate one of these per remote host.
      */
-    struct RemoteData {
+    class RemoteData {
+    public:
         /**
          * Creates a new uninitialized remote state with a command to send.
          */
@@ -184,8 +179,22 @@ private:
         std::shared_ptr<Shard> getShard();
 
         /**
+         * Returns true if we've already queued a response from the remote.
+         */
+        explicit operator bool() const {
+            return done;
+        }
+
+        /**
+         * Extracts a failed response from the remote, given an interruption status.
+         */
+        Response makeFailedResponse(Status status) && {
+            return {std::move(shardId), std::move(status), std::move(shardHostAndPort)};
+        }
+
+        /**
          * Executes the request for the given shard, this includes any necessary retries and ends
-         * with a Response getting written to response and this remote pushed to the ready queue.
+         * with a Response getting written to the response queue.
          *
          * This is implemented by calling scheduleRequest, which handles retries internally in its
          * future chain.
@@ -202,32 +211,29 @@ private:
          * for the given shard.  This returns an ExecutorFuture so that we can implement retries
          * through recursion.
          */
-        ExecutorFuture<executor::RemoteCommandResponse> scheduleRequest();
+        SemiFuture<executor::RemoteCommandResponse> scheduleRequest();
 
         /**
          * Given a read preference, selects a host on which the command should be run.
          */
-        ExecutorFuture<HostAndPort> resolveShardIdToHostAndPort(
-            const ReadPreferenceSetting& readPref);
+        SemiFuture<HostAndPort> resolveShardIdToHostAndPort(const ReadPreferenceSetting& readPref);
 
         /**
          * Schedules the remote command on the ARS's TaskExecutor
          */
-        ExecutorFuture<executor::RemoteCommandResponse> scheduleRemoteCommand(
-            const HostAndPort& hostAndPort);
+        SemiFuture<executor::RemoteCommandResponse> scheduleRemoteCommand(
+            HostAndPort&& hostAndPort);
 
         /**
          * Handles the remote response
          */
-        ExecutorFuture<executor::RemoteCommandResponse> handleResponse(
+        SemiFuture<executor::RemoteCommandResponse> handleResponse(
             executor::RemoteCommandResponse&& rcr);
 
-        /**
-         * Stashes the response to this remote
-         */
-        boost::optional<Response> response;
+    private:
+        bool done = false;
 
-        AsyncRequestsSender* ars;
+        AsyncRequestsSender* const ars;
 
         // ShardId of the shard to which the command will be sent.
         ShardId shardId;
@@ -260,12 +266,14 @@ private:
 
     // Data tracking the state of our communication with each of the remote nodes.
     std::vector<RemoteData> _remotes;
+
+    // Number of remotes we haven't returned final results from.
     size_t _remotesLeft;
 
-    // Queue of ready remotes.  We don't actually take advantage of the thread safety of the queue,
-    // but instead use it to collect which remotes are ready while waiting on a condvar (which
-    // allows us to use our underlying baton).
-    SingleProducerSingleConsumerQueue<RemoteData*> _readyQueue;
+    // Queue of responses.  We don't actually take advantage of the thread safety of the queue, but
+    // instead use it to collect results while waiting on a condvar (which allows us to use our
+    // underlying baton).
+    SingleProducerSingleConsumerQueue<Response> _responseQueue;
 
     // Used to determine if the ARS should attempt to retry any requests. Is set to true when
     // stopRetrying() is called.
@@ -278,11 +286,11 @@ private:
     // 2. cancel any outstanding work in the task executor
 
     // Scoped task executor which handles clean up of any handles after the ARS goes out of scope
-    executor::ScopedTaskExecutor _executor;
+    executor::ScopedTaskExecutor _subExecutor;
 
     // Scoped baton holder which ensures any callbacks which touch this ARS are called with a
     // not-okay status (or not run, in the case of ExecutorFuture continuations).
-    Baton::SubBatonHolder _baton;
+    Baton::SubBatonHolder _subBaton;
 };
 
 }  // namespace mongo
