@@ -67,12 +67,12 @@ AsyncRequestsSender::AsyncRequestsSender(OperationContext* opCtx,
       _subExecutor(executor),
       _subBaton(opCtx->getBaton()->makeSubBaton()) {
 
-    _remotes.reserve(requests.size());
     _remotesLeft = requests.size();
 
     // Initialize command metadata to handle the read preference.
     _metadataObj = readPreference.toContainingBSON();
 
+    _remotes.reserve(requests.size());
     for (const auto& request : requests) {
         // Kick off requests immediately.
         _remotes.emplace_back(this, request.shardId, request.cmdObj).executeRequest();
@@ -130,25 +130,25 @@ AsyncRequestsSender::Request::Request(ShardId shardId, BSONObj cmdObj)
 AsyncRequestsSender::RemoteData::RemoteData(AsyncRequestsSender* ars,
                                             ShardId shardId,
                                             BSONObj cmdObj)
-    : ars(ars), shardId(std::move(shardId)), cmdObj(std::move(cmdObj)) {}
+    : _ars(ars), _shardId(std::move(shardId)), _cmdObj(std::move(cmdObj)) {}
 
 std::shared_ptr<Shard> AsyncRequestsSender::RemoteData::getShard() {
     // TODO: Pass down an OperationContext* to use here.
-    return Grid::get(getGlobalServiceContext())->shardRegistry()->getShardNoReload(shardId);
+    return Grid::get(getGlobalServiceContext())->shardRegistry()->getShardNoReload(_shardId);
 }
 
 void AsyncRequestsSender::RemoteData::executeRequest() {
     scheduleRequest()
-        .thenRunOn(*ars->_subBaton)
+        .thenRunOn(*_ars->_subBaton)
         .getAsync([this](StatusWith<executor::RemoteCommandResponse> rcr) {
-            done = true;
-            ars->_responseQueue.push({std::move(shardId), rcr, std::move(shardHostAndPort)});
+            _done = true;
+            _ars->_responseQueue.push({std::move(_shardId), rcr, std::move(_shardHostAndPort)});
         });
 }
 
 SemiFuture<executor::RemoteCommandResponse> AsyncRequestsSender::RemoteData::scheduleRequest() {
-    return resolveShardIdToHostAndPort(ars->_readPreference)
-        .thenRunOn(*ars->_subBaton)
+    return resolveShardIdToHostAndPort(_ars->_readPreference)
+        .thenRunOn(*_ars->_subBaton)
         .then([this](auto&& hostAndPort) { return scheduleRemoteCommand(std::move(hostAndPort)); })
         .then([this](auto&& rcr) { return handleResponse(std::move(rcr)); })
         .semi();
@@ -159,7 +159,7 @@ SemiFuture<HostAndPort> AsyncRequestsSender::RemoteData::resolveShardIdToHostAnd
     const auto shard = getShard();
     if (!shard) {
         return Status(ErrorCodes::ShardNotFound,
-                      str::stream() << "Could not find shard " << shardId);
+                      str::stream() << "Could not find shard " << _shardId);
     }
 
     return shard->getTargeter()->findHostWithMaxWait(readPref, Seconds(20));
@@ -167,17 +167,17 @@ SemiFuture<HostAndPort> AsyncRequestsSender::RemoteData::resolveShardIdToHostAnd
 
 SemiFuture<executor::RemoteCommandResponse> AsyncRequestsSender::RemoteData::scheduleRemoteCommand(
     HostAndPort&& hostAndPort) {
-    shardHostAndPort = std::move(hostAndPort);
+    _shardHostAndPort = std::move(hostAndPort);
 
     executor::RemoteCommandRequest request(
-        *shardHostAndPort, ars->_db, cmdObj, ars->_metadataObj, ars->_opCtx);
+        *_shardHostAndPort, _ars->_db, _cmdObj, _ars->_metadataObj, _ars->_opCtx);
 
     // We have to make a promise future pair because the TaskExecutor doesn't currently support a
     // future returning variant of scheduleRemoteCommand
     auto[p, f] = makePromiseFuture<executor::RemoteCommandResponse>();
 
     // Failures to schedule skip the retry loop
-    uassertStatusOK(ars->_subExecutor->scheduleRemoteCommand(
+    uassertStatusOK(_ars->_subExecutor->scheduleRemoteCommand(
         request,
         // We have to make a shared_ptr<Promise> here because scheduleRemoteCommand requires
         // copyable callbacks
@@ -185,7 +185,7 @@ SemiFuture<executor::RemoteCommandResponse> AsyncRequestsSender::RemoteData::sch
             const executor::TaskExecutor::RemoteCommandCallbackArgs& cbData) {
             p->emplaceValue(cbData.response);
         },
-        *ars->_subBaton));
+        *_ars->_subBaton));
 
     return std::move(f).semi();
 }
@@ -212,18 +212,18 @@ SemiFuture<executor::RemoteCommandResponse> AsyncRequestsSender::RemoteData::han
     // There was an error with either the response or the command.
     auto shard = getShard();
     if (!shard) {
-        uasserted(ErrorCodes::ShardNotFound, str::stream() << "Could not find shard " << shardId);
+        uasserted(ErrorCodes::ShardNotFound, str::stream() << "Could not find shard " << _shardId);
     } else {
-        if (shardHostAndPort) {
-            shard->updateReplSetMonitor(*shardHostAndPort, status);
+        if (_shardHostAndPort) {
+            shard->updateReplSetMonitor(*_shardHostAndPort, status);
         }
-        if (!ars->_stopRetrying && shard->isRetriableError(status.code(), ars->_retryPolicy) &&
-            retryCount < kMaxNumFailedHostRetryAttempts) {
-            LOG(1) << "Command to remote " << shardId << " at host " << *shardHostAndPort
+        if (!_ars->_stopRetrying && shard->isRetriableError(status.code(), _ars->_retryPolicy) &&
+            _retryCount < kMaxNumFailedHostRetryAttempts) {
+            LOG(1) << "Command to remote " << _shardId << " at host " << *_shardHostAndPort
                    << " failed with retriable error and will be retried "
                    << causedBy(redact(status));
-            ++retryCount;
-            shardHostAndPort.reset();
+            ++_retryCount;
+            _shardHostAndPort.reset();
             // retry through recursion
             return scheduleRequest();
         }

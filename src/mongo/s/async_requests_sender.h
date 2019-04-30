@@ -182,14 +182,14 @@ private:
          * Returns true if we've already queued a response from the remote.
          */
         explicit operator bool() const {
-            return done;
+            return _done;
         }
 
         /**
          * Extracts a failed response from the remote, given an interruption status.
          */
         Response makeFailedResponse(Status status) && {
-            return {std::move(shardId), std::move(status), std::move(shardHostAndPort)};
+            return {std::move(_shardId), std::move(status), std::move(_shardHostAndPort)};
         }
 
         /**
@@ -208,8 +208,7 @@ private:
          * 2. scheduleRemoteCommand
          * 3. handlResponse
          *
-         * for the given shard.  This returns an ExecutorFuture so that we can implement retries
-         * through recursion.
+         * for the given shard.
          */
         SemiFuture<executor::RemoteCommandResponse> scheduleRequest();
 
@@ -231,22 +230,22 @@ private:
             executor::RemoteCommandResponse&& rcr);
 
     private:
-        bool done = false;
+        bool _done = false;
 
-        AsyncRequestsSender* const ars;
+        AsyncRequestsSender* const _ars;
 
         // ShardId of the shard to which the command will be sent.
-        ShardId shardId;
+        ShardId _shardId;
 
         // The command object to send to the remote host.
-        BSONObj cmdObj;
+        BSONObj _cmdObj;
 
         // The exact host on which the remote command was run. Is unset until a request has been
         // sent.
-        boost::optional<HostAndPort> shardHostAndPort;
+        boost::optional<HostAndPort> _shardHostAndPort;
 
         // The number of times we've retried sending the command to this remote.
-        int retryCount = 0;
+        int _retryCount = 0;
     };
 
     OperationContext* _opCtx;
