@@ -115,11 +115,26 @@ public:
         SubBatonHolder(const SubBatonHolder&) = delete;
         SubBatonHolder& operator=(const SubBatonHolder&) = delete;
 
-        SubBatonHolder(SubBatonHolder&&) = delete;
-        SubBatonHolder& operator=(SubBatonHolder&&) = delete;
+        SubBatonHolder(SubBatonHolder&& other)
+            : _mustDetach(other._mustDetach), _baton(std::move(other._baton)) {
+            other._mustDetach = false;
+        }
+
+        SubBatonHolder& operator=(SubBatonHolder&& other) {
+            if (_mustDetach) {
+                _baton->detach();
+            }
+
+            _mustDetach = other._mustDetach;
+            _baton = std::move(other._baton);
+
+            other._mustDetach = false;
+
+            return *this;
+        }
 
         ~SubBatonHolder() {
-            if (!_detached) {
+            if (_mustDetach) {
                 _baton->detach();
             }
         }
@@ -133,7 +148,7 @@ public:
         }
 
         void shutdown() {
-            if (std::exchange(_detached, true)) {
+            if (!std::exchange(_mustDetach, false)) {
                 return;
             }
 
@@ -143,7 +158,7 @@ public:
     private:
         explicit SubBatonHolder(const BatonHandle& baton) : _baton(baton) {}
 
-        bool _detached = false;
+        bool _mustDetach = true;
         BatonHandle _baton;
     };
 
