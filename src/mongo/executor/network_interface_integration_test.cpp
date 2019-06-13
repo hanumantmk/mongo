@@ -68,6 +68,8 @@ bool pingCommandMissing(const RemoteCommandResponse& result) {
     return false;
 }
 
+#if 0
+
 TEST_F(NetworkInterfaceIntegrationFixture, Ping) {
     startNet();
     assertCommandOK("admin", BSON("ping" << 1));
@@ -122,6 +124,8 @@ TEST_F(NetworkInterfaceIntegrationFixture, HookHangs) {
     auto res = runCommandSync(request);
     ASSERT(ErrorCodes::isExceededTimeLimitError(res.status.code()));
 }
+
+#endif
 
 using ResponseStatus = TaskExecutor::ResponseStatus;
 
@@ -208,6 +212,35 @@ private:
     stdx::condition_variable _isMasterCond;
     boost::optional<IsMasterData> _isMasterResult;
 };
+
+RemoteCommandRequest makeTestCommand(boost::optional<Milliseconds> timeout = boost::none,
+                                     BSONObj cmd = BSON("echo" << 1 << "foo"
+                                                               << "bar")) {
+    return RemoteCommandRequest(HostAndPort("127.0.0.1", 27017),
+                                "admin",
+                                std::move(cmd),
+                                BSONObj(),
+                                nullptr,
+                                timeout ? *timeout : RemoteCommandRequest::kNoTimeout);
+}
+
+Future<void> doAsyncStuff(NetworkInterface* ni) {
+    RemoteCommandRequestOnAny cmd = makeTestCommand();
+
+    for (size_t i = 0; i < 5; ++i) {
+        auto rcr = co_await (ni->startCommand(makeCallbackHandle(), cmd));
+        log() << "wooooo: " << i << ", " << rcr.data << "\n";
+        co_await ni->setAlarm(makeCallbackHandle(), ni->now() + Seconds(1));
+    }
+
+    co_return;
+}
+
+TEST_F(NetworkInterfaceTest, Test) {
+    ASSERT_OK(doAsyncStuff(&net()).getNoThrow());
+}
+
+#if 0
 
 TEST_F(NetworkInterfaceTest, CancelMissingOperation) {
     // This is just a sanity check, this action should have no effect.
@@ -383,6 +416,8 @@ TEST_F(NetworkInterfaceTest, IsMasterRequestMissingInternalClientInfoWhenNotInte
     ASSERT(res.elapsedMillis);
     assertNumOps(0u, 0u, 0u, 1u);
 }
+
+#endif
 
 }  // namespace
 }  // namespace executor

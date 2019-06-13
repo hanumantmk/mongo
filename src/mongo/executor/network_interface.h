@@ -194,6 +194,27 @@ public:
                             Date_t when,
                             unique_function<void(Status)> action) = 0;
 
+    Future<void> setAlarm(const TaskExecutor::CallbackHandle& cbHandle,
+                            Date_t when) {
+        auto pf = makePromiseFuture<void>();
+
+        auto status = setAlarm(
+            cbHandle,
+            when,
+            [p = std::move(pf.promise)](Status s) mutable {
+                if (s.isOK()) {
+                    p.emplaceValue();
+                } else {
+                    p.setError(s);
+                }
+            });
+
+        if (!status.isOK()) {
+            return status;
+        }
+        return std::move(pf.future);
+    }
+
     /**
      * Requests cancellation of the alarm associated with "cbHandle" if it has not yet completed.
      */

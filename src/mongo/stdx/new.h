@@ -31,13 +31,14 @@
 
 #include "mongo/config.h"
 
+#include <cstdint>
 #include <cstddef>
 #include <new>
 
 namespace mongo {
 namespace stdx {
 
-#if __cplusplus < 201703L || !defined(__cpp_lib_hardware_interference_size)
+//#if __cplusplus < 201703L || !defined(__cpp_lib_hardware_interference_size)
 
 #if defined(MONGO_CONFIG_MAX_EXTENDED_ALIGNMENT)
 static_assert(MONGO_CONFIG_MAX_EXTENDED_ALIGNMENT >= sizeof(uint64_t), "Bad extended alignment");
@@ -48,12 +49,12 @@ constexpr std::size_t hardware_destructive_interference_size = alignof(std::max_
 
 constexpr auto hardware_constructive_interference_size = hardware_destructive_interference_size;
 
-#else
+//else
 
-using std::hardware_constructive_interference_size;
-using std::hardware_destructive_interference_size;
+//sing std::hardware_constructive_interference_size;
+//sing std::hardware_destructive_interference_size;
 
-#endif
+//endif
 
 }  // namespace stdx
 }  // namespace mongo

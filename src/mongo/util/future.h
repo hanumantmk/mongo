@@ -33,6 +33,7 @@
 #include "mongo/util/future_impl.h"
 
 #include <boost/intrusive_ptr.hpp>
+#include <experimental/coroutine>
 #include <type_traits>
 
 #include "mongo/base/status.h"
@@ -300,6 +301,8 @@ class MONGO_WARN_UNUSED_RESULT_CLASS Future : private SemiFuture<T> {
     using T_unless_void = typename SemiFuture<T>::T_unless_void;
 
 public:
+    struct promise_type;
+
     /**
      * Re-export the API of SemiFuture. The API of Future is a superset, except you can't convert
      * from a SemiFuture to a Future.
@@ -1183,5 +1186,96 @@ template <typename T>
         return Out(SharedStateHolder<FakeVoidToVoid<T>>::makeReady(std::move(*_immediate)));
     return Out(SharedStateHolder<FakeVoidToVoid<T>>(std::move(_shared)));
 }
+
+namespace coroutine {
+
+template <typename T>
+class FuturePromise {
+    const static inline Status kUninitialized = Status(ErrorCodes::BadValue, "uninitialized");
+public:
+    auto initial_suspend() { return std::experimental::suspend_never(); }
+    auto final_suspend () { return std::experimental::suspend_always(); }
+    Future<T> get_return_object() {
+        return std::move(_pf.future);
+    }
+
+    void return_value(T val) {
+        _pf.promise.emplaceValue(std::move(val));
+    }
+
+    void unhandled_exception() {
+        _pf.promise.setError(exceptionToStatus());
+    }
+
+private:
+    decltype(makePromiseFuture<T>()) _pf = makePromiseFuture<T>();
+};
+
+template <>
+class FuturePromise<void> {
+    const static inline Status kUninitialized = Status(ErrorCodes::BadValue, "uninitialized");
+public:
+    auto initial_suspend() { return std::experimental::suspend_never(); }
+    auto final_suspend () { return std::experimental::suspend_always(); }
+    Future<void> get_return_object() {
+        return std::move(_pf.future);
+    }
+
+    void return_void() {
+        _pf.promise.emplaceValue();
+    }
+
+    void unhandled_exception() {
+        _pf.promise.setError(exceptionToStatus());
+    }
+
+private:
+    decltype(makePromiseFuture<void>()) _pf = makePromiseFuture<void>();
+};
+
+template <typename T>
+class FutureAwaitable {
+    const static inline Status kUninitialized = Status(ErrorCodes::BadValue, "uninitialized");
+
+public:
+    explicit FutureAwaitable(Future<T>&& future) noexcept : _future(std::move(future)) {}
+
+    bool await_ready() {
+        if (_future.isReady()) {
+            _storage = std::move(_future.getNoThrow());
+
+            return true;
+        }
+
+        return false;
+    }
+
+    T await_resume() {
+        return uassertStatusOK(std::move(_storage));
+    }
+
+    void await_suspend(std::experimental::coroutine_handle<> h) {
+        std::move(_future).getAsync([this, h](StatusOrStatusWith<T> swT) mutable {
+            _storage = std::move(swT);
+            h.resume();
+        });
+    }
+
+private:
+
+    Future<T> _future;
+    StatusOrStatusWith<T> _storage = kUninitialized;
+};
+}  // namespace coroutine
+
+template <typename T>
+inline coroutine::FutureAwaitable<T>
+operator co_await(Future<T>&& future) noexcept {
+    return coroutine::FutureAwaitable<T>(std::move(future));
+}
+
+template <typename T>
+struct Future<T>::promise_type : public coroutine::FuturePromise<T> {
+};
 
 }  // namespace mongo
