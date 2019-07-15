@@ -27,23 +27,35 @@
  *    it in the license file.
  */
 
-#include "mongo/platform/basic.h"
+#pragma once
 
-#include "mongo/unittest/unittest.h"
+#include <vector>
 
-#include "mongo/scripting/iwasm_wasm.h"
-#include "mongo/scripting/wasm_engine.h"
+#include "mongo/base/data_range.h"
+#include "mongo/base/string_data.h"
+#include "mongo/bson/util/builder.h"
+#include "mongo/util/if_constexpr.h"
 
 namespace mongo {
 
-TEST(IWasmTest, Func) {
-    auto scope = Engine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+class Engine {
+public:
+    ~Engine();
 
-    std::vector<uint32_t> args{8};
+    static Engine& get();
 
-    scope->callStr("_mysqrt", "(i32)i32", args);
+    class Scope {
+    public:
+        virtual ~Scope() {}
 
-    std::cout << "fib function returned: " << args[0] << "\n";
+        virtual void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) = 0;
+    private:
+    };
+
+    std::unique_ptr<Scope> createScope(ConstDataRange bytes);
+
+private:
+    Engine();
+};
+
 }
-
-}  // namespace mongo

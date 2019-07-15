@@ -158,14 +158,25 @@ env.CppUnitTest(
     ],
 )
 
-iwasmEnv = env.Clone()
-iwasmEnv.InjectThirdParty(libraries=['iwasm'])
-iwasmEnv.CppUnitTest(
+env.CppUnitTest(
     target='iwasm_test',
     source=[
         'iwasm_test.cpp',
     ],
     LIBDEPS=[
+        'wasm',
+    ],
+)
+iwasmEnv = env.Clone()
+iwasmEnv.InjectThirdParty(libraries=['iwasm'])
+
+iwasmEnv.Library(
+    target='wasm',
+    source=[
+        'wasm_engine.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/base',
         '$BUILD_DIR/third_party/shim_iwasm',
     ],
 )
