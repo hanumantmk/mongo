@@ -184,6 +184,13 @@ if not use_system_version_of_library('kms-message'):
         'CPPDEFINES' :['KMS_MSG_STATIC']
     }
 
+thirdPartyEnvironmentModifications['iwasm'] = {
+    'CPPPATH' : [
+        '#/src/third_party/iwasm/core/iwasm/runtime/include',
+        '#/src/third_party/iwasm/core/shared-lib/include',
+    ],
+}
+
 def injectThirdParty(thisEnv, libraries=[], parts=[]):
     libraries = thisEnv.Flatten([libraries])
     parts = thisEnv.Flatten([parts])
@@ -634,3 +641,17 @@ kmsEnv.Library(
         'shim_kms_message.cpp',
     ])
 
+
+iwasmEnv = env.Clone()
+iwasmEnv.InjectThirdParty(libraries=['iwasm'])
+iwasmEnv.SConscript('iwasm/SConscript', exports={ 'env' : iwasmEnv })
+iwasmEnv = iwasmEnv.Clone(
+    LIBDEPS_INTERFACE=[
+        'iwasm/iwasm',
+    ])
+
+iwasmEnv.Library(
+    target="shim_iwasm",
+    source=[
+        'shim_iwasm.cpp',
+    ])

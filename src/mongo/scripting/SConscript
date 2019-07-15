@@ -157,3 +157,15 @@ env.CppUnitTest(
         'scripting_common',
     ],
 )
+
+iwasmEnv = env.Clone()
+iwasmEnv.InjectThirdParty(libraries=['iwasm'])
+iwasmEnv.CppUnitTest(
+    target='iwasm_test',
+    source=[
+        'iwasm_test.cpp',
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/third_party/shim_iwasm',
+    ],
+)

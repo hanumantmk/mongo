@@ -1,0 +1,73 @@
+# -*- mode: python -*-
+
+Import([
+    "get_option",
+    "env",
+    ])
+
+env = env.Clone()
+
+#env.Append(
+#    CCFLAGS=[
+#        '-include', 'js-confdefs.h',
+#    ],
+#    CXXFLAGS=[
+#        '-Wno-non-virtual-dtor',
+#        '-Wno-invalid-offsetof',
+#    ],
+#)
+
+env.Prepend(CPPPATH=[
+    'core/iwasm/runtime/include',
+    'core/iwasm/runtime/platform/linux',
+    'core/iwasm/runtime/platform/include',
+    'core/iwasm/runtime/vmcore-wasm',
+    'core/shared-lib/platform/include',
+    'core/shared-lib/platform/linux',
+    'core/shared-lib/include',
+    'core/shared-lib/utils',
+#    'core/shared-lib/coap/extension',
+#    'core/app-mgr/app-mgr-shared/',
+#    'core/iwasm/lib/native-interface',
+#    'core/shared-lib/coap/er-coap',
+#    'core/app-mgr/app-manager',
+])
+
+sources = [
+    "core/iwasm/runtime/platform/linux/wasm_native.c",
+    "core/iwasm/runtime/platform/linux/wasm_platform.c",
+    "core/iwasm/runtime/vmcore-wasm/invokeNative_general.c",
+    "core/iwasm/runtime/vmcore-wasm/wasm_application.c",
+    "core/iwasm/runtime/vmcore-wasm/wasm_interp.c",
+    "core/iwasm/runtime/vmcore-wasm/wasm_loader.c",
+    "core/iwasm/runtime/vmcore-wasm/wasm_runtime.c",
+    "core/iwasm/runtime/utils/wasm_dlfcn.c",
+    "core/iwasm/runtime/utils/wasm_hashmap.c",
+    "core/iwasm/runtime/utils/wasm_log.c",
+    "core/iwasm/runtime/utils/wasm_vector.c",
+    "core/shared-lib/mem-alloc/bh_memory.c",
+    "core/shared-lib/mem-alloc/ems/ems_alloc.c",
+    "core/shared-lib/mem-alloc/ems/ems_hmu.c",
+    "core/shared-lib/mem-alloc/ems/ems_kfc.c",
+    "core/shared-lib/mem-alloc/mem_alloc.c",
+    "core/shared-lib/platform/linux/bh_assert.c",
+    "core/shared-lib/platform/linux/bh_definition.c",
+    "core/shared-lib/platform/linux/bh_platform.c",
+    "core/shared-lib/platform/linux/bh_platform_log.c",
+    "core/shared-lib/platform/linux/bh_thread.c",
+    "core/shared-lib/platform/linux/bh_time.c",
+    "core/shared-lib/utils/bh_list.c",
+    "core/shared-lib/utils/bh_log.c",
+    "core/shared-lib/utils/bh_queue.c",
+    "core/shared-lib/utils/runtime_timer.c",
+    "core/iwasm/lib/native/libc/libc_wrapper.c",
+    "mongo_imports.c",
+    "core/iwasm/lib/native/base/base_lib_export.c",
+#    "core/iwasm/lib/native/base/request_response.c",
+#    "core/iwasm/lib/native/base/timer_wrapper.c",
+]
+
+env.Library(
+    target="iwasm",
+    source=sources,
+)
