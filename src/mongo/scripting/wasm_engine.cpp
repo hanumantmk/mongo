@@ -121,8 +121,16 @@ public:
     void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) override {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
-        if (!wasm_runtime_call_wasm(
-                _inst, _exec, lfunc, argv.size(), argv.size() ? argv.data() : nullptr)) {
+        size_t oldSize = argv.size();
+
+        if (oldSize < 5) {
+            argv.resize(5);
+        }
+
+        if (!wasm_runtime_call_wasm(_inst, _exec, lfunc, oldSize, argv.data())) {
+            uasserted(ErrorCodes::BadValue,
+                      str::stream() << "failed to run " << name << " - "
+                                    << wasm_runtime_get_exception(_inst));
             wasm_runtime_clear_exception(_inst);
         }
     }
@@ -137,7 +145,7 @@ std::unique_ptr<WASMEngine::Scope> WASMEngine::createScope(ConstDataRange bytes)
     return std::make_unique<ImplScope>(bytes);
 }
 
-BSONObj WASMEngine::Scope::call(StringData name, BSONObj in) {
+BSONObj WASMEngine::Scope::transform(StringData name, BSONObj in) {
     std::vector<uint8_t> bytes;
     bytes.resize(in.objsize());
     memcpy(bytes.data(), in.objdata(), bytes.size());
@@ -149,6 +157,18 @@ BSONObj WASMEngine::Scope::call(StringData name, BSONObj in) {
     auto& out = getWasmContext();
 
     return BSONObj((char*)out.data()).getOwned();
+}
+
+bool WASMEngine::Scope::filter(StringData name, BSONObj in) {
+    std::vector<uint8_t> bytes;
+    bytes.resize(in.objsize());
+    memcpy(bytes.data(), in.objdata(), bytes.size());
+    setWasmContext(std::move(bytes));
+
+    std::vector<uint32_t> args;
+    callStr(name, "()i32", args);
+
+    return args[0];
 }
 
 }  // namespace mongo

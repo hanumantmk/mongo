@@ -48,12 +48,24 @@ TEST(IWasmTest, Func) {
     std::cout << "mysq function returned: " << args[0] << "\n";
 }
 
-TEST(IWasmTest, FuncWithBSON) {
+TEST(IWasmTest, FuncWithTransform) {
     auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
 
-    auto out = scope->call("_mybson", BSON("x" << 1));
+    auto out = scope->transform("_mytransform", BSON("x" << 1));
 
-    std::cout << "mybson function returned: " << out << "\n";
+    std::cout << "mytransform function returned: " << out << "\n";
+}
+
+TEST(IWasmTest, FuncWithFilter) {
+    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+
+    auto out = scope->filter("_myfilter", BSON("x" << 1));
+
+    std::cout << "myfilter function returned: " << out << "\n";
+
+    out = scope->filter("_myfilter", BSON("y" << 1));
+
+    std::cout << "myfilter function returned: " << out << "\n";
 }
 
 }  // namespace mongo

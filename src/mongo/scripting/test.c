@@ -25,11 +25,25 @@ int mysq(int n) {
     return n * n;
 }
 
-void mybson() {
+void mytransform() {
     size_t inputSize = getInputSize();
     char* buf = malloc(inputSize);
     writeInputToLocation(buf);
     buf[4+1]++;
     returnValue(buf, inputSize);
     free(buf);
+}
+
+int myfilter() {
+    size_t inputSize = getInputSize();
+    char* buf = malloc(inputSize);
+    writeInputToLocation(buf);
+
+    if (buf[4+1] == 'x') {
+        free(buf);
+        return 1;
+    } else {
+        free(buf);
+        return 0;
+    }
 }
