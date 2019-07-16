@@ -37,23 +37,23 @@
 
 namespace mongo {
 
-Engine::Engine() {
+WASMEngine::WASMEngine() {
     bh_memory_init_with_allocator((void*)mongoMalloc, (void*)free);
     wasm_runtime_init();
 }
 
-Engine::~Engine() {
+WASMEngine::~WASMEngine() {
     wasm_runtime_destroy();
     bh_memory_destroy();
 }
 
-Engine& Engine::get() {
-    static Engine engine;
+WASMEngine& WASMEngine::get() {
+    static WASMEngine engine;
 
     return engine;
 }
 
-class ImplScope : public Engine::Scope {
+class ImplScope : public WASMEngine::Scope {
 public:
     struct Module {
         explicit Module(ConstDataRange bytes) {
@@ -133,11 +133,11 @@ private:
     Exec _exec;
 };
 
-std::unique_ptr<Engine::Scope> Engine::createScope(ConstDataRange bytes) {
+std::unique_ptr<WASMEngine::Scope> WASMEngine::createScope(ConstDataRange bytes) {
     return std::make_unique<ImplScope>(bytes);
 }
 
-BSONObj Engine::Scope::call(StringData name, BSONObj in) {
+BSONObj WASMEngine::Scope::call(StringData name, BSONObj in) {
     std::vector<uint8_t> bytes;
     bytes.resize(in.objsize());
     memcpy(bytes.data(), in.objdata(), bytes.size());

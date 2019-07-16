@@ -39,7 +39,7 @@
 namespace mongo {
 
 TEST(IWasmTest, Func) {
-    auto scope = Engine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
 
     std::vector<uint32_t> args{8};
 
@@ -49,7 +49,7 @@ TEST(IWasmTest, Func) {
 }
 
 TEST(IWasmTest, FuncWithBSON) {
-    auto scope = Engine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
 
     auto out = scope->call("_mybson", BSON("x" << 1));
 

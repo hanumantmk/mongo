@@ -39,11 +39,11 @@
 
 namespace mongo {
 
-class Engine {
+class WASMEngine {
 public:
-    ~Engine();
+    ~WASMEngine();
 
-    static Engine& get();
+    static WASMEngine& get();
 
     class Scope {
     public:
@@ -59,6 +59,6 @@ public:
     std::unique_ptr<Scope> createScope(ConstDataRange bytes);
 
 private:
-    Engine();
+    WASMEngine();
 };
 }
