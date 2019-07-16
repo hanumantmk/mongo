@@ -31,6 +31,8 @@
 
 #include "mongo/unittest/unittest.h"
 
+#include "mongo/bson/bsonmisc.h"
+#include "mongo/bson/bsonobjbuilder.h"
 #include "mongo/scripting/iwasm_wasm.h"
 #include "mongo/scripting/wasm_engine.h"
 
@@ -41,9 +43,17 @@ TEST(IWasmTest, Func) {
 
     std::vector<uint32_t> args{8};
 
-    scope->callStr("_mysqrt", "(i32)i32", args);
+    scope->callStr("_mysq", "(i32)i32", args);
 
-    std::cout << "fib function returned: " << args[0] << "\n";
+    std::cout << "mysq function returned: " << args[0] << "\n";
+}
+
+TEST(IWasmTest, FuncWithBSON) {
+    auto scope = Engine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+
+    auto out = scope->call("_mybson", BSON("x" << 1));
+
+    std::cout << "mybson function returned: " << out << "\n";
 }
 
 }  // namespace mongo

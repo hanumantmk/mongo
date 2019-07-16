@@ -29,8 +29,9 @@
 
 #include "mongo/platform/basic.h"
 
-#include "wasm_export.h"
 #include "bh_memory.h"
+#include "mongo_imports.h"
+#include "wasm_export.h"
 
 #include "mongo/scripting/wasm_engine.h"
 
@@ -57,7 +58,8 @@ public:
     struct Module {
         explicit Module(ConstDataRange bytes) {
             char err[100];
-            _handle = wasm_runtime_load((const uint8_t*)bytes.data(), bytes.length(), err, sizeof(err));
+            _handle =
+                wasm_runtime_load((const uint8_t*)bytes.data(), bytes.length(), err, sizeof(err));
             if (!_handle) {
                 uasserted(ErrorCodes::BadValue, str::stream() << "could not load module: " << err);
             }
@@ -114,13 +116,13 @@ public:
         wasm_exec_env_t _handle;
     };
 
-    ImplScope(ConstDataRange bytes) : _module(bytes), _inst(_module), _exec() {
-    }
+    ImplScope(ConstDataRange bytes) : _module(bytes), _inst(_module), _exec() {}
 
     void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) override {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
-        if (!wasm_runtime_call_wasm(_inst, _exec, lfunc, argv.size(), argv.data())) {
+        if (!wasm_runtime_call_wasm(
+                _inst, _exec, lfunc, argv.size(), argv.size() ? argv.data() : nullptr)) {
             wasm_runtime_clear_exception(_inst);
         }
     }
@@ -133,6 +135,20 @@ private:
 
 std::unique_ptr<Engine::Scope> Engine::createScope(ConstDataRange bytes) {
     return std::make_unique<ImplScope>(bytes);
+}
+
+BSONObj Engine::Scope::call(StringData name, BSONObj in) {
+    std::vector<uint8_t> bytes;
+    bytes.resize(in.objsize());
+    memcpy(bytes.data(), in.objdata(), bytes.size());
+    setWasmContext(std::move(bytes));
+
+    std::vector<uint32_t> args;
+    callStr(name, "()", args);
+
+    auto& out = getWasmContext();
+
+    return BSONObj((char*)out.data()).getOwned();
 }
 
 }  // namespace mongo

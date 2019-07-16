@@ -188,6 +188,7 @@ thirdPartyEnvironmentModifications['iwasm'] = {
     'CPPPATH' : [
         '#/src/third_party/iwasm/core/iwasm/runtime/include',
         '#/src/third_party/iwasm/core/shared-lib/include',
+        '#/src/third_party/iwasm/',
     ],
 }
 

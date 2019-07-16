@@ -33,6 +33,7 @@
 
 #include "mongo/base/data_range.h"
 #include "mongo/base/string_data.h"
+#include "mongo/bson/bsonobj.h"
 #include "mongo/bson/util/builder.h"
 #include "mongo/util/if_constexpr.h"
 
@@ -49,6 +50,9 @@ public:
         virtual ~Scope() {}
 
         virtual void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) = 0;
+
+        BSONObj call(StringData name, BSONObj in);
+
     private:
     };
 
@@ -57,5 +61,4 @@ public:
 private:
     Engine();
 };
-
 }
