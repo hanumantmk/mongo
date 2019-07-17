@@ -22,7 +22,6 @@ env.Prepend(CPPPATH=[
     'core/iwasm/runtime/platform/linux',
     'core/iwasm/runtime/platform/include',
     'core/iwasm/runtime/vmcore-wasm',
-    'core/iwasm/lib/native-interface',
     'core/shared-lib/platform/include',
     'core/shared-lib/platform/linux',
     'core/shared-lib/include',

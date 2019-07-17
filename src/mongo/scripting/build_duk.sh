@@ -1,7 +1,5 @@
 #!/bin/sh
-EMCC_FORCE_STDLIBS=1 \
-EMCC_ONLY_FORCED_STDLIBS=1 \
-em++ -O3 -std=c++17 -I. test.cpp \
+emcc -O3 -I. duk.c \
     -s WASM=1 \
     -s ASSERTIONS=1 \
     -s STACK_OVERFLOW_CHECK=2 \

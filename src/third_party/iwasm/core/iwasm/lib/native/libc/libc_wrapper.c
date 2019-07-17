@@ -687,6 +687,12 @@ _malloc_wrapper(uint32 size)
 }
 
 static int32
+_realloc_wrapper(int32_t dst_offset, uint32 size)
+{
+    return dst_offset;
+}
+
+static int32
 _calloc_wrapper(uint32 nmemb, uint32 size)
 {
     uint64 total_size = (uint64) nmemb * (uint64) size;
@@ -873,6 +879,7 @@ static WASMNativeFuncDef native_func_defs[] = {
     REG_NATIVE_FUNC(env, _strncmp),
     REG_NATIVE_FUNC(env, _strncpy),
     REG_NATIVE_FUNC(env, _malloc),
+    REG_NATIVE_FUNC(env, _realloc),
     REG_NATIVE_FUNC(env, _calloc),
     REG_NATIVE_FUNC(env, _strdup),
     REG_NATIVE_FUNC(env, _free),

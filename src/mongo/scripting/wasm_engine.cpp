@@ -165,6 +165,10 @@ private:
     void _callStr(StringData name, StringData func, std::vector<uint32_t>& argv) {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
+        uassert(ErrorCodes::BadValue,
+                str::stream() << "Could not locate function \"" << name << "\"",
+                lfunc);
+
         size_t oldSize = argv.size();
 
         if (oldSize < 5) {
@@ -191,6 +195,7 @@ private:
     }
 
     BSONObj ptr2bson(int32_t ptr) {
+        std::cout << "wtf: " << ptr << "\n";
         uassert(ErrorCodes::InternalError,
                 "ptr not valid",
                 wasm_runtime_validate_app_addr(_inst, ptr, 4));

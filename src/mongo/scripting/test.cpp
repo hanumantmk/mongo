@@ -17,6 +17,7 @@
 #include "bson_iter.hpp"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string>
 
 #define CONSTEXPR
 #define CONSTEXPR_OFF
@@ -47,6 +48,9 @@ void* mytransform(void* buf) {
             break;
         }
     }
+
+    //    auto ab = std::string("a") + std::string("b");
+    //    printf("%s\n", ab.c_str());
 
     free(buf);
 

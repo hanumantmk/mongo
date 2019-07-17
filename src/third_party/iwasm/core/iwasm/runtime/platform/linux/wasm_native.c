@@ -299,6 +299,10 @@ typedef struct WASMNativeFuncDef {
     void *func_ptr;
 } WASMNativeFuncDef;
 
+double f64rem(double x, double y) {
+    return 0;
+}
+
 static WASMNativeFuncDef native_func_defs[] = {
     REG_NATIVE_FUNC(env, __syscall0),
     REG_NATIVE_FUNC(env, __syscall1),
@@ -321,6 +325,7 @@ static WASMNativeFuncDef native_func_defs[] = {
     REG_NATIVE_FUNC(env, enlargeMemory),
     REG_NATIVE_FUNC(env, getTotalMemory),
     REG_NATIVE_FUNC(env, ___setErrNo),
+    { "asm2wasm", "f64-rem", f64rem },
 };
 
 void*
