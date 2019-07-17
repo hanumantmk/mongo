@@ -97,6 +97,7 @@ private:
 
     const WasmSpec _spec;
     std::unique_ptr<WASMEngine::Scope> _scope;
+    bool _eof;
 };
 
 }  // namespace mongo

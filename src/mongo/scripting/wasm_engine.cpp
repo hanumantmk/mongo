@@ -30,7 +30,6 @@
 #include "mongo/platform/basic.h"
 
 #include "bh_memory.h"
-#include "mongo_imports.h"
 #include "wasm_export.h"
 
 #include "mongo/scripting/wasm_engine.h"
@@ -56,6 +55,20 @@ WASMEngine& WASMEngine::get() {
 
 class ImplScope : public WASMEngine::Scope {
 public:
+    struct BindThread {
+        BindThread(ImplScope* scope) : _scope(scope) {
+            wasm_runtime_attach_current_thread(_scope->_inst, nullptr);
+        }
+
+        BindThread(BindThread&&) = delete;
+
+        ~BindThread() {
+            wasm_runtime_detach_current_thread(_scope->_inst);
+        }
+
+        ImplScope* _scope;
+    };
+
     struct Module {
         explicit Module(ConstDataRange bytes) {
             char err[100];
@@ -122,9 +135,34 @@ public:
     }
 
     void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) override {
-        wasm_runtime_attach_current_thread(_inst, nullptr);
-        ON_BLOCK_EXIT([&] { wasm_runtime_detach_current_thread(_inst); });
+        BindThread bt(this);
 
+        _callStr(name, func, argv);
+    }
+
+    BSONObj transform(StringData name, BSONObj in) override {
+        BindThread bt(this);
+
+        auto ptr = bson2ptr(in);
+
+        std::vector<uint32_t> args{(uint32_t)ptr};
+        _callStr(name, "(i32)i32", args);
+
+        return ptr2bson(args[0]);
+    }
+
+    bool filter(StringData name, BSONObj in) override {
+        BindThread bt(this);
+
+        auto ptr = bson2ptr(in);
+        std::vector<uint32_t> args{(uint32_t)ptr};
+        _callStr(name, "(i32)i32", args);
+
+        return args[0];
+    }
+
+private:
+    void _callStr(StringData name, StringData func, std::vector<uint32_t>& argv) {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
         size_t oldSize = argv.size();
@@ -141,7 +179,31 @@ public:
         }
     }
 
-private:
+    int32_t bson2ptr(BSONObj in) {
+        int32_t ptr = wasm_runtime_module_malloc(_inst, in.objsize());
+        uassert(ErrorCodes::InternalError,
+                "could not malloc memory",
+                wasm_runtime_validate_app_addr(_inst, ptr, in.objsize()));
+
+        auto actualPtr = wasm_runtime_addr_app_to_native(_inst, ptr);
+        memcpy(actualPtr, in.objdata(), in.objsize());
+        return ptr;
+    }
+
+    BSONObj ptr2bson(int32_t ptr) {
+        uassert(ErrorCodes::InternalError,
+                "ptr not valid",
+                wasm_runtime_validate_app_addr(_inst, ptr, 4));
+
+        auto actualPtr = wasm_runtime_addr_app_to_native(_inst, ptr);
+
+        auto bson = BSONObj((char*)actualPtr).getOwned();
+
+        wasm_runtime_module_free(_inst, ptr);
+
+        return bson;
+    }
+
     Module _module;
     Inst _inst;
     Exec _exec;
@@ -149,32 +211,6 @@ private:
 
 std::unique_ptr<WASMEngine::Scope> WASMEngine::createScope(ConstDataRange bytes) {
     return std::make_unique<ImplScope>(bytes);
-}
-
-BSONObj WASMEngine::Scope::transform(StringData name, BSONObj in) {
-    std::vector<uint8_t> bytes;
-    bytes.resize(in.objsize());
-    memcpy(bytes.data(), in.objdata(), bytes.size());
-    setWasmContext(std::move(bytes));
-
-    std::vector<uint32_t> args;
-    callStr(name, "()", args);
-
-    auto& out = getWasmContext();
-
-    return BSONObj((char*)out.data()).getOwned();
-}
-
-bool WASMEngine::Scope::filter(StringData name, BSONObj in) {
-    std::vector<uint8_t> bytes;
-    bytes.resize(in.objsize());
-    memcpy(bytes.data(), in.objdata(), bytes.size());
-    setWasmContext(std::move(bytes));
-
-    std::vector<uint32_t> args;
-    callStr(name, "()i32", args);
-
-    return args[0];
 }
 
 }  // namespace mongo

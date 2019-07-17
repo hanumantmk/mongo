@@ -50,13 +50,60 @@ intrusive_ptr<DocumentSource> DocumentSourceWasm::createFromBson(
 DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
     pExpCtx->checkForInterrupt();
 
-    // FIXME: Here we should call our WASMEngine::Scope's getNext.
-    auto nextInput = pSource->getNext();
-    return nextInput;
+    // If the wasm module or our DocumentSource had already indicated that it had reached EOF,
+    // simply return EOF.
+    if (_eof) {
+        return GetNextResult::makeEOF();
+    }
+
+    while (!_eof) {
+        auto nextInput = pSource->getNext();
+        if (nextInput.isPaused()) {
+            return GetNextResult::makePauseExecution();
+        }
+
+        // If we receive EOF from the previous stage, give this information to the wasm module and
+        // allow it to return a final document.
+        _eof = nextInput.isEOF();
+
+        // Construct the expected input document.
+        boost::optional<BSONObj> inputDoc =
+            _eof ? boost::optional<BSONObj>{} : nextInput.releaseDocument().toBson();
+        InputSpec input{};
+        input.setDoc(inputDoc);
+
+        // Call the wasm module and parse the response.
+        BSONObj result = _scope->transform("getNext", input.toBSON());
+        ReturnSpec returned = ReturnSpec::parse("$wasm"_sd, result);
+
+        auto nextDoc = returned.getNext_doc();
+
+        // The wasm module can signify that it's done prior to the DocumentSource, e.g. if it's
+        // imitating $limit.
+        if (returned.getIs_eof()) {
+            _eof = true;
+
+            // If the module signified EOF without a final document to return, then return EOF.
+            // Otherwise, fall through and return the final document. If this is the case the next
+            // getNext() call will return EOF thanks to the initial guard on _eof.
+            if (!nextDoc.is_initialized()) {
+                return GetNextResult::makeEOF();
+            }
+        }
+
+        // If the wasm module returned a document, pass it along.
+        if (nextDoc.is_initialized()) {
+            return Document(nextDoc.get());
+        }
+    }
+
+    // We reach here if the wasm module was passed EOF and it did not signify EOF in its return
+    // document.
+    uassert(51242, "$wasm module didn't terminate after EOF", false);
 }
 
 DocumentSourceWasm::DocumentSourceWasm(const intrusive_ptr<ExpressionContext>& pExpCtx,
                                        const WasmSpec& spec)
-    : DocumentSource(pExpCtx), _spec(spec), _scope(WASMEngine::get().createScope(spec.getWasm())) {}
+    : DocumentSource(pExpCtx), _spec(spec), _eof(false) {}
 
 }  // namespace mongo

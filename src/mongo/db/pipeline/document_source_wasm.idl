@@ -41,3 +41,19 @@ structs:
     fields:
       wasm:
         type: bindata_generic
+  InputSpec:
+    description: "$wasm input spec"
+    strict: true
+    fields:
+      doc:
+        optional: true
+        type: object
+  ReturnSpec:
+    description: "$wasm return spec"
+    strict: true
+    fields:
+      is_eof:
+        type: bool
+      next_doc:
+        optional: true
+        type: object

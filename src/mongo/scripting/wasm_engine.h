@@ -51,8 +51,8 @@ public:
 
         virtual void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) = 0;
 
-        BSONObj transform(StringData name, BSONObj in);
-        bool filter(StringData name, BSONObj in);
+        virtual BSONObj transform(StringData name, BSONObj in) = 0;
+        virtual bool filter(StringData name, BSONObj in) = 0;
 
     private:
     };
