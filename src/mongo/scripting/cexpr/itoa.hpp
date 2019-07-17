@@ -6,7 +6,7 @@
 namespace cexpr {
 
 class itoa {
-   public:
+public:
     CONSTEXPR itoa();
     CONSTEXPR itoa(uint32_t i);
     CONSTEXPR itoa(const itoa& rhs);
@@ -16,7 +16,7 @@ class itoa {
     CONSTEXPR const char* c_str() const;
     CONSTEXPR std::size_t length() const;
 
-   private:
+private:
     CONSTEXPR void init();
 
     uint32_t _val;
@@ -25,22 +25,24 @@ class itoa {
     char _buf[11];
 };
 
-CONSTEXPR itoa::itoa(uint32_t val) : _val(val), _str(nullptr), _len(0), _buf() { init(); }
+CONSTEXPR itoa::itoa(uint32_t val) : _val(val), _str(nullptr), _len(0), _buf() {
+    init();
+}
 
 CONSTEXPR void itoa::init() {
-     int size = sizeof(_buf) - 1;
-     int i = size;
+    int size = sizeof(_buf) - 1;
+    int i = size;
 
-     _buf[i] = '\0';
+    _buf[i] = '\0';
 
-     while (_val > 0) {
-         i--;
-         _buf[i] = (_val % 10) + '0';
-         _val = _val / 10;
-     }
+    while (_val > 0) {
+        i--;
+        _buf[i] = (_val % 10) + '0';
+        _val = _val / 10;
+    }
 
-     _str = _buf + i;
-     _len = size - i;
+    _str = _buf + i;
+    _len = size - i;
 }
 
 CONSTEXPR itoa::itoa() : itoa(0) {}
@@ -59,8 +61,11 @@ CONSTEXPR itoa& itoa::operator=(uint32_t i) {
     return *this;
 }
 
-CONSTEXPR const char* itoa::c_str() const { return _str; }
+CONSTEXPR const char* itoa::c_str() const {
+    return _str;
+}
 
-CONSTEXPR std::size_t itoa::length() const { return _len; }
-
+CONSTEXPR std::size_t itoa::length() const {
+    return _len;
+}
 }

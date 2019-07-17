@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
+#include "bson_iter.hpp"
 #include <stdio.h>
 #include <stdlib.h>
-#include "bson_iter.hpp"
 
 #define CONSTEXPR
 #define CONSTEXPR_OFF
@@ -24,28 +24,19 @@
 
 extern "C" {
 
-void returnValue(void*, size_t len);
-size_t getInputSize(void);
-int writeInputToLocation(void*);
-
 int mysq(int n) {
     return n * n;
 }
 
-void mytransform() {
-    size_t inputSize = getInputSize();
-    char* buf = (char*)malloc(inputSize);
-    writeInputToLocation(buf);
-
+void* mytransform(void* buf) {
     bson_iter in((uint8_t*)buf);
     in.next();
     auto outBuf = (uint8_t*)malloc(1000);
     cexpr::bson out(outBuf);
 
     while (1) {
-        printf("%s: %d\n", in.key(), in.type());
         if (strcmp(in.key(), "x") == 0) {
-            out.append_int32("x", 1, in.int32()+1);
+            out.append_int32("x", 1, in.dbl() + 1);
         } else {
             size_t size;
             auto ptr = in.keyAndValue(&size);
@@ -59,22 +50,30 @@ void mytransform() {
 
     free(buf);
 
-    returnValue((void*)out.data(), out.length());
-    free(outBuf);
+    return outBuf;
 }
 
-int myfilter() {
-    size_t inputSize = getInputSize();
-    char* buf = (char*)malloc(inputSize);
-    writeInputToLocation(buf);
+int myfilter(void* buf) {
+    bson_iter in((uint8_t*)buf);
+    in.next();
 
-    if (buf[4+1] == 'x') {
-        free(buf);
-        return 1;
-    } else {
-        free(buf);
-        return 0;
+    int rval = 0;
+
+    while (1) {
+        if (strcmp(in.key(), "x") == 0) {
+            if (in.int32()) {
+                rval = 1;
+            }
+            break;
+        }
+
+        if (!in.next()) {
+            break;
+        }
     }
-}
 
+    free(buf);
+
+    return rval;
+}
 }

@@ -26,12 +26,6 @@ env.Prepend(CPPPATH=[
     'core/shared-lib/platform/include',
     'core/shared-lib/platform/linux',
     'core/shared-lib/include',
-    'core/shared-lib/utils',
-#    'core/shared-lib/coap/extension',
-#    'core/app-mgr/app-mgr-shared/',
-#    'core/iwasm/lib/native-interface',
-#    'core/shared-lib/coap/er-coap',
-#    'core/app-mgr/app-manager',
 ])
 
 sources = [
