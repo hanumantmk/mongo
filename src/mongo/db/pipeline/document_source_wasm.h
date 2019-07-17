@@ -32,24 +32,42 @@
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/pipeline/document_source.h"
+#include "mongo/db/pipeline/document_source_wasm_gen.h"
+#include "mongo/scripting/wasm_engine.h"
 
 namespace mongo {
 
 class DocumentSourceWasm final : public DocumentSource {
 public:
-    static constexpr StringData kStageName = "$wasm"_sd;
+    static const char* kStageName;
 
-    /**
-     * Create a new $wasm stage.
-     */
-    static boost::intrusive_ptr<DocumentSourceWasm> create(
-        const boost::intrusive_ptr<ExpressionContext>& pExpCtx, ConstDataRange wasm);
+    class LiteParsed final : public LiteParsedDocumentSource {
+    public:
+        static std::unique_ptr<LiteParsed> parse(const AggregationRequest& request,
+                                                 const BSONElement& spec) {
 
-    /**
-     * Parse a $wasm stage from a BSON stage specification. 'elem's field name must be "$wasm".
-     */
+            return std::make_unique<LiteParsed>(WasmSpec::parse("$wasm"_sd, spec.Obj()));
+        }
+
+        explicit LiteParsed(const WasmSpec& spec) : _spec(spec) {}
+
+        stdx::unordered_set<NamespaceString> getInvolvedNamespaces() const final {
+            return stdx::unordered_set<NamespaceString>();
+        }
+
+        PrivilegeVector requiredPrivileges(bool isMongos) const final {
+            return {};
+        }
+
+    private:
+        const WasmSpec _spec;
+    };
+
     static boost::intrusive_ptr<DocumentSource> createFromBson(
-        BSONElement elem, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+        BSONElement spec, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
+
+
+    GetNextResult getNext() final;
 
     StageConstraints constraints(Pipeline::SplitState pipeState) const final {
         return {StreamType::kBlocking,  // May or may not be blocking, we don't know.
@@ -61,26 +79,24 @@ public:
                 LookupRequirement::kNotAllowed};
     }
 
-    GetNextResult getNext() final;
     const char* getSourceName() const final {
-        return kStageName.rawData();
+        return kStageName;
     }
 
-    DepsTracker::State getDependencies(DepsTracker* deps) const final {
-        return DepsTracker::State::NOT_SUPPORTED;
+    Value serialize(boost::optional<ExplainOptions::Verbosity> explain = boost::none) const final {
+        return Value(Document{{getSourceName(), _spec.toBSON()}});
     }
-
-    Value serialize(boost::optional<ExplainOptions::Verbosity> explain = boost::none) const final;
 
     boost::optional<DistributedPlanLogic> distributedPlanLogic() final {
-        // FIXME: this seem right?
-        return DistributedPlanLogic{nullptr, nullptr, boost::none};
+        return boost::none;
     }
 
 private:
-    DocumentSourceWasm(const boost::intrusive_ptr<ExpressionContext>& pExpCtx, ConstDataRange wasm);
+    DocumentSourceWasm(const boost::intrusive_ptr<ExpressionContext>& pExpCtx,
+                       const WasmSpec& spec);
 
-    ConstDataRange _wasm;
+    const WasmSpec _spec;
+    std::unique_ptr<WASMEngine::Scope> _scope;
 };
 
 }  // namespace mongo

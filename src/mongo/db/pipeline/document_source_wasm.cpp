@@ -30,55 +30,33 @@
 #include "mongo/platform/basic.h"
 
 #include "mongo/db/pipeline/document_source_wasm.h"
-
-#include "mongo/db/jsobj.h"
-#include "mongo/db/pipeline/document.h"
-#include "mongo/db/pipeline/expression.h"
-#include "mongo/db/pipeline/expression_context.h"
-#include "mongo/db/pipeline/lite_parsed_document_source.h"
-#include "mongo/db/pipeline/value.h"
+#include "mongo/db/pipeline/document_source_wasm_gen.h"
 
 namespace mongo {
 
 using boost::intrusive_ptr;
 
-DocumentSourceWasm::DocumentSourceWasm(const intrusive_ptr<ExpressionContext>& pExpCtx,
-                                       ConstDataRange wasm)
-    : DocumentSource(pExpCtx), _wasm(wasm) {}
-
 REGISTER_DOCUMENT_SOURCE(wasm,
-                         LiteParsedDocumentSourceDefault::parse,
+                         DocumentSourceWasm::LiteParsed::parse,
                          DocumentSourceWasm::createFromBson);
 
-constexpr StringData DocumentSourceWasm::kStageName;
+const char* DocumentSourceWasm::kStageName = "$wasm";
+
+intrusive_ptr<DocumentSource> DocumentSourceWasm::createFromBson(
+    BSONElement spec, const intrusive_ptr<ExpressionContext>& pExpCtx) {
+    return new DocumentSourceWasm(pExpCtx, WasmSpec::parse("$wasm"_sd, spec.Obj()));
+}
 
 DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
     pExpCtx->checkForInterrupt();
 
+    // FIXME: Here we should call our WASMEngine::Scope's getNext.
     auto nextInput = pSource->getNext();
     return nextInput;
 }
 
-Value DocumentSourceWasm::serialize(boost::optional<ExplainOptions::Verbosity> explain) const {
-    // FIXME: does _wasm.data() need to be copied?
-    return Value(DOC(getSourceName()
-                     << BSONBinData(_wasm.data(), _wasm.length(), BinDataType::BinDataGeneral)));
-}
+DocumentSourceWasm::DocumentSourceWasm(const intrusive_ptr<ExpressionContext>& pExpCtx,
+                                       const WasmSpec& spec)
+    : DocumentSource(pExpCtx), _spec(spec), _scope(WASMEngine::get().createScope(spec.getWasm())) {}
 
-intrusive_ptr<DocumentSourceWasm> DocumentSourceWasm::create(
-    const intrusive_ptr<ExpressionContext>& pExpCtx, ConstDataRange wasm) {
-    intrusive_ptr<DocumentSourceWasm> source(new DocumentSourceWasm(pExpCtx, wasm));
-    return source;
-}
-
-intrusive_ptr<DocumentSource> DocumentSourceWasm::createFromBson(
-    BSONElement elem, const intrusive_ptr<ExpressionContext>& pExpCtx) {
-    uassert(
-        51242, "wasm be specified as binData type 0", elem.isBinData(BinDataType::BinDataGeneral));
-
-    int binDataLen = 0;
-    const char* binData = elem.binData(binDataLen);
-    ConstDataRange wasm(binData, binDataLen);
-    return DocumentSourceWasm::create(pExpCtx, std::move(wasm));
-}
 }  // namespace mongo

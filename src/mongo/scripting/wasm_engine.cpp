@@ -34,6 +34,7 @@
 #include "wasm_export.h"
 
 #include "mongo/scripting/wasm_engine.h"
+#include "mongo/util/scopeguard.h"
 
 namespace mongo {
 
@@ -116,9 +117,14 @@ public:
         wasm_exec_env_t _handle;
     };
 
-    ImplScope(ConstDataRange bytes) : _module(bytes), _inst(_module), _exec() {}
+    ImplScope(ConstDataRange bytes) : _module(bytes), _inst(_module), _exec() {
+        wasm_runtime_detach_current_thread(_inst);
+    }
 
     void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) override {
+        wasm_runtime_attach_current_thread(_inst, nullptr);
+        ON_BLOCK_EXIT([&] { wasm_runtime_detach_current_thread(_inst); });
+
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
         size_t oldSize = argv.size();
