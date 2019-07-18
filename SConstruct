@@ -458,6 +458,7 @@ add_option('build-fast-and-loose',
 
 add_option('disable-warnings-as-errors',
     help="Don't add -Werror to compiler command line",
+    default=True,
     nargs=0,
 )
 
@@ -3680,7 +3681,7 @@ if get_option('install-mode') == 'hygienic':
                 "runtime",
             ]
         ),
-        
+
         "$LIBSUFFIX": env.SuffixMap(
             directory="$PREFIX_LIB_DIR",
             default_roles=[
@@ -3703,21 +3704,21 @@ if get_option('install-mode') == 'hygienic':
                 "debug",
             ]
         ),
-        
+
         ".dSYM": env.SuffixMap(
             directory="$PREFIX_DEBUG_DIR",
             default_roles=[
                 "debug"
             ]
         ),
-        
+
         ".lib": env.SuffixMap(
             directory="$PREFIX_LIB_DIR",
             default_roles=[
                 "dev"
             ]
         ),
-        
+
         ".h": env.SuffixMap(
             directory="$PREFIX_INCLUDE_DIR",
             default_roles=[
@@ -4068,8 +4069,8 @@ env.Alias('cache-prune', cachePrune)
 if get_option('install-mode') == 'hygienic':
     env.FinalizeInstallDependencies()
 
-# We don't want installing files to cause them to flow into the cache,	
-# since presumably we can re-install them from the origin if needed.	
+# We don't want installing files to cause them to flow into the cache,
+# since presumably we can re-install them from the origin if needed.
 env.NoCache(env.FindInstalledFiles())
 
 # Substitute environment variables in any build targets so that we can
