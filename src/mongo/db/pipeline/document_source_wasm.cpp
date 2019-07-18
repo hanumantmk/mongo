@@ -73,7 +73,7 @@ DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
         input.setDoc(inputDoc);
 
         // Call the wasm module and parse the response.
-        BSONObj result = _scope->transform("getNext", input.toBSON());
+        BSONObj result = _scope->transform("_mytransform", input.toBSON());
         ReturnSpec returned = ReturnSpec::parse("$wasm"_sd, result);
 
         auto nextDoc = returned.getNext_doc();
@@ -99,11 +99,14 @@ DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
 
     // We reach here if the wasm module was passed EOF and it did not signify EOF in its return
     // document.
-    uassert(51242, "$wasm module didn't terminate after EOF", false);
+    uassert(51242, "$wasm module didn't terminate after EOF", true);
 }
 
 DocumentSourceWasm::DocumentSourceWasm(const intrusive_ptr<ExpressionContext>& pExpCtx,
                                        const WasmSpec& spec)
-    : DocumentSource(pExpCtx), _spec(spec), _eof(false) {}
+    : DocumentSource(pExpCtx),
+      _spec(spec),
+      _scope(WASMEngine::get().createScope(spec.getWasm())),
+      _eof(false) {}
 
 }  // namespace mongo

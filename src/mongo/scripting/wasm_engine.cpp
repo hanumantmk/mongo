@@ -164,6 +164,7 @@ public:
 private:
     void _callStr(StringData name, StringData func, std::vector<uint32_t>& argv) {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
+        uassert(51243, "invalid function name", lfunc != nullptr);
 
         size_t oldSize = argv.size();
 
