@@ -113,7 +113,7 @@ public:
     struct Exec {
         Exec() {
             char err[100];
-            _handle = wasm_runtime_create_exec_env(8192);
+            _handle = wasm_runtime_create_exec_env(8192 * 1024);
             if (!_handle) {
                 uasserted(ErrorCodes::BadValue, str::stream() << "could not load env: " << err);
             }
