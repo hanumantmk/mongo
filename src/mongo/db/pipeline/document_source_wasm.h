@@ -66,6 +66,9 @@ public:
     static boost::intrusive_ptr<DocumentSource> createFromBson(
         BSONElement spec, const boost::intrusive_ptr<ExpressionContext>& pExpCtx);
 
+    static boost::intrusive_ptr<DocumentSourceWasm> create(
+        const boost::intrusive_ptr<ExpressionContext>& pExpCtx, const WasmSpec& spec);
+
 
     GetNextResult getNext() final;
 

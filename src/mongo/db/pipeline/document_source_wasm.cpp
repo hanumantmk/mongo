@@ -47,6 +47,12 @@ intrusive_ptr<DocumentSource> DocumentSourceWasm::createFromBson(
     return new DocumentSourceWasm(pExpCtx, WasmSpec::parse("$wasm"_sd, spec.Obj()));
 }
 
+intrusive_ptr<DocumentSourceWasm> DocumentSourceWasm::create(
+    const intrusive_ptr<ExpressionContext>& pExpCtx, const WasmSpec& spec) {
+    intrusive_ptr<DocumentSourceWasm> source(new DocumentSourceWasm(pExpCtx, spec));
+    return source;
+}
+
 DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
     pExpCtx->checkForInterrupt();
 
@@ -99,7 +105,7 @@ DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
 
     // We reach here if the wasm module was passed EOF and it did not signify EOF in its return
     // document.
-    uassert(51242, "$wasm module didn't terminate after EOF", true);
+    uasserted(51242, "$wasm module didn't terminate after EOF");
 }
 
 DocumentSourceWasm::DocumentSourceWasm(const intrusive_ptr<ExpressionContext>& pExpCtx,
