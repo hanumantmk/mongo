@@ -73,7 +73,7 @@ DocumentSource::GetNextResult DocumentSourceWasm::getNext() {
         input.setDoc(inputDoc);
 
         // Call the wasm module and parse the response.
-        BSONObj result = _scope->transform("_mytransform", input.toBSON());
+        BSONObj result = _scope->transform("getNext", input.toBSON());
         ReturnSpec returned = ReturnSpec::parse("$wasm"_sd, result);
 
         auto nextDoc = returned.getNext_doc();
