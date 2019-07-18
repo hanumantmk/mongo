@@ -1127,6 +1127,7 @@ wasm_runtime_module_malloc(WASMModuleInstance *module_inst, uint32 size)
     WASMMemoryInstance *memory = module_inst->default_memory;
     uint8 *addr = mem_allocator_malloc(memory->heap_handle, size);
     if (!addr) {
+        printf("failed to allocated memory, asked for %d\n", size);
         wasm_runtime_set_exception(module_inst, "out of memory");
         return 0;
     }

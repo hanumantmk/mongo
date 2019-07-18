@@ -14,26 +14,38 @@
  * limitations under the License.
  */
 
-#include "duktape.h"
+#define DUK_SINGLE_FILE
+#include "duk_config.h"
+//#define DUK_USE_DEBUG 1
+//#define DUK_USE_DEBUG_WRITE(...) \
+//    printf("DUK\t%ld\t%s\t%ld\t%s\t%s\n", __VA_ARGS__);
+
+#define DUK_USE_DATE_GET_NOW(ctx) 0
+#define DUK_USE_DATE_GET_LOCAL_TZOFFSET(d) 0
+#include "duktape.c"
 
 int mysq(int n) {
     return n * n;
 }
 
 void fatal_handler(void*udata, const char* msg) {
+    printf("fatal handler - %s\n", msg);
 }
 
 void* mytransform(void* buf) {
+    printf("mytransform 1\n");
     duk_context* ctx = duk_create_heap(NULL, NULL, NULL, NULL, fatal_handler);
+    printf("mytransform 2\n");
 
-    duk_eval_string(ctx, "return \"hello from js\";");
-    const char* result = duk_get_string(ctx, -1);
-
-    printf("%s\n", result);
-
-    duk_pop(ctx);
-
-    duk_destroy_heap(ctx);
+    int r = duk_peval_string(ctx, "\"hello from js\";");
+    printf("r = %d\n", r);
+//    const char* result = duk_get_string(ctx, -1);
+//
+//    printf("%s\n", result);
+//
+//    duk_pop(ctx);
+//
+//    duk_destroy_heap(ctx);
 
     return buf;
 }
@@ -42,9 +54,3 @@ int myfilter(void* buf) {
     return 1;
 }
 
-#define DUK_COMPILING_DUKTAPE
-#define DUK_USE_DATE_GET_NOW(ctx) 0
-#define DUK_USE_DATE_GET_LOCAL_TZOFFSET(d) 0
-#include "duk_config.h"
-
-#include "duktape.c"

@@ -93,7 +93,7 @@ public:
     struct Inst {
         explicit Inst(wasm_module_t module) {
             char err[100];
-            _handle = wasm_runtime_instantiate(module, 0, 0, err, sizeof(err));
+            _handle = wasm_runtime_instantiate(module, 1 << 20, 1 << 30, err, sizeof(err));
             if (!_handle) {
                 uasserted(ErrorCodes::BadValue, str::stream() << "could not load inst: " << err);
             }
@@ -113,7 +113,8 @@ public:
     struct Exec {
         Exec() {
             char err[100];
-            _handle = wasm_runtime_create_exec_env(8192);
+            //_handle = wasm_runtime_create_exec_env(8192);
+            _handle = wasm_runtime_create_exec_env(1 << 20);
             if (!_handle) {
                 uasserted(ErrorCodes::BadValue, str::stream() << "could not load env: " << err);
             }
@@ -132,6 +133,10 @@ public:
 
     ImplScope(ConstDataRange bytes) : _module(bytes), _inst(_module), _exec() {
         wasm_runtime_detach_current_thread(_inst);
+    }
+
+    ~ImplScope() {
+        wasm_runtime_attach_current_thread(_inst, nullptr);
     }
 
     void callStr(StringData name, StringData func, std::vector<uint32_t>& argv) override {

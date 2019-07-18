@@ -590,6 +590,20 @@ _memset_wrapper(int32 s_offset, int32 c, int32 size)
 }
 
 static int32
+_memchr_wrapper(int32 s_offset, int32 c, int32 size)
+{
+    wasm_module_inst_t module_inst = get_module_inst();
+    void *s;
+
+    if (!validate_app_addr(s_offset, size))
+        return s_offset;
+
+    s = addr_app_to_native(s_offset);
+    char* ret = memchr(s, c, size);
+    return ret ? addr_native_to_app(ret) : 0;
+}
+
+static int32
 _strchr_wrapper(int32 s_offset, int32 c)
 {
     wasm_module_inst_t module_inst = get_module_inst();
@@ -683,13 +697,15 @@ static int32
 _malloc_wrapper(uint32 size)
 {
     wasm_module_inst_t module_inst = get_module_inst();
-    return module_malloc(size);
-}
+    int x = module_malloc(size+16);
+    if (!x) {
+        return 0;
+    }
 
-static int32
-_realloc_wrapper(int32_t dst_offset, uint32 size)
-{
-    return dst_offset;
+    uint8* retptr = addr_app_to_native(x);
+    memcpy(retptr, &size, sizeof(size));
+
+    return x+16;
 }
 
 static int32
@@ -703,11 +719,15 @@ _calloc_wrapper(uint32 nmemb, uint32 size)
     if (total_size > UINT32_MAX)
         total_size = UINT32_MAX;
 
-    ret_offset = module_malloc((uint32 )total_size);
-    if (ret_offset) {
-        ret_ptr = addr_app_to_native(ret_offset);
-        memset(ret_ptr, 0, (uint32) total_size);
+    ret_offset = module_malloc((uint32 )total_size + 16);
+    if (!ret_offset) {
+        return 0;
     }
+
+    ret_ptr = addr_app_to_native(ret_offset);
+    memcpy(ret_ptr, &total_size, sizeof(total_size));
+
+    memset(ret_ptr+16, 0, (uint32) total_size);
 
     return ret_offset;
 }
@@ -717,9 +737,47 @@ _free_wrapper(int32 ptr_offset)
 {
     wasm_module_inst_t module_inst = get_module_inst();
 
+    if (!ptr_offset) {
+        return;
+    }
+
+    ptr_offset-=16;
+
     if (!validate_app_addr(ptr_offset, 4))
         return;
     return module_free(ptr_offset);
+}
+
+static int32
+_realloc_wrapper(int32_t dst_offset, uint32 size)
+{
+    wasm_module_inst_t module_inst = get_module_inst();
+    if (!dst_offset) {
+        return _malloc_wrapper(size);
+    }
+
+    if (!size) {
+        _free_wrapper(dst_offset);
+        return 0;
+    }
+
+    if (!validate_app_addr(dst_offset-16, size+16))
+        return 0;
+
+    uint8* ret_ptr = addr_app_to_native(dst_offset-16);
+
+    uint32 current;
+    memcpy(&current, ret_ptr, 4);
+
+    if (current >= size) {
+        return dst_offset;
+    }
+
+    int32 new_dst = _malloc_wrapper(size);
+    _memcpy_wrapper(new_dst, dst_offset, size);
+    _free_wrapper(dst_offset);
+
+    return new_dst;
 }
 
 static void
@@ -789,6 +847,63 @@ _bitshift64Shl_wrapper(uint32 int64_part0, uint32 int64_part1,
     /* return low 32bit and save high 32bit to temp ret */
     wasm_runtime_set_temp_ret(module_inst, (uint32) (u.value >> 32));
     return (uint32) u.value;
+}
+
+static uint32
+_i64Add_wrapper(uint32 a, uint32 b, uint32 c, uint32 d)
+{
+    wasm_module_inst_t module_inst = get_module_inst();
+
+    int64_t lhs;
+    int64_t rhs;
+
+    memcpy((char*)&lhs, (char*)&a, 4);
+    memcpy(((char*)&lhs)+4, (char*)&b, 4);
+    memcpy((char*)&rhs, (char*)&c, 4);
+    memcpy(((char*)&rhs)+4, (char*)&d, 4);
+
+    lhs += rhs;
+
+    wasm_runtime_set_temp_ret(module_inst, (uint32) (lhs >> 32));
+    return (uint32) lhs;
+}
+
+static uint32
+_i64Subtract_wrapper(uint32 a, uint32 b, uint32 c, uint32 d)
+{
+    wasm_module_inst_t module_inst = get_module_inst();
+
+    int64_t lhs;
+    int64_t rhs;
+
+    memcpy((char*)&lhs, (char*)&a, 4);
+    memcpy(((char*)&lhs)+4, (char*)&b, 4);
+    memcpy((char*)&rhs, (char*)&c, 4);
+    memcpy(((char*)&rhs)+4, (char*)&d, 4);
+
+    lhs -= rhs;
+
+    wasm_runtime_set_temp_ret(module_inst, (uint32) (lhs >> 32));
+    return (uint32) lhs;
+}
+
+static uint32
+muldi3_wrapper(uint32 a, uint32 b, uint32 c, uint32 d)
+{
+    wasm_module_inst_t module_inst = get_module_inst();
+
+    int64_t lhs;
+    int64_t rhs;
+
+    memcpy((char*)&lhs, (char*)&a, 4);
+    memcpy(((char*)&lhs)+4, (char*)&b, 4);
+    memcpy((char*)&rhs, (char*)&c, 4);
+    memcpy(((char*)&rhs)+4, (char*)&d, 4);
+
+    lhs *= rhs;
+
+    wasm_runtime_set_temp_ret(module_inst, (uint32) (lhs >> 32));
+    return (uint32) lhs;
 }
 
 static void
@@ -872,6 +987,7 @@ static WASMNativeFuncDef native_func_defs[] = {
     REG_NATIVE_FUNC(env, _memcpy),
     REG_NATIVE_FUNC(env, _memmove),
     REG_NATIVE_FUNC(env, _memset),
+    REG_NATIVE_FUNC(env, _memchr),
     REG_NATIVE_FUNC(env, _strchr),
     REG_NATIVE_FUNC(env, _strcmp),
     REG_NATIVE_FUNC(env, _strcpy),
@@ -883,6 +999,9 @@ static WASMNativeFuncDef native_func_defs[] = {
     REG_NATIVE_FUNC(env, _calloc),
     REG_NATIVE_FUNC(env, _strdup),
     REG_NATIVE_FUNC(env, _free),
+    REG_NATIVE_FUNC(env, _i64Add),
+    REG_NATIVE_FUNC(env, _i64Subtract),
+    { "env", "___muldi3", muldi3_wrapper },
     REG_NATIVE_FUNC(env, setTempRet0),
     REG_NATIVE_FUNC(env, getTempRet0),
     REG_NATIVE_FUNC(env, _llvm_bswap_i16),

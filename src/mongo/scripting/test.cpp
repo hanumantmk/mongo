@@ -37,7 +37,7 @@ void* mytransform(void* buf) {
 
     while (1) {
         if (strcmp(in.key(), "x") == 0) {
-            out.append_int32("x", 1, in.dbl() + 1);
+            out.append_int32("x", 1, in.int32() + 1);
         } else {
             size_t size;
             auto ptr = in.keyAndValue(&size);
@@ -48,9 +48,6 @@ void* mytransform(void* buf) {
             break;
         }
     }
-
-    //    auto ab = std::string("a") + std::string("b");
-    //    printf("%s\n", ab.c_str());
 
     free(buf);
 
