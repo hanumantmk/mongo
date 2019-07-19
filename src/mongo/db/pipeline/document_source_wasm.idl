@@ -26,7 +26,7 @@
 # it in the license file.
 #
 
-# Document source list sessions stage IDL file
+# Document source wasm stage IDL file
 
 global:
    cpp_namespace: "mongo"
@@ -35,16 +35,25 @@ imports:
     - "mongo/idl/basic_types.idl"
 
 structs:
-
-  WasmtSpec:
-    description: "$wasmt spec"
+  WasmSpec:
+    description: "$wasm spec"
     strict: true
     fields:
       wasm:
         type: bindata_generic
-      func:
-        type: string
-#      $_internalPredicate:
-#        cpp_name: predicate
-#        type: object
-#        optional: true
+  InputSpec:
+    description: "$wasm input spec"
+    strict: true
+    fields:
+      doc:
+        optional: true
+        type: object
+  ReturnSpec:
+    description: "$wasm return spec"
+    strict: true
+    fields:
+      is_eof:
+        type: bool
+      next_doc:
+        optional: true
+        type: object

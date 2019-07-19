@@ -113,8 +113,7 @@ public:
     struct Exec {
         Exec() {
             char err[100];
-            //_handle = wasm_runtime_create_exec_env(8192);
-            _handle = wasm_runtime_create_exec_env(1 << 20);
+            _handle = wasm_runtime_create_exec_env(8192 * 1024);
             if (!_handle) {
                 uasserted(ErrorCodes::BadValue, str::stream() << "could not load env: " << err);
             }
@@ -170,6 +169,11 @@ private:
     void _callStr(StringData name, StringData func, std::vector<uint32_t>& argv) {
         auto lfunc = wasm_runtime_lookup_function(_inst, name.rawData(), func.rawData());
 
+        if (!lfunc) {
+            std::string str = str::stream() << "_" << name;
+            lfunc = wasm_runtime_lookup_function(_inst, str.c_str(), func.rawData());
+        }
+
         uassert(ErrorCodes::BadValue,
                 str::stream() << "Could not locate function \"" << name << "\"",
                 lfunc);
@@ -200,7 +204,6 @@ private:
     }
 
     BSONObj ptr2bson(int32_t ptr) {
-        std::cout << "wtf: " << ptr << "\n";
         uassert(ErrorCodes::InternalError,
                 "ptr not valid",
                 wasm_runtime_validate_app_addr(_inst, ptr, 4));

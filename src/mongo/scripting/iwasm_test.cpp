@@ -33,39 +33,80 @@
 
 #include "mongo/bson/bsonmisc.h"
 #include "mongo/bson/bsonobjbuilder.h"
-#include "mongo/scripting/iwasm_wasm.h"
+#include "mongo/scripting/limit_wasm.h"
+#include "mongo/scripting/passthrough_wasm.h"
+#include "mongo/scripting/project_wasm.h"
+#include "mongo/scripting/stats_wasm.h"
 #include "mongo/scripting/wasm_engine.h"
 
 namespace mongo {
 
-TEST(IWasmTest, Func) {
-    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+TEST(IWasmTest, PassthroughAggPipelineStage) {
+    auto scope =
+        WASMEngine::get().createScope(ConstDataRange(passthrough_wasm, passthrough_wasm_len));
 
-    std::vector<uint32_t> args{8};
+    auto out = scope->transform("getNext", BSON("doc" << BSON("foo" << 1)));
+    std::cout << "passthrough returned: " << out << "\n";
 
-    scope->callStr("_mysq", "(i32)i32", args);
+    out = scope->transform("getNext", BSON("doc" << BSON("bar" << 1)));
+    std::cout << "passthrough returned: " << out << "\n";
 
-    std::cout << "mysq function returned: " << args[0] << "\n";
+    out = scope->transform("getNext", BSONObj{});
+    std::cout << "passthrough returned: " << out << "\n";
 }
 
-TEST(IWasmTest, FuncWithTransform) {
-    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+TEST(IWasmTest, ProjectAggPipelineStage) {
+    auto scope = WASMEngine::get().createScope(ConstDataRange(project_wasm, project_wasm_len));
 
-    auto out = scope->transform("_mytransform", BSON("x" << 1));
+    auto out = scope->transform("getNext", BSON("doc" << BSON("foo" << 1)));
+    std::cout << "project returned: " << out << "\n";
 
-    std::cout << "mytransform function returned: " << out << "\n";
+    out = scope->transform("getNext", BSON("doc" << BSON("bar" << 1)));
+    std::cout << "project returned: " << out << "\n";
+
+    out = scope->transform("getNext", BSONObj{});
+    std::cout << "project returned: " << out << "\n";
 }
 
-TEST(IWasmTest, FuncWithFilter) {
-    auto scope = WASMEngine::get().createScope(ConstDataRange(test_wasm, test_wasm_len));
+TEST(IWasmTest, LimitAggPipelineStage) {
+    auto scope = WASMEngine::get().createScope(ConstDataRange(limit_wasm, limit_wasm_len));
 
-    auto out = scope->filter("_myfilter", BSON("x" << 1));
+    auto out = scope->transform("getNext", BSON("doc" << BSON("foo" << 1)));
+    std::cout << "limit returned: " << out << "\n";
 
-    std::cout << "myfilter function returned: " << out << "\n";
+    out = scope->transform("getNext", BSON("doc" << BSON("bar" << 1)));
+    std::cout << "limit returned: " << out << "\n";
 
-    out = scope->filter("_myfilter", BSON("y" << 1));
+    out = scope->transform("getNext", BSONObj{});
+    std::cout << "limit returned: " << out << "\n";
+}
 
-    std::cout << "myfilter function returned: " << out << "\n";
+TEST(IWasmTest, StatsAggPipelineStage) {
+    auto scope = WASMEngine::get().createScope(ConstDataRange(stats_wasm, stats_wasm_len));
+
+    auto out = scope->transform("getNext",
+                                BSON("doc" << BSON("name"
+                                                   << "Younger Person"
+                                                   << "age" << 25 << "email_address"
+                                                   << "young@mongodb.com")));
+    std::cout << "stats returned: " << out << "\n";
+
+    out = scope->transform("getNext",
+                           BSON("doc" << BSON("name"
+                                              << "Older Person"
+                                              << "age" << 75 << "email_address"
+                                              << "older@mongodb.com")));
+    std::cout << "stats returned: " << out << "\n";
+
+    out = scope->transform("getNext",
+                           BSON("doc" << BSON("name"
+                                              << "Middle Person"
+                                              << "age" << 50 << "email_address"
+                                              << "middle@mongodb.com")));
+    std::cout << "stats returned: " << out << "\n";
+
+    out = scope->transform("getNext", BSONObj{});
+    std::cout << "stats returned: " << out << "\n";
 }
 
 }  // namespace mongo

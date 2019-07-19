@@ -5,6 +5,7 @@
 
 extern "C" {
 
+#include "wasm_export.h"
 #include "lib_export.h"
 
 int invoke_ii(int, int) {
@@ -64,6 +65,21 @@ int savesetjmp(int, int, int, int) {
     return 0;
 }
 
+void print(uint32_t ptr, uint32_t len) {
+    wasm_module_inst_t module_inst = wasm_runtime_get_current_module_inst();
+
+    if (len > (1 << 10)) {
+        return;
+    }
+
+    if (!wasm_runtime_validate_app_addr(module_inst, ptr, len)) {
+        return;
+    }
+
+    char* actualPtr = (char*)wasm_runtime_addr_app_to_native(module_inst, ptr);
+    std::cout << "wasm debug: " << actualPtr << "\n";
+}
+
 int vsnpr(int, int, int, int) {
     std::cout << "in vsnpr\n";
     return 0;
@@ -107,8 +123,8 @@ static NativeSymbol extended_native_symbol_defs[] = {
     { "_testSetjmp", (void*)invoke_iii},
     { "_sscanf", (void*)invoke_iii},
     { "_vsnprintf", (void*)vsnpr},
+    {"print", (void*)print},
 };
 
 #include "ext_lib_export.h"
-
 }

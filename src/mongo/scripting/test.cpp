@@ -25,28 +25,22 @@
 
 extern "C" {
 
-int mysq(int n) {
-    return n * n;
-}
+void* getNext(void* buf) {
+    uint32_t len;
+    memcpy(&len, buf, 4);
 
-void* mytransform(void* buf) {
-    bson_iter in((uint8_t*)buf);
-    in.next();
     auto outBuf = (uint8_t*)malloc(1000);
     cexpr::bson out(outBuf);
+    cexpr::bson sub;
 
-    while (1) {
-        if (strcmp(in.key(), "x") == 0) {
-            out.append_int32("x", 1, in.int32() + 1);
-        } else {
-            size_t size;
-            auto ptr = in.keyAndValue(&size);
-            out.append_slug(ptr, size);
-        }
+    const char* str = "hello from C++!";
 
-        if (!in.next()) {
-            break;
-        }
+    out.append_bool("is_eof", 6, len==5);
+
+    if (len != 5) {
+        out.append_document_begin("next_doc", 8, sub);
+        sub.append_utf8("msg", 3, "hello from C++", strlen(str)-1);
+        out.append_document_end(sub);
     }
 
     free(buf);
@@ -54,27 +48,4 @@ void* mytransform(void* buf) {
     return outBuf;
 }
 
-int myfilter(void* buf) {
-    bson_iter in((uint8_t*)buf);
-    in.next();
-
-    int rval = 0;
-
-    while (1) {
-        if (strcmp(in.key(), "x") == 0) {
-            if (in.int32()) {
-                rval = 1;
-            }
-            break;
-        }
-
-        if (!in.next()) {
-            break;
-        }
-    }
-
-    free(buf);
-
-    return rval;
-}
 }
