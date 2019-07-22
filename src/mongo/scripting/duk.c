@@ -24,33 +24,33 @@
 #define DUK_USE_DATE_GET_LOCAL_TZOFFSET(d) 0
 #include "duktape.c"
 
-int mysq(int n) {
-    return n * n;
-}
-
 void fatal_handler(void*udata, const char* msg) {
     printf("fatal handler - %s\n", msg);
 }
 
-void* mytransform(void* buf) {
-    printf("mytransform 1\n");
+void* json2bson(const char* json);
+
+void* getNext(void* buf) {
+    uint32_t len;
+    memcpy(&len, buf, 4);
     duk_context* ctx = duk_create_heap(NULL, NULL, NULL, NULL, fatal_handler);
-    printf("mytransform 2\n");
 
-    int r = duk_peval_string(ctx, "\"hello from js\";");
-    printf("r = %d\n", r);
-//    const char* result = duk_get_string(ctx, -1);
-//
-//    printf("%s\n", result);
-//
-//    duk_pop(ctx);
-//
-//    duk_destroy_heap(ctx);
+    int r;
 
-    return buf;
+    if (len == 5) {
+        r = duk_peval_string(ctx, "JSON.stringify({ is_eof: true});");
+    } else {
+        r = duk_peval_string(ctx, "JSON.stringify({ is_eof: false, next_doc : { msg: \"Hello from Javascript!\" }});");
+    }
+    const char* result = duk_get_string(ctx, -1);
+
+    void* out = json2bson(result);
+
+    duk_pop(ctx);
+
+    duk_destroy_heap(ctx);
+
+    free(buf);
+
+    return out;
 }
-
-int myfilter(void* buf) {
-    return 1;
-}
-

@@ -37,6 +37,7 @@
 #include "mongo/scripting/passthrough_wasm.h"
 #include "mongo/scripting/project_wasm.h"
 #include "mongo/scripting/stats_wasm.h"
+#include "mongo/scripting/duk_wasm.h"
 #include "mongo/scripting/wasm_engine.h"
 
 namespace mongo {
@@ -107,6 +108,13 @@ TEST(IWasmTest, StatsAggPipelineStage) {
 
     out = scope->transform("getNext", BSONObj{});
     std::cout << "stats returned: " << out << "\n";
+}
+
+TEST(IWasmTest, Other) {
+    auto scope = WASMEngine::get().createScope(ConstDataRange(duk_wasm, duk_wasm_len));
+
+    auto out = scope->transform("getNext", BSON("doc" << BSON("foo" << 1)));
+    std::cout << "js returned: " << out << "\n";
 }
 
 }  // namespace mongo

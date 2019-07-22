@@ -396,11 +396,11 @@ CONSTEXPR std::size_t parse_toks() {
 }
 
 template <typename T, typename S>
-CONSTEXPR std::size_t parse(T b) {
+CONSTEXPR std::size_t parse(T b, S s) {
     using namespace jsmn;
 
-    const char* v = S::str();
-    std::size_t len = S::str_len();
+    const char* v = s.str();
+    std::size_t len = s.str_len();
 
     jsmn_parser p = {};
 #ifdef CONSTEXPR_OFF

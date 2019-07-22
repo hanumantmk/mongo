@@ -17,7 +17,6 @@
 #include "bson_iter.hpp"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string>
 
 #define CONSTEXPR
 #define CONSTEXPR_OFF
@@ -25,25 +24,26 @@
 
 extern "C" {
 
-void* getNext(void* buf) {
-    uint32_t len;
-    memcpy(&len, buf, 4);
+struct Magic {
+    const char* str() {
+        return my_str;
+    };
+    std::size_t str_len() {
+        return strlen(my_str);
+    };
 
+    const char* my_str;
+};
+
+void* json2bson(const char* json) {
     auto outBuf = (uint8_t*)malloc(1000);
-    cexpr::bson out(outBuf);
-    cexpr::bson sub;
 
-    const char* str = "hello from C++!";
+    printf("json: %s\n", json);
 
-    out.append_bool("is_eof", 6, len==5);
+    Magic m{json};
 
-    if (len != 5) {
-        out.append_document_begin("next_doc", 8, sub);
-        sub.append_utf8("msg", 3, str, strlen(str));
-        out.append_document_end(sub);
-    }
-
-    free(buf);
+    size_t len = cexpr::parse<cexpr::bson, Magic>(cexpr::bson(outBuf), m);
+    printf("wrote: %ld\n", len);
 
     return outBuf;
 }
