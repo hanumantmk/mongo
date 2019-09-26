@@ -416,6 +416,29 @@ TEST_F(OperationDeadlineTests, NestedTimeoutsTimeoutInOrder) {
     ASSERT_THROWS_CODE(opCtx->checkForInterrupt(), DBException, ErrorCodes::MaxTimeMSExpired);
 }
 
+TEST_F(OperationDeadlineTests, timeoutThatViolatesMaxTimeMS) {
+    auto opCtx = client->makeOperationContext();
+
+    opCtx->setDeadlineByDate(mockClock->now() + Milliseconds(10), ErrorCodes::MaxTimeMSExpired);
+
+    bool reached = false;
+
+    try {
+        auto func = [&](Interruptible* interruptible){
+            ASSERT_OK(opCtx->checkForInterruptNoAssert());
+            ASSERT_OK(opCtx->getKillStatus());
+            mockClock->advance(Milliseconds(50));
+            opCtx->checkForInterrupt();
+        };
+
+        func(opCtx->makeTimeout(mockClock->now() + Milliseconds(100), ErrorCodes::ExceededTimeLimit));
+    } catch (const ExceptionFor<ErrorCodes::MaxTimeMSExpired>&) {
+        reached = true;
+    }
+
+    ASSERT(!reached);
+}
+
 TEST_F(OperationDeadlineTests, NestedTimeoutsThatViolateMaxTime) {
     auto opCtx = client->makeOperationContext();
 

@@ -43,6 +43,10 @@ namespace mongo {
  * waitForConditionXXX will fail.  Interrupts must unblock all callers of waitForConditionXXX.
  */
 class Interruptible {
+    class NotInterruptible;
+
+    class WithDeadline;
+
 protected:
     struct DeadlineState {
         Date_t deadline;
@@ -132,6 +136,24 @@ protected:
     }
 
 public:
+    template <typename T>
+    class InterruptionContainer {
+    public:
+        template <typename... Args>
+        InterruptionContainer(Args&& ...args) : _interruptible(std::forward<Args>(args)...) {}
+
+        Interruptible* operator->() const noexcept {
+            return &_interruptible;
+        }
+
+        operator Interruptible* () noexcept {
+            return &_interruptible;
+        }
+
+    private:
+        T _interruptible;
+    };
+
     /**
      * Returns a statically allocated instance that cannot be interrupted.  Useful as a default
      * argument to interruptible taking methods.
@@ -157,6 +179,8 @@ public:
             throw;
         }
     }
+
+    InterruptionContainer<WithDeadline> makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept;
 
     bool hasDeadline() const {
         return getDeadline() != Date_t::max();
@@ -388,14 +412,80 @@ protected:
      * Returns the equivalent of Date_t::now() + waitFor for the interruptible's clock
      */
     virtual Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) = 0;
-
-    class NotInterruptible;
 };
 
 /**
  * A not interruptible type which can be used as a lightweight default arg for interruptible taking
  * functions.
  */
+class Interruptible::WithDeadline final : public Interruptible {
+public:
+
+    explicit WithDeadline(Interruptible* interruptible, Date_t deadline, ErrorCodes::Error code) : _interruptible(interruptible), _deadline(deadline), _code(code) {}
+
+    StatusWith<stdx::cv_status> waitForConditionOrInterruptNoAssertUntil(
+        stdx::condition_variable& cv, BasicLockableAdapter m, Date_t deadline) noexcept override {
+
+        try {
+            return runWithDeadline(_deadline, _code, [&]{
+                return _interruptible->waitForConditionOrInterruptUntil(cv, m, deadline);
+            });
+        } catch (const DBException& ex) {
+            return ex.toStatus();
+        }
+    }
+
+    Date_t getDeadline() const override {
+        return std::min(_interruptible->getDeadline(), _deadline);
+    }
+
+    Status checkForInterruptNoAssert() noexcept override {
+        try {
+            return runWithDeadline(_deadline, _code, [&]{
+                _interruptible->checkForInterrupt();
+                return Status::OK();
+            });
+        } catch (const DBException& ex) {
+            return ex.toStatus();
+        }
+    }
+
+    // It's invalid to call the deadline or ignore interruption guards on a withDeadline
+    // interruptible.
+    //
+    // This interruptible should only be invoked at the bottom of the call stack (with types that
+    // won't modify it's invocation)
+    IgnoreInterruptsState pushIgnoreInterrupts() override {
+        return _interruptible->pushIgnoreInterrupts();
+    }
+
+    void popIgnoreInterrupts(IgnoreInterruptsState state) override {
+        _interruptible->popIgnoreInterrupts(state);
+    }
+
+    DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) override {
+        return _interruptible->pushArtificialDeadline(deadline, error);
+    }
+
+    void popArtificialDeadline(DeadlineState state) override {
+        _interruptible->popArtificialDeadline(state);
+    }
+
+    Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) override {
+        return _interruptible->getExpirationDateForWaitForValue(waitFor);
+    }
+
+private:
+
+    Interruptible* _interruptible;
+    Date_t _deadline;
+    ErrorCodes::Error _code;
+};
+
+Interruptible::InterruptionContainer<Interruptible::WithDeadline> Interruptible::makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept {
+    return { this, deadline, code };
+}
+
 class Interruptible::NotInterruptible final : public Interruptible {
     StatusWith<stdx::cv_status> waitForConditionOrInterruptNoAssertUntil(
         stdx::condition_variable& cv, BasicLockableAdapter m, Date_t deadline) noexcept override {
