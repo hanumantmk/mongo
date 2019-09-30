@@ -416,27 +416,40 @@ TEST_F(OperationDeadlineTests, NestedTimeoutsTimeoutInOrder) {
     ASSERT_THROWS_CODE(opCtx->checkForInterrupt(), DBException, ErrorCodes::MaxTimeMSExpired);
 }
 
-TEST_F(OperationDeadlineTests, timeoutThatViolatesMaxTimeMS) {
+TEST_F(OperationDeadlineTests, makeTimeout) {
     auto opCtx = client->makeOperationContext();
-
-    opCtx->setDeadlineByDate(mockClock->now() + Milliseconds(10), ErrorCodes::MaxTimeMSExpired);
 
     bool reached = false;
 
     try {
         auto func = [&](Interruptible* interruptible){
-            ASSERT_OK(opCtx->checkForInterruptNoAssert());
-            ASSERT_OK(opCtx->getKillStatus());
-            mockClock->advance(Milliseconds(50));
-            opCtx->checkForInterrupt();
+            ASSERT_OK(interruptible->checkForInterruptNoAssert());
+            mockClock->advance(Milliseconds(100));
+            interruptible->checkForInterrupt();
         };
 
-        func(opCtx->makeTimeout(mockClock->now() + Milliseconds(100), ErrorCodes::ExceededTimeLimit));
-    } catch (const ExceptionFor<ErrorCodes::MaxTimeMSExpired>&) {
+        func(opCtx->makeTimeout(mockClock->now() + Milliseconds(50), ErrorCodes::ExceededTimeLimit));
+    } catch (const ExceptionFor<ErrorCodes::ExceededTimeLimit>&) {
         reached = true;
     }
 
-    ASSERT(!reached);
+    ASSERT(reached);
+}
+
+TEST_F(OperationDeadlineTests, makeIgnoreInterrupts) {
+    auto opCtx = client->makeOperationContext();
+
+    opCtx->setDeadlineByDate(mockClock->now() + Milliseconds(10), ErrorCodes::MaxTimeMSExpired);
+
+    auto func = [&](Interruptible* interruptible){
+        ASSERT_OK(interruptible->checkForInterruptNoAssert());
+        mockClock->advance(Milliseconds(100));
+        ASSERT_OK(interruptible->checkForInterruptNoAssert());
+    };
+
+    func(opCtx->makeIgnoreInterruptionExceptAtGlobalShutdown());
+
+    ASSERT_THROWS_CODE(opCtx->checkForInterrupt(), DBException, ErrorCodes::MaxTimeMSExpired);
 }
 
 TEST_F(OperationDeadlineTests, NestedTimeoutsThatViolateMaxTime) {

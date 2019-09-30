@@ -44,8 +44,8 @@ namespace mongo {
  */
 class Interruptible {
     class NotInterruptible;
-
     class WithDeadline;
+    class WithoutInterruptionExceptAtGlobalShutdown;
 
 protected:
     struct DeadlineState {
@@ -137,10 +137,10 @@ protected:
 
 public:
     template <typename T>
-    class InterruptionContainer {
+    class InterruptibleContainer {
     public:
         template <typename... Args>
-        InterruptionContainer(Args&& ...args) : _interruptible(std::forward<Args>(args)...) {}
+        explicit InterruptibleContainer(Args&& ...args) : _interruptible(std::forward<Args>(args)...) {}
 
         Interruptible* operator->() const noexcept {
             return &_interruptible;
@@ -180,7 +180,7 @@ public:
         }
     }
 
-    InterruptionContainer<WithDeadline> makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept;
+    InterruptibleContainer<WithDeadline> makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept;
 
     bool hasDeadline() const {
         return getDeadline() != Date_t::max();
@@ -208,6 +208,8 @@ public:
             throw;
         }
     }
+
+    InterruptibleContainer<WithoutInterruptionExceptAtGlobalShutdown> makeIgnoreInterruptionExceptAtGlobalShutdown() noexcept;
 
     /**
      * Raises a AssertionException if this operation is in a killed state.
@@ -420,19 +422,27 @@ protected:
  */
 class Interruptible::WithDeadline final : public Interruptible {
 public:
-
     explicit WithDeadline(Interruptible* interruptible, Date_t deadline, ErrorCodes::Error code) : _interruptible(interruptible), _deadline(deadline), _code(code) {}
 
     StatusWith<stdx::cv_status> waitForConditionOrInterruptNoAssertUntil(
         stdx::condition_variable& cv, BasicLockableAdapter m, Date_t deadline) noexcept override {
 
-        try {
-            return runWithDeadline(_deadline, _code, [&]{
-                return _interruptible->waitForConditionOrInterruptUntil(cv, m, deadline);
-            });
-        } catch (const DBException& ex) {
-            return ex.toStatus();
+        auto sw = [&] {
+            const auto guard = _interruptible->makeDeadlineGuard(_deadline, _code);
+            return _interruptible->waitForConditionOrInterruptNoAssertUntil(cv, m, deadline);
+        }();
+
+        if (sw.isOK()) {
+            return sw;
         }
+
+        if (ErrorCodes::isExceededTimeLimitError(sw.getStatus())) {
+            if (auto status = _interruptible->checkForInterruptNoAssert(); !status.isOK()) {
+                return status;
+            }
+        }
+
+        return sw;
     }
 
     Date_t getDeadline() const override {
@@ -440,35 +450,29 @@ public:
     }
 
     Status checkForInterruptNoAssert() noexcept override {
-        try {
-            return runWithDeadline(_deadline, _code, [&]{
-                _interruptible->checkForInterrupt();
-                return Status::OK();
-            });
-        } catch (const DBException& ex) {
-            return ex.toStatus();
-        }
+        const auto guard = _interruptible->makeDeadlineGuard(_deadline, _code);
+        return _interruptible->checkForInterruptNoAssert();
     }
 
-    // It's invalid to call the deadline or ignore interruption guards on a withDeadline
+    // It's invalid to call the deadline or ignore interruption guards on a WithDeadline
     // interruptible.
     //
     // This interruptible should only be invoked at the bottom of the call stack (with types that
-    // won't modify it's invocation)
+    // won't modify its invocation)
     IgnoreInterruptsState pushIgnoreInterrupts() override {
-        return _interruptible->pushIgnoreInterrupts();
+        MONGO_UNREACHABLE;
     }
 
-    void popIgnoreInterrupts(IgnoreInterruptsState state) override {
-        _interruptible->popIgnoreInterrupts(state);
+    void popIgnoreInterrupts(IgnoreInterruptsState) override {
+        MONGO_UNREACHABLE;
     }
 
     DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) override {
-        return _interruptible->pushArtificialDeadline(deadline, error);
+        MONGO_UNREACHABLE;
     }
 
-    void popArtificialDeadline(DeadlineState state) override {
-        _interruptible->popArtificialDeadline(state);
+    void popArtificialDeadline(DeadlineState) override {
+        MONGO_UNREACHABLE;
     }
 
     Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) override {
@@ -482,8 +486,77 @@ private:
     ErrorCodes::Error _code;
 };
 
-Interruptible::InterruptionContainer<Interruptible::WithDeadline> Interruptible::makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept {
-    return { this, deadline, code };
+inline auto Interruptible::makeTimeout(Date_t deadline, ErrorCodes::Error code) noexcept -> InterruptibleContainer<WithDeadline> {
+    return InterruptibleContainer<WithDeadline>(this, deadline, code);
+}
+
+class Interruptible::WithoutInterruptionExceptAtGlobalShutdown final : public Interruptible {
+public:
+    explicit WithoutInterruptionExceptAtGlobalShutdown(Interruptible* interruptible) : _interruptible(interruptible) {}
+
+    StatusWith<stdx::cv_status> waitForConditionOrInterruptNoAssertUntil(
+        stdx::condition_variable& cv, BasicLockableAdapter m, Date_t deadline) noexcept override {
+
+        auto sw = [&] {
+            const auto guard = _interruptible->makeIgnoreInterruptionsGuard();
+            return _interruptible->waitForConditionOrInterruptNoAssertUntil(cv, m, deadline);
+        }();
+
+        if (sw.isOK()) {
+            return sw;
+        }
+
+        if (ErrorCodes::isExceededTimeLimitError(sw.getStatus())) {
+            if (auto status = _interruptible->checkForInterruptNoAssert(); !status.isOK()) {
+                return status;
+            }
+        }
+
+        return sw;
+    }
+
+    Date_t getDeadline() const override {
+        return _interruptible->getDeadline();
+    }
+
+    Status checkForInterruptNoAssert() noexcept override {
+        const auto guard = _interruptible->makeIgnoreInterruptionsGuard();
+
+        return _interruptible->checkForInterruptNoAssert();
+    }
+
+    // It's invalid to call the deadline or ignore interruption guards on a WithDeadline
+    // interruptible.
+    //
+    // This interruptible should only be invoked at the bottom of the call stack (with types that
+    // won't modify its invocation)
+    IgnoreInterruptsState pushIgnoreInterrupts() override {
+        MONGO_UNREACHABLE;
+    }
+
+    void popIgnoreInterrupts(IgnoreInterruptsState) override {
+        MONGO_UNREACHABLE;
+    }
+
+    DeadlineState pushArtificialDeadline(Date_t deadline, ErrorCodes::Error error) override {
+        MONGO_UNREACHABLE;
+    }
+
+    void popArtificialDeadline(DeadlineState) override {
+        MONGO_UNREACHABLE;
+    }
+
+    Date_t getExpirationDateForWaitForValue(Milliseconds waitFor) override {
+        return _interruptible->getExpirationDateForWaitForValue(waitFor);
+    }
+
+private:
+
+    Interruptible* _interruptible;
+};
+
+inline auto Interruptible::makeIgnoreInterruptionExceptAtGlobalShutdown() noexcept -> InterruptibleContainer<WithoutInterruptionExceptAtGlobalShutdown> {
+    return InterruptibleContainer<WithoutInterruptionExceptAtGlobalShutdown>(this);
 }
 
 class Interruptible::NotInterruptible final : public Interruptible {
