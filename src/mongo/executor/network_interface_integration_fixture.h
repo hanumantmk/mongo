@@ -81,6 +81,9 @@ public:
     Future<RemoteCommandResponse> runCommand(const TaskExecutor::CallbackHandle& cbHandle,
                                              RemoteCommandRequest request);
 
+    Future<RemoteCommandOnAnyResponse> runCommandOnAny(const TaskExecutor::CallbackHandle& cbHandle,
+                                                       RemoteCommandRequestOnAny request);
+
     RemoteCommandResponse runCommandSync(RemoteCommandRequest& request);
 
     void assertCommandOK(StringData db,

@@ -1,0 +1,75 @@
+digraph G {
+    subgraph clusterStart {
+        startCommand;
+    }
+
+    subgraph clusterGetConnection1 {
+        label = "getConnection I";
+
+        getConnection1 [ label = "getConnection" ];
+
+        startCommand -> getConnection1;
+
+        getConnection1hostA [ label="hostA" ];
+        getConnection1hostB [ label="hostB" ];
+        getConnection1hostC [ label="hostC" ];
+
+        getConnection1 -> getConnection1hostA;
+        getConnection1 -> getConnection1hostB [ style=dotted ];
+        getConnection1 -> getConnection1hostC [ style=dotted ];
+
+        gotConnection1 [ label = "gotConnection" ];
+
+        getConnection1hostA -> gotConnection1;
+        getConnection1hostB -> gotConnection1 [ style=dotted ];
+        getConnection1hostC -> gotConnection1 [ style=dotted ];
+    }
+
+    subgraph clusterOnAcquireConn1 {
+        label = "onAcquireConn I";
+
+        onAcquireConn1 [ label = "onAcquireConn" ];
+        runCommand1 [ label = "runCommand" ];
+
+        gotConnection1 -> onAcquireConn1;
+        onAcquireConn1 -> runCommand1 [ style=dotted ];
+    }
+
+    subgraph clusterGetConnection2 {
+        label = "getConnection II";
+
+        getConnection2 [ label = "getConnection" ];
+
+        onAcquireConn1 -> getConnection2;
+
+        getConnection2hostB [ label="hostB" ];
+        getConnection2hostC [ label="hostC" ];
+
+        getConnection2 -> getConnection2hostB;
+        getConnection2 -> getConnection2hostC [ style=dotted ];
+
+        gotConnection2 [ label = "gotConnection" ];
+
+        getConnection2hostB -> gotConnection2;
+        getConnection2hostC -> gotConnection2 [ style=dotted ];
+    }
+
+    subgraph clusterOnAcquireConn2 {
+        label = "onAcquireConn II";
+
+        onAcquireConn2 [ label = "onAcquireConn" ];
+        runCommand2 [ label = "runCommand" ];
+
+        gotConnection2 -> onAcquireConn2;
+        onAcquireConn2 -> runCommand2;
+    }
+
+    subgraph clusterOnFinish{
+        label = "onFinish";
+
+        onFinish;
+
+        runCommand2 -> onFinish;
+        runCommand1 -> onFinish [ style = dotted ];
+    }
+}

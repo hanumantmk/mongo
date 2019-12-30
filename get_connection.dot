@@ -1,0 +1,10 @@
+digraph G {
+    startCommand -> getConnection1;
+    getConnection1-> onAcquireConn1;
+    onAcquireConn1 -> getConnection2;
+    onAcquireConn1 -> runCommand1 [ style=dotted ];
+    getConnection2-> onAcquireConn2;
+    onAcquireConn2 -> runCommand2;
+    runCommand1 -> onFinish [ style=dotted ];
+    runCommand2 -> onFinish;
+}

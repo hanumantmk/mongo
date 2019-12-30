@@ -68,10 +68,14 @@ bool pingCommandMissing(const RemoteCommandResponse& result) {
     return false;
 }
 
+#if 0
+
 TEST_F(NetworkInterfaceIntegrationFixture, Ping) {
     startNet();
     assertCommandOK("admin", BSON("ping" << 1));
 }
+
+#endif
 
 // Hook that intentionally never finishes
 class HangingHook : public executor::NetworkConnectionHook {
@@ -102,6 +106,7 @@ class HangingHook : public executor::NetworkConnectionHook {
     }
 };
 
+#if 0
 
 // Test that we time out a command if the connection hook hangs.
 TEST_F(NetworkInterfaceIntegrationFixture, HookHangs) {
@@ -121,6 +126,8 @@ TEST_F(NetworkInterfaceIntegrationFixture, HookHangs) {
     auto res = runCommandSync(request);
     ASSERT(ErrorCodes::isExceededTimeLimitError(res.status.code()));
 }
+
+#endif
 
 using ResponseStatus = TaskExecutor::ResponseStatus;
 
@@ -208,6 +215,8 @@ private:
     stdx::condition_variable _isMasterCond;
     boost::optional<IsMasterData> _isMasterResult;
 };
+
+#if 0
 
 TEST_F(NetworkInterfaceTest, CancelMissingOperation) {
     // This is just a sanity check, this action should have no effect.
@@ -391,6 +400,51 @@ TEST_F(NetworkInterfaceTest, StartCommand) {
     assertNumOps(0u, 0u, 0u, 1u);
 }
 
+#endif
+
+TEST_F(NetworkInterfaceTest, StartCommandOnAny) {
+    auto commandRequest = BSON("echo" << 1 << "boop"
+                                      << "bop");
+
+    // This opmsg request expect the following reply, which is generated below
+    // { echo: { echo: 1, boop: "bop", $db: "admin" }, ok: 1.0 }
+    auto expectedCommandReply = [&] {
+        BSONObjBuilder echoed;
+        echoed.appendElements(commandRequest);
+        echoed << "$db"
+               << "admin";
+        return echoed.obj();
+    }();
+    auto request = [&] {
+        auto cs = fixture();
+
+        RemoteCommandRequestBase::HedgeOptions ho;
+
+        ho.count = 2;
+        ho.delay = Milliseconds(0);
+
+        return RemoteCommandRequestOnAny({cs.getServers().front(), HostAndPort("127.0.0.1:27018")},
+                                         "admin",
+                                         std::move(commandRequest),
+                                         BSONObj(),
+                                         nullptr,
+                                         RemoteCommandRequest::kNoTimeout,
+                                         ho);
+    }();
+
+    auto deferred = runCommandOnAny(makeCallbackHandle(), std::move(request));
+
+    auto res = deferred.get();
+
+    ASSERT(res.elapsedMillis);
+    uassertStatusOK(res.status);
+    ASSERT_BSONOBJ_EQ(res.data.getObjectField("echo"), expectedCommandReply);
+    ASSERT_EQ(res.data.getIntField("ok"), 1);
+    assertNumOps(0u, 0u, 0u, 1u);
+}
+
+#if 0
+
 TEST_F(NetworkInterfaceTest, SetAlarm) {
     // set a first alarm, to execute after "expiration"
     Date_t expiration = net().now() + Milliseconds(100);
@@ -458,6 +512,8 @@ TEST_F(NetworkInterfaceTest, IsMasterRequestMissingInternalClientInfoWhenNotInte
     ASSERT(res.elapsedMillis);
     assertNumOps(0u, 0u, 0u, 1u);
 }
+
+#endif
 
 }  // namespace
 }  // namespace executor

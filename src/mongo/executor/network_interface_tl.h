@@ -86,13 +86,29 @@ public:
     void dropConnections(const HostAndPort& hostAndPort) override;
 
 private:
-    struct CommandState {
-        CommandState(NetworkInterfaceTL* interface_,
-                     RemoteCommandRequestOnAny request_,
-                     const TaskExecutor::CallbackHandle& cbHandle_,
-                     Promise<RemoteCommandOnAnyResponse> promise_);
-        ~CommandState();
+    struct ParallelCommandState;
 
+    struct CommandState {
+        CommandState(std::shared_ptr<ParallelCommandState> pcs);
+
+        ParallelCommandState* pcs;
+        boost::optional<RemoteCommandRequest> request;
+        boost::optional<size_t> usedIndex;
+        StrongWeakFinishLine finishLine;
+        ConnectionPool::ConnectionHandle conn;
+
+        AtomicWord<bool> done;
+        std::unique_ptr<transport::ReactorTimer> timer;
+        Promise<RemoteCommandOnAnyResponse> promise;
+    };
+
+    struct ParallelCommandState {
+        ParallelCommandState(NetworkInterfaceTL* interface,
+                             RemoteCommandRequestOnAny request,
+                             const TaskExecutor::CallbackHandle& cbHandle,
+                             Promise<RemoteCommandOnAnyResponse> promise);
+
+        ~ParallelCommandState();
         // Create a new CommandState in a shared_ptr
         // Prefer this over raw construction
         static auto make(NetworkInterfaceTL* interface,
@@ -102,18 +118,17 @@ private:
 
         NetworkInterfaceTL* interface;
 
+        std::vector<std::unique_ptr<CommandState>> commandStates;
+
         RemoteCommandRequestOnAny requestOnAny;
-        boost::optional<RemoteCommandRequest> request;
+
         TaskExecutor::CallbackHandle cbHandle;
-        Date_t deadline = RemoteCommandRequest::kNoExpirationDate;
-        Date_t start;
 
         StrongWeakFinishLine finishLine;
-        ConnectionPool::ConnectionHandle conn;
-        std::unique_ptr<transport::ReactorTimer> timer;
-
-        AtomicWord<bool> done;
         Promise<RemoteCommandOnAnyResponse> promise;
+
+        Date_t deadline = RemoteCommandRequest::kNoExpirationDate;
+        Date_t start;
     };
 
     struct AlarmState {
@@ -137,6 +152,9 @@ private:
     void _answerAlarm(Status status, std::shared_ptr<AlarmState> state);
 
     void _run();
+    Status _startCommandImpl(std::shared_ptr<ParallelCommandState> state,
+                             size_t idx,
+                             const BatonHandle& baton);
     void _onAcquireConn(std::shared_ptr<CommandState> state,
                         ConnectionPool::ConnectionHandle conn,
                         const BatonHandle& baton);
@@ -169,7 +187,8 @@ private:
 
     Mutex _inProgressMutex =
         MONGO_MAKE_LATCH(HierarchicalAcquisitionLevel(0), "NetworkInterfaceTL::_inProgressMutex");
-    stdx::unordered_map<TaskExecutor::CallbackHandle, std::weak_ptr<CommandState>> _inProgress;
+    stdx::unordered_map<TaskExecutor::CallbackHandle, std::weak_ptr<ParallelCommandState>>
+        _inProgress;
     stdx::unordered_map<TaskExecutor::CallbackHandle, std::shared_ptr<AlarmState>>
         _inProgressAlarms;
 

@@ -104,6 +104,14 @@ Future<RemoteCommandResponse> NetworkInterfaceIntegrationFixture::runCommand(
     });
 }
 
+Future<RemoteCommandOnAnyResponse> NetworkInterfaceIntegrationFixture::runCommandOnAny(
+    const TaskExecutor::CallbackHandle& cbHandle, RemoteCommandRequestOnAny request) {
+
+    return net().startCommand(cbHandle, request).then([](TaskExecutor::ResponseOnAnyStatus roa) {
+        return roa;
+    });
+}
+
 RemoteCommandResponse NetworkInterfaceIntegrationFixture::runCommandSync(
     RemoteCommandRequest& request) {
     auto deferred = runCommand(makeCallbackHandle(), request);
