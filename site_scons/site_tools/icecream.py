@@ -112,7 +112,7 @@ def generate(env):
                 target=icecc_version,
                 source=["$ICECC_CREATE_ENV", "$CC", "$CXX"],
                 action=[
-                    "${SOURCES[0]} --clang ${SOURCES[1].abspath} /bin/true $TARGET",
+                    "${SOURCES[0]} ${SOURCES[1].abspath} --addfile /bin/true $TARGET",
                 ],
             )
         else:
