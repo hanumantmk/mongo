@@ -45,9 +45,26 @@ std::size_t ZstdMessageCompressor::getMaxCompressedSize(size_t inputSize) {
     return ZSTD_compressBound(inputSize);
 }
 
+namespace {
+
+struct ZstdDtor {
+    void operator()(ZSTD_CCtx* ptr) const {
+        if (ptr)
+            ZSTD_freeCCtx(ptr);  // cant tell what the return value is supposed to be
+    }
+};
+
+thread_local std::unique_ptr<ZSTD_CCtx, ZstdDtor> localZstdContext;
+}
+
 StatusWith<std::size_t> ZstdMessageCompressor::compressData(ConstDataRange input,
                                                             DataRange output) {
-    size_t ret = ZSTD_compress(const_cast<char*>(output.data()),
+    if (!localZstdContext) {
+        localZstdContext.reset(ZSTD_createCCtx());
+    }
+
+    size_t ret = ZSTD_compressCCtx(localZstdContext.get(),
+                               const_cast<char*>(output.data()),
                                output.length(),
                                input.data(),
                                input.length(),
